@@ -165,7 +165,7 @@ func TestQuietOutputShowsVerdictThenFailuresOnly(t *testing.T) {
 
 // Rule: a word is skipped only when every stamp component matches a recorded green result.
 func TestUnchangedChainIsSkippedCitingThePastRun(t *testing.T) {
-	root := product(t)
+	root := curated(t)
 	first := green(t, root, nil, chain)
 	ranLive(t, first)
 	done := verilex(t, root, nil, "run", chain)
@@ -200,6 +200,7 @@ func TestAnyChangedStampComponentForcesRerun(t *testing.T) {
 	}{
 		{"word script", func(t *testing.T, root string) map[string]string {
 			appendTo(t, filepath.Join(root, ".verilex", "words", "item-listed", "run"), "# edited\n")
+			admitted(t, root, "item-listed")
 			return nil
 		}, chain, "item-listed apple: word changed"},
 		{"word permissions", func(t *testing.T, root string) map[string]string {
@@ -210,6 +211,7 @@ func TestAnyChangedStampComponentForcesRerun(t *testing.T) {
 		}, chain, "item-stored apple: word changed"},
 		{"word contract", func(t *testing.T, root string) map[string]string {
 			appendTo(t, filepath.Join(root, ".verilex", "words", "store-open", "word.md"), "More words.\n")
+			admitted(t, root, "store-open")
 			return nil
 		}, chain, "store-open: word changed"},
 		{"declared input", func(t *testing.T, root string) map[string]string {
@@ -260,7 +262,7 @@ func TestAnyChangedStampComponentForcesRerun(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			root := product(t)
+			root := curated(t)
 			first := green(t, root, nil, chain)
 			env := c.change(t, root)
 			_, record := runJSON(t, root, env, c.chain)
@@ -276,7 +278,7 @@ func TestAnyChangedStampComponentForcesRerun(t *testing.T) {
 }
 
 func TestPlantedDefectAfterGreenRunIsNeverSkipped(t *testing.T) {
-	root := product(t)
+	root := curated(t)
 	green(t, root, nil, chain)
 	done, record := runJSON(t, root, map[string]string{"TALLY_DEFECT": "drop-adds"}, chain)
 	equal(t, done.code, 1)
@@ -288,7 +290,7 @@ func TestPlantedDefectAfterGreenRunIsNeverSkipped(t *testing.T) {
 	equal(t, again.Rerun, "item-stored apple: env TALLY_DEFECT changed")
 	ranLive(t, again)
 	equal(t, string(*again.Verdict), "red")
-	root = product(t)
+	root = curated(t)
 	runJSON(t, root, map[string]string{"TALLY_DEFECT": "drop-adds"}, chain)
 	_, third := runJSON(t, root, map[string]string{"TALLY_DEFECT": "drop-adds"}, chain)
 	equal(t, third.Rerun, "item-stored apple: no green result on record")
@@ -297,10 +299,11 @@ func TestPlantedDefectAfterGreenRunIsNeverSkipped(t *testing.T) {
 
 func TestUpstreamRerunForcesDependentRerun(t *testing.T) {
 	t.Run("upstream stamp changed", func(t *testing.T) {
-		root := product(t)
+		root := curated(t)
 		first := green(t, root, nil, chain)
 		// Re-prove only the first two words under a changed script; item-listed keeps its old record.
 		appendTo(t, filepath.Join(root, ".verilex", "words", "item-stored", "run"), "# edited\n")
+		admitted(t, root, "item-stored")
 		prefix := green(t, root, nil, "store-open | item-stored apple")
 		ranLive(t, prefix)
 		_, record := runJSON(t, root, nil, chain)
@@ -325,7 +328,7 @@ func TestUpstreamRerunForcesDependentRerun(t *testing.T) {
 
 func TestUnclearFootprintIsNeverSkipped(t *testing.T) {
 	t.Run("word declares no inputs", func(t *testing.T) {
-		root := product(t)
+		root := curated(t)
 		addWord(t, root, "store-glanced", `echo '{"verdict": "pass", "observation": "fine"}'`+"\n")
 		green(t, root, nil, "store-open | store-glanced")
 		record := green(t, root, nil, "store-open | store-glanced")
@@ -333,7 +336,7 @@ func TestUnclearFootprintIsNeverSkipped(t *testing.T) {
 		ranLive(t, record)
 	})
 	t.Run("word declares an empty inputs list", func(t *testing.T) {
-		root := product(t)
+		root := curated(t)
 		addWord(t, root, "store-glanced", `echo '{"verdict": "pass", "observation": "fine"}'`+"\n")
 		path := filepath.Join(root, ".verilex", "words", "store-glanced", "word.md")
 		write(t, path, strings.Replace(read(t, path), "requires: [store]", "requires: [store]\ninputs: []", 1), 0644)
@@ -355,7 +358,7 @@ func TestUnclearFootprintIsNeverSkipped(t *testing.T) {
 		ranLive(t, record)
 	})
 	t.Run("input changes while the word runs", func(t *testing.T) {
-		root := product(t)
+		root := curated(t)
 		write(t, filepath.Join(root, "counter"), "0\n", 0644)
 		addWord(t, root, "store-counted", `echo 1 >> "$VERILEX_PROJECT_ROOT/counter"`+"\n"+`echo '{"verdict": "pass", "observation": "counted"}'`+"\n")
 		path := filepath.Join(root, ".verilex", "words", "store-counted", "word.md")

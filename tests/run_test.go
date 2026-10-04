@@ -386,7 +386,7 @@ func TestWordsJSONAndProjectDiscovery(t *testing.T) {
 	root := product(t)
 	done := verilex(t, root, nil, "words")
 	equal(t, done.code, 0)
-	equal(t, done.stdout, "item-listed name\n  promise:  A stored item shows up when a user lists the store.\n  requires: item:{name}  provides: -\nitem-stored name\n  promise:  A named item is in the store.\n  requires: store  provides: item:{name}\nstore-open\n  promise:  A new, empty store is open and ready for items.\n  requires: -  provides: store\n")
+	equal(t, done.stdout, "item-listed name\n  promise:  A stored item shows up when a user lists the store.\n  requires: item:{name}  provides: -\n  status:   provisional\nitem-stored name\n  promise:  A named item is in the store.\n  requires: store  provides: item:{name}\n  status:   provisional\nstore-open\n  promise:  A new, empty store is open and ready for items.\n  requires: -  provides: store\n  status:   provisional\n")
 	done = verilex(t, root, nil, "--project", filepath.Join(root, "bin"), "run", "store-open | item-stored 'red apple'", "--json")
 	equal(t, done.code, 0)
 	var record runner.Record

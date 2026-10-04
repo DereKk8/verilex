@@ -7,19 +7,22 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
+	"github.com/DereKk8/verilex/internal/lifecycle"
 	"github.com/DereKk8/verilex/internal/report"
 	"github.com/DereKk8/verilex/internal/runner"
 	"github.com/DereKk8/verilex/internal/verdict"
 )
 
-const usage = "usage: verilex [-h] [--project PROJECT] {run,words,runs,cleanup} ...\n"
+const usage = "usage: verilex [-h] [--project PROJECT] {run,words,runs,cleanup,new,propose,admit,gap,check} ...\n"
 
 type options struct {
-	project, command, operand string
-	keep, fresh, json         bool
+	project, command, operand, verdict string
+	implements                         []string
+	keep, fresh, json                  bool
 }
 
 func Main(argv []string, out, stderr io.Writer) int {
@@ -45,11 +48,16 @@ func Main(argv []string, out, stderr io.Writer) int {
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
 		root = resolved
 	}
+	if args.command == "new" {
+		return scaffold(root, args, out, refuse)
+	}
 	project, err := dictionary.FindProject(root)
 	if err != nil {
 		return refuse(err)
 	}
 	switch args.command {
+	case "propose", "admit", "gap", "check":
+		return curate(project, args, out, refuse)
 	case "runs":
 		records, err := runner.LoadRuns(project)
 		if err != nil {
@@ -74,6 +82,11 @@ func Main(argv []string, out, stderr io.Writer) int {
 		for _, word := range words {
 			fmt.Fprintln(out, strings.TrimSpace(word.Name+" "+strings.Join(word.Args, " ")))
 			fmt.Fprintf(out, "  promise:  %s\n  requires: %s  provides: %s\n", word.Promise, states(word.Requires), states(word.Provides))
+			status, err := lifecycle.StatusOf(project, word)
+			if err != nil {
+				return refuse(err)
+			}
+			fmt.Fprintf(out, "  status:   %s\n", status.State)
 		}
 		return 0
 	}
@@ -109,6 +122,27 @@ func Main(argv []string, out, stderr io.Writer) int {
 	return record.Verdict.ExitCode()
 }
 
+// command describes one subcommand's operand and flags.
+type command struct {
+	operand, usage, help string
+	flags                []string // boolean flags
+	values               []string // flags taking a value
+}
+
+var commands = map[string]command{
+	"run":     {"chain", "[--keep] [--fresh] [--json] chain", "run a chain of words, e.g. 'a | b X | c'", []string{"--keep", "--fresh", "--json"}, nil},
+	"words":   {"", "", "list the dictionary and each word's lifecycle status", nil, nil},
+	"runs":    {"", "", "list this project's runs and any instance still alive", nil, nil},
+	"cleanup": {"run", "run", "tear down a kept run's instance", nil, nil},
+	"new":     {"word", "--implements REF [--implements REF ...] word", "scaffold a provisional word", nil, []string{"--implements"}},
+	"propose": {"word", "word", "build a curator packet for a word used in two runs", nil, nil},
+	"admit":   {"word", "--verdict FILE word", "record an outside curator's admit or reject verdict", nil, []string{"--verdict"}},
+	"gap":     {"description", "description", "record a product moment the feature map has no section for", nil, nil},
+	"check":   {"", "", "report admitted words whose feature-map sections or files changed (drift-suspect)", nil, nil},
+}
+
+var order = []string{"run", "words", "runs", "cleanup", "new", "propose", "admit", "gap", "check"}
+
 func parse(argv []string) (options, bool, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -140,14 +174,16 @@ func parse(argv []string) (options, bool, error) {
 	}
 	o.command = argv[0]
 	argv = argv[1:]
-	if o.command != "run" && o.command != "words" && o.command != "runs" && o.command != "cleanup" {
-		command := o.command
+	spec, ok := commands[o.command]
+	if !ok {
+		name := o.command
 		o.command = ""
-		return o, false, fmt.Errorf("argument command: invalid choice: '%s' (choose from 'run', 'words', 'runs', 'cleanup')", command)
+		return o, false, fmt.Errorf("argument command: invalid choice: '%s' (choose from '%s')", name, strings.Join(order, "', '"))
 	}
 	pos := []string{}
 	literal := false
-	for _, arg := range argv {
+	for i := 0; i < len(argv); i++ {
+		arg := argv[i]
 		if !literal && arg == "--" {
 			literal = true
 			continue
@@ -155,16 +191,25 @@ func parse(argv []string) (options, bool, error) {
 		if !literal && (arg == "-h" || arg == "--help") {
 			return o, true, nil
 		}
-		if !literal && o.command == "run" && arg == "--keep" {
-			o.keep = true
+		if !literal && slices.Contains(spec.flags, arg) {
+			o.keep = o.keep || arg == "--keep"
+			o.fresh = o.fresh || arg == "--fresh"
+			o.json = o.json || arg == "--json"
 			continue
 		}
-		if !literal && o.command == "run" && arg == "--fresh" {
-			o.fresh = true
-			continue
-		}
-		if !literal && o.command == "run" && arg == "--json" {
-			o.json = true
+		if name, value, inline := strings.Cut(arg, "="); !literal && slices.Contains(spec.values, name) {
+			if !inline {
+				if i+1 == len(argv) {
+					return o, false, fmt.Errorf("argument %s: expected one argument", name)
+				}
+				i++
+				value = argv[i]
+			}
+			if name == "--implements" {
+				o.implements = append(o.implements, value)
+			} else {
+				o.verdict = value
+			}
 			continue
 		}
 		if !literal && strings.HasPrefix(arg, "-") && arg != "-" {
@@ -173,50 +218,59 @@ func parse(argv []string) (options, bool, error) {
 		pos = append(pos, arg)
 	}
 	n := 0
-	if o.command == "run" || o.command == "cleanup" {
+	if spec.operand != "" {
 		n = 1
 	}
 	if len(pos) != n {
 		if len(pos) == 0 && n == 1 {
-			operand := "chain"
-			if o.command == "cleanup" {
-				operand = "run"
-			}
-			return o, false, fmt.Errorf("the following arguments are required: %s", operand)
+			return o, false, fmt.Errorf("the following arguments are required: %s", spec.operand)
 		}
 		return o, false, fmt.Errorf("unrecognized arguments: %s", strings.Join(pos[n:], " "))
 	}
 	if n == 1 {
 		o.operand = pos[0]
 	}
+	if o.command == "admit" && o.verdict == "" {
+		return o, false, fmt.Errorf("the following arguments are required: --verdict")
+	}
 	return o, false, nil
 }
 
-func usageFor(command string) string {
-	switch command {
-	case "run":
-		return "usage: verilex run [-h] [--keep] [--fresh] [--json] chain\n"
-	case "words", "runs":
-		return "usage: verilex " + command + " [-h]\n"
-	case "cleanup":
-		return "usage: verilex cleanup [-h] run\n"
-	default:
+func usageFor(name string) string {
+	spec, ok := commands[name]
+	if !ok {
 		return usage
+	}
+	return strings.TrimSpace("usage: verilex "+name+" [-h] "+spec.usage) + "\n"
+}
+
+func printHelp(name string, out io.Writer) {
+	fmt.Fprint(out, usageFor(name))
+	spec, ok := commands[name]
+	if !ok {
+		fmt.Fprintf(out, "\nverilex command line.\n\npositional arguments:\n  {%s}\n", strings.Join(order, ","))
+		for _, c := range order {
+			fmt.Fprintf(out, "    %-20s%s\n", c, commands[c].help)
+		}
+		fmt.Fprint(out, "\noptions:\n  -h, --help            show this help message and exit\n  --project PROJECT     product checkout (default: cwd)\n")
+		return
+	}
+	fmt.Fprintf(out, "\n%s\n", spec.help)
+	if spec.operand != "" {
+		fmt.Fprintf(out, "\npositional arguments:\n  %s\n", spec.operand)
+	}
+	fmt.Fprint(out, "\noptions:\n  -h, --help  show this help message and exit\n")
+	for _, flag := range append(append([]string{}, spec.flags...), spec.values...) {
+		fmt.Fprintf(out, "  %s\n", flagHelp[flag])
 	}
 }
 
-func printHelp(command string, out io.Writer) {
-	fmt.Fprint(out, usageFor(command))
-	switch command {
-	case "run":
-		fmt.Fprint(out, "\npositional arguments:\n  chain\n\noptions:\n  -h, --help  show this help message and exit\n  --keep      skip cleanup; tear down later with `verilex cleanup`\n  --fresh     run live even when every proof stamp matches\n  --json      print the complete run record as JSON\n")
-	case "cleanup":
-		fmt.Fprint(out, "\npositional arguments:\n  run\n\noptions:\n  -h, --help  show this help message and exit\n")
-	case "words", "runs":
-		fmt.Fprint(out, "\noptions:\n  -h, --help  show this help message and exit\n")
-	default:
-		fmt.Fprint(out, "\nverilex command line.\n\npositional arguments:\n  {run,words,runs,cleanup}\n    run                 run a chain of words, e.g. 'a | b X | c'\n    words               list the dictionary\n    runs                list this project's runs and any instance still alive\n    cleanup             tear down a kept run's instance\n\noptions:\n  -h, --help            show this help message and exit\n  --project PROJECT     product checkout (default: cwd)\n")
-	}
+var flagHelp = map[string]string{
+	"--keep":       "--keep      skip cleanup; tear down later with `verilex cleanup`",
+	"--fresh":      "--fresh     run live even when every proof stamp matches",
+	"--json":       "--json      print the complete run record as JSON",
+	"--implements": "--implements REF  the feature-map section the word implements, <skill>/<file>#<section>; repeatable",
+	"--verdict":    "--verdict FILE    the curator's verdict JSON for the proposed packet",
 }
 
 func cleanup(project dictionary.Project, id string, out io.Writer, refuse func(error) int) int {

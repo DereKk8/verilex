@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
+	"github.com/DereKk8/verilex/internal/lifecycle"
 )
 
 // format changes whenever the meaning of a stamp changes, so old stamps stop matching.
@@ -31,6 +32,10 @@ type Stamp struct {
 	Components map[string]string
 	// Unclear says why the step has no stamp.
 	Unclear string
+	// Hold says why the step must run live even when its stamp matches a recorded result: its
+	// word is provisional or drift-suspect. A held step keeps its digest, because what it
+	// depended on is still fingerprinted; only reusing a result for it is forbidden.
+	Hold string
 }
 
 // Chain stamps every step. A step's upstream component is the previous step's digest, so a
@@ -55,6 +60,7 @@ func Chain(project dictionary.Project, steps []dictionary.Step) []Stamp {
 		common["shared"] = digest
 	}
 	stamps := make([]Stamp, len(steps))
+	holds := map[string]string{}
 	prefix := [][]string{}
 	upstream := ""
 	for i, step := range steps {
@@ -74,6 +80,12 @@ func Chain(project dictionary.Project, steps []dictionary.Step) []Stamp {
 		if s.Unclear == "" {
 			s.Digest = digestOf(s.Slot + "\n" + lines(s.Components))
 		}
+		hold, seen := holds[step.Word.Name]
+		if !seen {
+			hold = lifecycle.Hold(project, step.Word)
+			holds[step.Word.Name] = hold
+		}
+		s.Hold = hold
 		upstream = s.Digest
 		stamps[i] = s
 	}

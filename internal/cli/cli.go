@@ -10,14 +10,16 @@ import (
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
+	"github.com/DereKk8/verilex/internal/report"
 	"github.com/DereKk8/verilex/internal/runner"
+	"github.com/DereKk8/verilex/internal/verdict"
 )
 
 const usage = "usage: verilex [-h] [--project PROJECT] {run,words,runs,cleanup} ...\n"
 
 type options struct {
 	project, command, operand string
-	keep, json                bool
+	keep, fresh, json         bool
 }
 
 func Main(argv []string, out, stderr io.Writer) int {
@@ -54,11 +56,11 @@ func Main(argv []string, out, stderr io.Writer) int {
 			return refuse(err)
 		}
 		for _, record := range records {
-			verdict := "running"
-			if record.Verdict != nil && *record.Verdict != "" {
-				verdict = *record.Verdict
+			status := "running"
+			if record.Verdict != nil {
+				status = string(*record.Verdict)
 			}
-			fmt.Fprintf(out, "%s  %s  cleanup=%s  %s\n", record.Run, verdict, record.Cleanup, record.Chain)
+			fmt.Fprintf(out, "%s  %s  cleanup=%s  %s\n", record.Run, status, record.Cleanup, record.Chain)
 		}
 		return 0
 	case "cleanup":
@@ -86,7 +88,7 @@ func Main(argv []string, out, stderr io.Writer) int {
 	if err != nil {
 		return refuse(err)
 	}
-	record, runErr := run.Execute(args.keep)
+	record, runErr := run.Execute(runner.Options{Keep: args.keep, Fresh: args.fresh})
 	if args.json {
 		encoder := json.NewEncoder(out)
 		encoder.SetIndent("", "  ")
@@ -95,16 +97,16 @@ func Main(argv []string, out, stderr io.Writer) int {
 			return refuse(err)
 		}
 	} else {
-		report(record, out)
+		report.Human(record, out)
 	}
 	if runErr != nil {
 		fmt.Fprintf(stderr, "verilex: %v\n", runErr)
 		return 2
 	}
 	if record.Verdict == nil {
-		return 2
+		return verdict.Inconclusive.ExitCode()
 	}
-	return runner.ExitCode(*record.Verdict)
+	return record.Verdict.ExitCode()
 }
 
 func parse(argv []string) (options, bool, error) {
@@ -157,6 +159,10 @@ func parse(argv []string) (options, bool, error) {
 			o.keep = true
 			continue
 		}
+		if !literal && o.command == "run" && arg == "--fresh" {
+			o.fresh = true
+			continue
+		}
 		if !literal && o.command == "run" && arg == "--json" {
 			o.json = true
 			continue
@@ -189,7 +195,7 @@ func parse(argv []string) (options, bool, error) {
 func usageFor(command string) string {
 	switch command {
 	case "run":
-		return "usage: verilex run [-h] [--keep] [--json] chain\n"
+		return "usage: verilex run [-h] [--keep] [--fresh] [--json] chain\n"
 	case "words", "runs":
 		return "usage: verilex " + command + " [-h]\n"
 	case "cleanup":
@@ -203,7 +209,7 @@ func printHelp(command string, out io.Writer) {
 	fmt.Fprint(out, usageFor(command))
 	switch command {
 	case "run":
-		fmt.Fprint(out, "\npositional arguments:\n  chain\n\noptions:\n  -h, --help  show this help message and exit\n  --keep      skip cleanup; tear down later with `verilex cleanup`\n  --json      print the run record as JSON\n")
+		fmt.Fprint(out, "\npositional arguments:\n  chain\n\noptions:\n  -h, --help  show this help message and exit\n  --keep      skip cleanup; tear down later with `verilex cleanup`\n  --fresh     run live even when every proof stamp matches\n  --json      print the complete run record as JSON\n")
 	case "cleanup":
 		fmt.Fprint(out, "\npositional arguments:\n  run\n\noptions:\n  -h, --help  show this help message and exit\n")
 	case "words", "runs":
@@ -228,6 +234,10 @@ func cleanup(project dictionary.Project, id string, out io.Writer, refuse func(e
 		fmt.Fprintf(out, "verilex: %s was already cleaned up\n", id)
 		return 0
 	}
+	if record.Cleanup == "none" {
+		fmt.Fprintf(out, "verilex: %s launched nothing; it relied on stamps\n", id)
+		return 0
+	}
 	if err = runner.Cleanup(project, &record, dir); err != nil {
 		return refuse(err)
 	}
@@ -243,52 +253,4 @@ func states(values []string) string {
 		return "-"
 	}
 	return strings.Join(values, ", ")
-}
-
-func report(record runner.Record, out io.Writer) {
-	fmt.Fprintf(out, "verilex run %s (%s)\n", record.Run, record.Project)
-	frames := map[string]runner.Frame{}
-	for _, f := range record.Frame {
-		frames[f.Step] = f
-	}
-	status := func(f runner.Frame) string {
-		if f.Exit != nil && *f.Exit == 0 {
-			return "ok"
-		}
-		return "refused"
-	}
-	for _, step := range []string{"launch", "doctor"} {
-		if f, ok := frames[step]; ok {
-			fmt.Fprintf(out, "  [%s] %s\n", status(f), step)
-		}
-	}
-	for _, word := range record.Words {
-		label := strings.Join(append([]string{word.Word}, word.Args...), " ")
-		seconds := fmt.Sprint(word.Seconds)
-		if !strings.Contains(seconds, ".") {
-			seconds += ".0"
-		}
-		fmt.Fprintf(out, "  [%s] %s  (%ss)\n", word.Verdict, label, seconds)
-		if dictionary.Truthy(word.Observation) {
-			fmt.Fprintf(out, "      observation: %v\n", word.Observation)
-		}
-		if dictionary.Truthy(word.Reason) {
-			fmt.Fprintf(out, "      reason: %v\n", word.Reason)
-		}
-		if word.Verdict != "pass" {
-			fmt.Fprintf(out, "      fall back to the verify skill: %s\n", strings.Join(word.Implements, ", "))
-		}
-	}
-	if f, ok := frames["doctor-after-failure"]; ok {
-		fmt.Fprintf(out, "  [%s] doctor after failure\n", status(f))
-	}
-	verdict := "None"
-	if record.Verdict != nil {
-		verdict = *record.Verdict
-	}
-	fmt.Fprintf(out, "  cleanup: %s\nresult: %s", record.Cleanup, verdict)
-	if record.Reason != nil && *record.Reason != "" {
-		fmt.Fprintf(out, " - %s", *record.Reason)
-	}
-	fmt.Fprintf(out, "\nevidence: %s\n", record.Dir)
 }

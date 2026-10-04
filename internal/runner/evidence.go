@@ -1,8 +1,6 @@
 package runner
 
 import (
-	"encoding/json"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -67,45 +65,4 @@ func scan(dir string, patterns []*regexp2.Regexp) (string, error) {
 		return nil
 	})
 	return leak, err
-}
-
-type result struct {
-	Verdict             string
-	Observation, Detail any
-	PreconditionsHeld   bool
-}
-
-func judge(code *int, evidence string, timeout int) (string, any, result, error) {
-	var r result
-	if code == nil {
-		return "unverified", fmt.Sprintf("timed out after %ds", timeout), r, nil
-	}
-	data, err := os.ReadFile(filepath.Join(evidence, "stdout"))
-	if err != nil {
-		return "unverified", nil, r, err
-	}
-	var raw any
-	if json.Unmarshal(data, &raw) != nil {
-		return "unverified", "stdout is not one result JSON object", r, nil
-	}
-	m, ok := raw.(map[string]any)
-	if ok {
-		r.Verdict, _ = m["verdict"].(string)
-		r.Observation = m["observation"]
-		r.Detail = m["detail"]
-		r.PreconditionsHeld, _ = m["preconditions_held"].(bool)
-	}
-	if !ok || (r.Verdict != "pass" && r.Verdict != "fail" && r.Verdict != "blocked") {
-		return "unverified", "result has no verdict of pass, fail or blocked", result{}, nil
-	}
-	if ExitCode(r.Verdict) != *code {
-		return "unverified", fmt.Sprintf("exit %d disagrees with verdict %s", *code, r.Verdict), r, nil
-	}
-	if r.Verdict == "pass" && (!dictionary.Truthy(r.Observation) || strings.TrimSpace(fmt.Sprint(r.Observation)) == "") {
-		return "unverified", "pass without a second observation", r, nil
-	}
-	if r.Verdict == "fail" && !r.PreconditionsHeld {
-		return "unverified", "fail without stating that its preconditions held", r, nil
-	}
-	return r.Verdict, r.Detail, r, nil
 }

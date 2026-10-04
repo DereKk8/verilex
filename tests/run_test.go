@@ -159,7 +159,7 @@ func contains(t *testing.T, actual, expected string) {
 func verdicts(r runner.Record) []string {
 	result := []string{}
 	for _, w := range r.Words {
-		result = append(result, w.Verdict)
+		result = append(result, string(w.Verdict))
 	}
 	return result
 }
@@ -193,31 +193,32 @@ func TestPassingChainCleansUpInstanceAndKeepsEvidence(t *testing.T) {
 		names = append(names, w.Word)
 	}
 	equal(t, names, []string{"store-open", "item-stored", "item-listed"})
-	equal(t, verdicts(record), []string{"pass", "pass", "pass"})
+	equal(t, verdicts(record), []string{"green", "green", "green"})
 	equal(t, record.Cleanup, "done")
 	equal(t, stores(t, root), []string{})
 	equal(t, read(t, filepath.Join(record.Words[1].Evidence, "actions.log")), "$ tally add apple\nexit 0\nadded apple\n\n")
-	contains(t, done.stdout, "result: pass\n")
+	equal(t, done.stdout, "green: 3 green; run "+record.Run+"\n")
 }
 
-func TestPlantedDefectFailsWordThatProvesIt(t *testing.T) {
+func TestPlantedDefectIsRedAtWordThatProvesIt(t *testing.T) {
 	root := product(t)
 	done := verilex(t, root, map[string]string{"TALLY_DEFECT": "drop-adds"}, "run", chain)
 	equal(t, done.code, 1)
 	record := lastRun(t, root)
-	equal(t, verdicts(record), []string{"pass", "fail"})
+	equal(t, verdicts(record), []string{"green", "red"})
 	equal(t, *record.Reason, "item-stored apple: tally said 'added apple' but store.json lacks apple")
-	contains(t, done.stdout, "fall back to the verify skill: verify-tally/features/items.md#item-add")
+	contains(t, done.stdout, "    verify skill: verify-tally/features/items.md#item-add\n")
 	equal(t, frames(record), []string{"launch", "doctor", "doctor-after-failure", "cleanup"})
 	equal(t, stores(t, root), []string{})
 }
 
-func TestEnvironmentTroubleIsBlockedNotFailed(t *testing.T) {
+func TestEnvironmentTroubleIsInconclusiveNeverRed(t *testing.T) {
 	root := product(t)
 	done := verilex(t, root, map[string]string{"TALLY_SIMULATE_LOCK": "1"}, "run", chain)
 	equal(t, done.code, 2)
 	record := lastRun(t, root)
-	equal(t, *record.Verdict, "blocked")
+	equal(t, *record.Verdict, "inconclusive")
+	equal(t, record.Words[0].Claim, "blocked")
 	reason, ok := record.Words[0].Reason.(string)
 	if !ok || !strings.HasSuffix(reason, "is locked by another process") {
 		t.Fatalf("reason: %v", record.Words[0].Reason)
@@ -253,13 +254,13 @@ func TestInstanceRunDidNotLaunchIsRefusedAndLeftIntact(t *testing.T) {
 	done := verilex(t, root, map[string]string{"TALLY_ADOPT_STORE": other}, "run", chain)
 	equal(t, done.code, 2)
 	record := lastRun(t, root)
-	equal(t, *record.Verdict, "blocked")
+	equal(t, *record.Verdict, "inconclusive")
 	equal(t, *record.Reason, "doctor refused the instance (exit 1)")
 	equal(t, len(record.Words), 0)
 	equal(t, read(t, filepath.Join(other, "store.json")), `{"items": ["keep-me"]}`)
 }
 
-func TestDishonestWordResultsAreUnverified(t *testing.T) {
+func TestDishonestWordResultsAreInconclusive(t *testing.T) {
 	cases := []struct{ name, script, reason string }{
 		{"no-observation", `echo '{"verdict": "pass"}'` + "\n", "pass without a second observation"},
 		{"no-preconditions", `echo '{"verdict": "fail", "detail": "broken"}'` + "\nexit 1\n", "fail without stating that its preconditions held"},
@@ -274,7 +275,8 @@ func TestDishonestWordResultsAreUnverified(t *testing.T) {
 			done := verilex(t, root, nil, "run", "store-open | store-glanced")
 			equal(t, done.code, 2)
 			record := lastRun(t, root)
-			equal(t, record.Words[len(record.Words)-1].Verdict, "unverified")
+			equal(t, record.Words[len(record.Words)-1].Verdict, "inconclusive")
+			equal(t, *record.Verdict, "inconclusive")
 			equal(t, record.Words[len(record.Words)-1].Reason, any(c.reason))
 			equal(t, stores(t, root), []string{})
 		})
@@ -287,23 +289,23 @@ func TestKeptInstanceListedUntilCleanedUp(t *testing.T) {
 	equal(t, done.code, 0)
 	id := lastRun(t, root).Run
 	equal(t, len(stores(t, root)), 1)
-	equal(t, verilex(t, root, nil, "runs").stdout, id+"  pass  cleanup=kept  store-open\n")
+	equal(t, verilex(t, root, nil, "runs").stdout, id+"  green  cleanup=kept  store-open\n")
 	equal(t, verilex(t, root, nil, "cleanup", id).stdout, "cleanup: done\n")
 	equal(t, stores(t, root), []string{})
-	equal(t, verilex(t, root, nil, "runs").stdout, id+"  pass  cleanup=done  store-open\n")
+	equal(t, verilex(t, root, nil, "runs").stdout, id+"  green  cleanup=done  store-open\n")
 }
 
-func TestDoctorRefusalAfterWordFailureBlocksRun(t *testing.T) {
+func TestDoctorRefusalAfterRedWordMakesRunInconclusive(t *testing.T) {
 	root := product(t)
 	script := `python3 -c "import json, os, pathlib; p = pathlib.Path(json.loads(os.environ['VERILEX_INSTANCE'])['store']) / 'owner'; p.unlink()"` + "\n" + `echo '{"verdict": "fail", "preconditions_held": true, "detail": "failed and corrupted"}'` + "\nexit 1\n"
 	addWord(t, root, "store-corrupted", script)
 	done := verilex(t, root, nil, "run", "store-open | store-corrupted")
 	equal(t, done.code, 2)
 	record := lastRun(t, root)
-	equal(t, verdicts(record), []string{"pass", "fail"})
+	equal(t, verdicts(record), []string{"green", "red"})
 	equal(t, record.Words[0].Word, "store-open")
 	equal(t, record.Words[1].Word, "store-corrupted")
-	equal(t, *record.Verdict, "blocked")
+	equal(t, *record.Verdict, "inconclusive")
 	equal(t, *record.Reason, "doctor-after-failure refused the instance (exit 1)")
 	equal(t, frames(record), []string{"launch", "doctor", "doctor-after-failure", "cleanup"})
 	codes := []int{}
@@ -311,20 +313,24 @@ func TestDoctorRefusalAfterWordFailureBlocksRun(t *testing.T) {
 		codes = append(codes, *f.Exit)
 	}
 	equal(t, codes, []int{0, 0, 1, 0})
-	contains(t, done.stdout, "  [refused] doctor after failure\n")
-	contains(t, done.stdout, "result: blocked - doctor-after-failure refused the instance (exit 1)\n")
+	contains(t, done.stdout, "inconclusive: 1 green, 1 red; run "+record.Run+"\n")
+	contains(t, done.stdout, "  inconclusive  doctor-after-failure: refused the instance (exit 1)\n")
+	if strings.Contains(done.stdout, "cause:") {
+		t.Fatal(done.stdout)
+	}
 }
 
-func TestCleanupEvidenceSecretLeakMarksRunUnverified(t *testing.T) {
+func TestCleanupEvidenceSecretLeakMakesRunInconclusive(t *testing.T) {
 	root := product(t)
 	path := filepath.Join(root, ".verilex", "frame", "cleanup")
 	write(t, path, read(t, path)+"\nfrom pathlib import Path\nimport os\n"+`(Path(os.environ["VERILEX_EVIDENCE"]) / "key.pem").write_text("-----BEGIN PRIVATE KEY-----\n")`+"\n", 0755)
 	done := verilex(t, root, nil, "run", "store-open")
 	equal(t, done.code, 2)
 	record := lastRun(t, root)
-	equal(t, *record.Verdict, "unverified")
+	equal(t, *record.Verdict, "inconclusive")
 	equal(t, *record.Reason, "secret pattern in evidence key.pem")
 	equal(t, record.Cleanup, "done")
+	contains(t, done.stdout, "  inconclusive  cleanup: secret pattern in evidence key.pem\n")
 }
 
 func TestWordFailureWithoutDetailDoesNotFormatNone(t *testing.T) {
@@ -333,9 +339,9 @@ func TestWordFailureWithoutDetailDoesNotFormatNone(t *testing.T) {
 	done := verilex(t, root, nil, "run", "store-open | store-flaked")
 	equal(t, done.code, 1)
 	record := lastRun(t, root)
-	equal(t, *record.Verdict, "fail")
+	equal(t, *record.Verdict, "red")
 	equal(t, *record.Reason, "store-flaked")
-	contains(t, done.stdout, "result: fail - store-flaked\n")
+	contains(t, done.stdout, "  red  store-flaked\n")
 	if strings.Contains(done.stdout, ": None") {
 		t.Fatal(done.stdout)
 	}
@@ -387,7 +393,7 @@ func TestWordsJSONAndProjectDiscovery(t *testing.T) {
 	if err := json.Unmarshal([]byte(done.stdout), &record); err != nil {
 		t.Fatal(err)
 	}
-	equal(t, *record.Verdict, "pass")
+	equal(t, *record.Verdict, "green")
 	equal(t, record.Words[1].Args, []string{"red apple"})
 	equal(t, record.Words[1].Provides, []string{"item:red apple"})
 	equal(t, record.Root, root)
@@ -395,7 +401,7 @@ func TestWordsJSONAndProjectDiscovery(t *testing.T) {
 	equal(t, *record.EvidenceKept, true)
 }
 
-func TestTimeoutIsUnverifiedAndCleansUp(t *testing.T) {
+func TestTimeoutIsInconclusiveAndCleansUp(t *testing.T) {
 	root := product(t)
 	addWord(t, root, "store-waited", "sleep 10\n")
 	path := filepath.Join(root, ".verilex", "words", "store-waited", "word.md")
@@ -403,7 +409,7 @@ func TestTimeoutIsUnverifiedAndCleansUp(t *testing.T) {
 	done := verilex(t, root, nil, "run", "store-open | store-waited")
 	equal(t, done.code, 2)
 	record := lastRun(t, root)
-	equal(t, record.Words[1].Verdict, "unverified")
+	equal(t, record.Words[1].Verdict, "inconclusive")
 	equal(t, record.Words[1].Reason, any("timed out after 1s"))
 	equal(t, record.Words[1].Exit, (*int)(nil))
 	equal(t, read(t, filepath.Join(record.Words[1].Evidence, "exit")), "timeout\n")
@@ -418,7 +424,7 @@ func TestLegacyYAMLAndProjectRegexContracts(t *testing.T) {
 		equal(t, done.code, 0)
 		record := lastRun(t, root)
 		equal(t, record.Project, "tally")
-		equal(t, *record.Verdict, "pass")
+		equal(t, *record.Verdict, "green")
 	})
 	t.Run("YAML 1.1 booleans are not list strings", func(t *testing.T) {
 		root := product(t)
@@ -435,7 +441,7 @@ func TestLegacyYAMLAndProjectRegexContracts(t *testing.T) {
 		done := verilex(t, root, nil, "run", "store-open | store-glanced")
 		equal(t, done.code, 2)
 		record := lastRun(t, root)
-		equal(t, record.Words[1].Verdict, "unverified")
+		equal(t, record.Words[1].Verdict, "inconclusive")
 		equal(t, record.Words[1].Reason, any("secret pattern in evidence custom.txt"))
 		equal(t, stores(t, root), []string{})
 	})

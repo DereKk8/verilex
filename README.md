@@ -15,8 +15,11 @@ This is the first slice: the chain runner and its trust frame. Dependency-based 
 ## Install
 
 ```
-uv tool install git+https://github.com/DereKk8/verilex
+go install github.com/DereKk8/verilex/cmd/verilex@latest
 ```
+
+Use Go 1.27.1 or newer on a Unix system. Add `$(go env GOPATH)/bin` to your `PATH`.
+The core is Go; frame steps and words can use any language installed on the product's workstation.
 
 ## Commands
 
@@ -98,5 +101,13 @@ timeout: 1800            # seconds, optional
 ## Development
 
 ```
-uv run pytest
+go test ./...
+go vet ./...
+go build -o verilex ./cmd/verilex
 ```
+
+The Go behavior tests drive the compiled CLI against tally. The sample product and its words
+use Python 3, so tests require `python3` and a POSIX shell. The verilex core does not require Python.
+
+For direct CLI verification and evidence capture, follow
+[verify-verilex](.cursor/skills/verify-verilex/SKILL.md).

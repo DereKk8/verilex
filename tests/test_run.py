@@ -178,9 +178,17 @@ def test_doctor_refusal_after_word_failure_blocks_the_run(product):
 
     assert done.returncode == 2
     record = last_run(product)
+    assert [(w["word"], w["verdict"]) for w in record["words"]] == [("store-open", "pass"), ("store-corrupted", "fail")]
     assert record["verdict"] == "blocked"
-    assert "doctor-after-failure refused the instance" in record["reason"]
-    assert "[refused] doctor after failure" in done.stdout
+    assert record["reason"] == "doctor-after-failure refused the instance (exit 1)"
+    assert [(f["step"], f["exit"]) for f in record["frame"]] == [
+        ("launch", 0),
+        ("doctor", 0),
+        ("doctor-after-failure", 1),
+        ("cleanup", 0),
+    ]
+    assert "  [refused] doctor after failure\n" in done.stdout
+    assert "result: blocked - doctor-after-failure refused the instance (exit 1)\n" in done.stdout
 
 
 def test_cleanup_evidence_secret_leak_marks_run_unverified(product):

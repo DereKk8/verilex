@@ -29,6 +29,12 @@ type Word struct {
 	Name, Path, Promise                  string
 	Args, Requires, Provides, Implements []string
 	Timeout                              int
+	// Inputs are the product paths the word reads, relative to the project root. A word whose
+	// contract omits 'inputs', or lists none, has an unknown footprint, so its results are never reused.
+	Inputs         []string
+	InputsDeclared bool
+	// Env names the environment variables whose values the word's result depends on.
+	Env []string
 }
 
 func (w Word) Run() string { return filepath.Join(w.Path, "run") }
@@ -134,10 +140,23 @@ func loadWord(path string) (Word, error) {
 		dest *[]string
 	}{
 		{"implements", &w.Implements}, {"args", &w.Args}, {"requires", &w.Requires}, {"provides", &w.Provides},
+		{"inputs", &w.Inputs}, {"env", &w.Env},
 	} {
 		*field.dest, err = stringsList(meta[field.key])
 		if err != nil {
 			return Word{}, fmt.Errorf("%s: '%s' must be a list of strings", file, field.key)
+		}
+	}
+	// An empty list covers no product paths, so it proves nothing and counts as undeclared.
+	w.InputsDeclared = len(w.Inputs) > 0
+	for _, input := range w.Inputs {
+		if strings.TrimSpace(input) == "" {
+			return Word{}, fmt.Errorf("%s: 'inputs' entries must be paths", file)
+		}
+	}
+	for _, name := range w.Env {
+		if !envName.MatchString(name) {
+			return Word{}, fmt.Errorf("%s: 'env' entry %s is not a variable name", file, quote(name))
 		}
 	}
 	if len(w.Implements) == 0 {
@@ -192,6 +211,8 @@ func loadWord(path string) (Word, error) {
 	}
 	return w, nil
 }
+
+var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 var placeholder = regexp.MustCompile(`\{([\pL\pN_]+)\}`)
 

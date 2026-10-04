@@ -4,6 +4,8 @@ promise: A stored item shows up when a user lists the store.
 args: [name]
 requires: ["item:{name}"]
 provides: []
+inputs: [bin/tally]
+env: [TALLY_DEFECT, TALLY_SIMULATE_LOCK]
 implements:
   - verify-tally/features/items.md#item-list
 ---

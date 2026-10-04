@@ -8,9 +8,9 @@ verilex run 'store-open | item-stored apple | item-listed apple'
 
 A **word** is a reusable, executable piece that drives the product through a surface its users have and promises one product state. Someone who knows the product, but not how it is built, would recognize each word as a real moment in the product's life.
 
-verilex holds execution only. The project's verification skill (a [pstack](https://github.com/cursor/plugins/tree/main/pstack)-style `verify-*` skill with its feature map) keeps the meaning: what a feature is, how a user reaches it, what proves it and its traps. Every word points back at the feature-map entries it puts into action, and verilex never replaces the skill. When a word does not pass, verilex prints those entries so the agent can continue by hand.
+verilex holds execution only. The project's verification skill (a [pstack](https://github.com/cursor/plugins/tree/main/pstack)-style `verify-*` skill with its feature map) keeps the meaning: what a feature is, how a user reaches it, what proves it and its traps. Every word points back at the feature-map entries it puts into action, and verilex never replaces the skill. When a word is not green, verilex prints those entries so the agent can continue by hand.
 
-This is the first slice: the chain runner and its trust frame. Dependency-based skipping, word invention and curation come later.
+This slice holds the chain runner, its trust frame, the three verdicts, quiet output and stamp-based skipping. Reusing a kept instance, word invention and curation come later.
 
 ## Install
 
@@ -25,12 +25,36 @@ The core is Go; frame steps and words can use any language installed on the prod
 
 | Command | Does |
 |---|---|
-| `verilex run '<chain>' [--keep] [--json]` | Plans the chain, launches an owned instance, runs each word, cleans up |
+| `verilex run '<chain>' [--keep] [--fresh] [--json]` | Plans the chain, skips it when every proof stamp matches, else launches an owned instance, runs each word, cleans up |
 | `verilex words` | Lists the dictionary with each word's promise, `requires` and `provides` |
 | `verilex runs` | Lists this project's runs and whether each instance was cleaned up |
 | `verilex cleanup <run>` | Tears down an instance kept with `--keep` |
 
-Exit codes: `0` pass, `1` fail, `2` blocked, unverified, or refused.
+Exit codes: `0` green, `1` red, `2` inconclusive or refused.
+
+## Verdicts
+
+| Verdict | Means |
+|---|---|
+| `green` | The product works, backed by evidence. |
+| `red` | The product is broken, backed by evidence. |
+| `inconclusive` | Environment or harness trouble, or a claim that is not backed. Never reported as a product failure. |
+
+A word claims `pass`, `fail` or `blocked` (see the word contract); verilex judges that claim and turns it into a verdict. A run is red only when a word is red and the doctor still vouches for the instance afterwards; anything that undermines the run makes it inconclusive. `verilex runs` reads runs recorded with the older labels (`pass`, `fail`, `blocked`, `unverified`) as the three verdicts.
+
+## Output
+
+`verilex run` prints the verdict first, then only the steps that are not green, each with a one-line cause and a path to its evidence; green steps are only counted:
+
+```
+$ verilex run 'store-open | item-stored apple | item-listed apple'
+red: 1 green, 1 red, 1 not run; run 1767225600-a1b2c3
+  red  item-stored apple: tally said 'added apple' but store.json lacks apple
+    evidence: ~/.local/state/verilex/tally/runs/1767225600-a1b2c3/02-item-stored
+    verify skill: verify-tally/features/items.md#item-add
+```
+
+`--json` prints the complete run record instead: every step, frame step, stamp and reason.
 
 ## The grammar
 
@@ -49,15 +73,36 @@ Exit codes: `0` pass, `1` fail, `2` blocked, unverified, or refused.
 Every run goes through the project's frame, and no word can opt out of it:
 
 1. **Launch** creates an instance owned by this run. verilex never attaches to an instance it did not launch.
-2. **Doctor** confirms the instance is this run's and worth driving, before the first word and again after any failure. A refusal stops the run as `blocked`.
+2. **Doctor** confirms the instance is this run's and worth driving, before the first word and again after any failure. A refusal stops the run as `inconclusive`.
 3. **Evidence** for every step goes to `~/.local/state/verilex/<project>/runs/<run>/` (override with `VERILEX_HOME`), outside the product and every repository.
-4. **Honesty rules** turn a word's claim into `unverified` when it is not backed:
+4. **Honesty rules** turn a word's claim into `inconclusive` when it is not backed, so it is never green or red:
    - `pass` without a second observation;
    - `fail` without stating that its preconditions held;
    - an exit code that disagrees with the verdict, or no result JSON;
    - a secret pattern (private key block, GitHub, AWS, Slack or Anthropic token, or a project pattern) anywhere in its evidence.
-   Workstation and environment trouble is `blocked`, never `fail`.
+   Workstation and environment trouble is `inconclusive`, never `red`.
 5. **Cleanup** always runs, tears down only what the run started, and verilex then confirms the evidence survived.
+
+## Proof stamps and skipping
+
+Every word result carries a proof stamp: a fingerprint of everything the result depended on.
+
+- the word's own directory (`word.md`, `run` and anything beside them, with permissions);
+- everything in `.verilex/words/` outside word directories (helpers words share), `.verilex/config.yaml` and `.verilex/frame/`;
+- the paths in the word's `inputs` and the values of the variables in its `env`;
+- the verilex executable;
+- the stamp of the step before it, so a change anywhere upstream reaches every later word.
+
+After a run that is not inconclusive, verilex records each green word in a ledger at `~/.local/state/verilex/<project>/runs/ledger.json`, keyed by the chain prefix that ends in that word. A later `verilex run` skips the chain only when every word's stamp matches a recorded green result and that result's evidence still exists. A skipped run launches nothing and names the run it relies on:
+
+```
+$ verilex run 'store-open | item-stored apple | item-listed apple'
+green: 3 green, skipped: stamps match run 1767225600-a1b2c3; run 1767225900-d4e5f6
+```
+
+Anything missing or unclear runs the chain live: a word without `inputs` or with an empty `inputs` list, an input that is missing, an unreadable ledger, evidence that is gone, a stamp that changed while the run was going. Skipping is all or nothing, because each run starts from a fresh instance: a word that has to run needs the effects of every word before it, and every word after it depends on its new result. `--keep` and `--fresh` always run live. `--json` names the first reason a chain ran live in `rerun`.
+
+A stamp covers only what it lists. A word that reads anything else (another file, a service, a tool's version) must declare it in `inputs` or `env`, or leave `inputs` out (or empty) so it is never skipped.
 
 ## Adding verilex to a project
 
@@ -82,6 +127,8 @@ promise: A named item is in the store.
 args: [name]
 requires: [store]
 provides: ["item:{name}"]
+inputs: [bin/tally]      # product paths the result depends on; omit or leave empty to never skip
+env: [TALLY_DEFECT]      # environment variables the result depends on, optional
 implements:
   - verify-tally/features/items.md#item-add
 timeout: 1800            # seconds, optional

@@ -163,3 +163,89 @@ def test_kept_instance_is_listed_until_cleaned_up(product):
     assert verilex(product, "cleanup", run_id).stdout == "cleanup: done\n"
     assert stores(product) == []
     assert verilex(product, "runs").stdout == f"{run_id}  pass  cleanup=done  store-open\n"
+
+
+def test_doctor_refusal_after_word_failure_blocks_the_run(product):
+    script = (
+        'python3 -c "import json, os, pathlib; '
+        'p = pathlib.Path(json.loads(os.environ[\'VERILEX_INSTANCE\'])[\'store\']) / \'owner\'; '
+        'p.unlink()"\n'
+        'echo \'{"verdict": "fail", "preconditions_held": true, "detail": "failed and corrupted"}\'\n'
+        'exit 1\n'
+    )
+    add_word(product, "store-corrupted", script)
+    done = verilex(product, "run", "store-open | store-corrupted")
+
+    assert done.returncode == 2
+    record = last_run(product)
+    assert record["verdict"] == "blocked"
+    assert "doctor-after-failure refused the instance" in record["reason"]
+    assert "[refused] doctor after failure" in done.stdout
+
+
+def test_cleanup_evidence_secret_leak_marks_run_unverified(product):
+    cleanup_script = product / ".verilex" / "frame" / "cleanup"
+    with open(cleanup_script, "a", encoding="utf-8") as f:
+        f.write(
+            '\nfrom pathlib import Path\n'
+            'import os\n'
+            '(Path(os.environ["VERILEX_EVIDENCE"]) / "key.pem").write_text("-----BEGIN PRIVATE KEY-----\\n")\n'
+        )
+
+    done = verilex(product, "run", "store-open")
+
+    assert done.returncode == 2
+    record = last_run(product)
+    assert record["verdict"] == "unverified"
+    assert record["reason"] == "secret pattern in evidence key.pem"
+    assert record["cleanup"] == "done"
+
+
+def test_word_failure_without_detail_does_not_format_none(product):
+    script = 'echo \'{"verdict": "fail", "preconditions_held": true}\'\nexit 1\n'
+    add_word(product, "store-flaked", script)
+    done = verilex(product, "run", "store-open | store-flaked")
+
+    assert done.returncode == 1
+    record = last_run(product)
+    assert record["verdict"] == "fail"
+    assert record["reason"] == "store-flaked"
+    assert "result: fail - store-flaked\n" in done.stdout
+    assert ": None" not in done.stdout
+
+
+def test_management_commands_work_with_malformed_word_dictionary(product):
+    broken = product / ".verilex" / "words" / "broken"
+    broken.mkdir()
+    (broken / "word.md").write_text("not yaml frontmatter at all\n")
+
+    done_runs = verilex(product, "runs")
+    assert done_runs.returncode == 0
+    assert done_runs.stdout == ""
+
+    done_clean = verilex(product, "cleanup", "no-such-run")
+    assert done_clean.returncode == 2
+    assert "no-such-run is not a run of tally" in done_clean.stderr
+
+
+def test_syntax_and_metadata_validation_errors_are_refused_as_verilex_error(product):
+    done_quote = verilex(product, "run", 'store-open | "item-stored')
+    assert done_quote.returncode == 2
+    assert "verilex: refused: invalid word syntax in chain" in done_quote.stderr
+    assert "No closing quotation" in done_quote.stderr
+
+    (product / ".verilex" / "config.yaml").write_text("project: tally\nsecret_patterns: ['[']\n")
+    done_config = verilex(product, "words")
+    assert done_config.returncode == 2
+    assert "verilex: refused:" in done_config.stderr
+    assert "invalid regex in 'secret_patterns'" in done_config.stderr
+
+    (product / ".verilex" / "config.yaml").write_text("project: tally\n")
+    (product / ".verilex" / "words" / "store-open" / "word.md").write_text(
+        "---\nword: store-open\npromise: A store is open.\ntimeout: not-a-number\n"
+        "implements: [verify-tally/features/store.md#store-open]\n---\n"
+    )
+    done_timeout = verilex(product, "words")
+    assert done_timeout.returncode == 2
+    assert "verilex: refused:" in done_timeout.stderr
+    assert "'timeout' must be a positive integer" in done_timeout.stderr

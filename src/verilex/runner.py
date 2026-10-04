@@ -96,7 +96,8 @@ class Run:
             self.record["words"].append(entry)
             self._save()
             if entry["verdict"] != "pass":
-                self._stop(entry["verdict"], f"{step.label}: {entry['reason']}")
+                reason = f"{step.label}: {entry['reason']}" if entry.get("reason") else step.label
+                self._stop(entry["verdict"], reason)
                 self._doctor("doctor-after-failure")
                 return
             available.update(step.provides)
@@ -159,7 +160,7 @@ class Run:
         return scan(evidence, self.patterns)
 
     def _stop(self, verdict: str, reason: str) -> bool:
-        if self.record["verdict"] is None:
+        if self.record["verdict"] is None or (self.record["verdict"] == "fail" and verdict == "blocked"):
             self.record["verdict"], self.record["reason"] = verdict, reason
         return False
 
@@ -178,13 +179,20 @@ def cleanup(project: Project, record: dict, run_dir: Path) -> None:
         "VERILEX_EVIDENCE": str(evidence),
     }
     code = _execute([str(project.frame("cleanup"))], evidence, env, FRAME_TIMEOUT)
-    record["frame"].append({"step": "cleanup", "exit": code, "evidence": str(evidence)})
+    frame_step = {"step": "cleanup", "exit": code, "evidence": str(evidence)}
+    leak = scan(evidence, [re.compile(p) for p in (*SECRET_PATTERNS, *project.secret_patterns)])
+    if leak:
+        frame_step["exit"] = 2 if code == 0 else code
+        frame_step["leak"] = leak
+    record["frame"].append(frame_step)
     record["cleanup"] = "done" if code == 0 else "failed"
     record["evidence_kept"] = all(Path(w["evidence"], "stdout").is_file() for w in record["words"])
     if code != 0 and record["verdict"] in (None, "pass"):
         record["verdict"], record["reason"] = "blocked", f"cleanup exited {code}; the instance may outlive the run"
     if not record["evidence_kept"]:
         record["verdict"], record["reason"] = "unverified", "evidence did not survive cleanup"
+    if leak:
+        record["verdict"], record["reason"] = "unverified", f"secret pattern in evidence {leak}"
     record["finished"] = _now()
     save(run_dir, record)
 
@@ -239,7 +247,10 @@ def _execute(argv: list[str], evidence: Path, env: dict, timeout: int, stdin: st
         try:
             proc.communicate(stdin.encode(), timeout=timeout)
         except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGKILL)
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             proc.wait()
             code = None
         else:

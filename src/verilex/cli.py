@@ -29,13 +29,6 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         project = find_project(args.project.resolve())
-        words = load_words(project)
-        if args.command == "words":
-            for word in words.values():
-                print(f"{word.name} {' '.join(word.args)}".strip())
-                print(f"  promise:  {word.promise}")
-                print(f"  requires: {', '.join(word.requires) or '-'}  provides: {', '.join(word.provides) or '-'}")
-            return 0
         if args.command == "runs":
             for record in load_runs(project):
                 print(
@@ -44,6 +37,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "cleanup":
             return _cleanup(project, args.run)
+        words = load_words(project)
+        if args.command == "words":
+            for word in words.values():
+                print(f"{word.name} {' '.join(word.args)}".strip())
+                print(f"  promise:  {word.promise}")
+                print(f"  requires: {', '.join(word.requires) or '-'}  provides: {', '.join(word.provides) or '-'}")
+            return 0
         steps = parse_chain(args.chain, words)
         check_order(steps)
     except VerilexError as exc:

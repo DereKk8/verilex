@@ -71,7 +71,18 @@ def find_project(start: Path) -> Project:
             name = data.get("project")
             if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9._-]+", name):
                 raise VerilexError(f"{config}: 'project' must be a plain name")
-            patterns = tuple(str(p) for p in data.get("secret_patterns") or ())
+            raw_patterns = data.get("secret_patterns")
+            if raw_patterns is None:
+                patterns: tuple[str, ...] = ()
+            elif not isinstance(raw_patterns, list) or not all(isinstance(p, str) for p in raw_patterns):
+                raise VerilexError(f"{config}: 'secret_patterns' must be a list of regex strings")
+            else:
+                for p in raw_patterns:
+                    try:
+                        re.compile(p)
+                    except re.error as exc:
+                        raise VerilexError(f"{config}: invalid regex in 'secret_patterns' {p!r}: {exc}")
+                patterns = tuple(raw_patterns)
             project = Project(root=root, name=name, secret_patterns=patterns)
             for step in FRAME_STEPS:
                 if not os.access(project.frame(step), os.X_OK):
@@ -93,7 +104,12 @@ def _load_word(path: Path) -> Word:
     parts = text.split("---", 2)
     if not text.startswith("---") or len(parts) < 3:
         raise VerilexError(f"{path}/word.md: missing YAML frontmatter")
-    meta = yaml.safe_load(parts[1]) or {}
+    try:
+        meta = yaml.safe_load(parts[1]) or {}
+    except yaml.YAMLError as exc:
+        raise VerilexError(f"{path}/word.md: malformed YAML frontmatter: {exc}")
+    if not isinstance(meta, dict):
+        raise VerilexError(f"{path}/word.md: expected a mapping in YAML frontmatter")
     name = meta.get("word")
     if name != path.name:
         raise VerilexError(f"{path}/word.md: 'word' must equal the directory name {path.name!r}")
@@ -109,6 +125,13 @@ def _load_word(path: Path) -> Word:
         unknown = set(_PLACEHOLDER.findall(state)) - set(args)
         if unknown:
             raise VerilexError(f"{path}/word.md: state {state!r} uses undeclared args {sorted(unknown)}")
+    raw_timeout = meta.get("timeout", 1800)
+    try:
+        timeout = int(raw_timeout)
+        if timeout <= 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        raise VerilexError(f"{path}/word.md: 'timeout' must be a positive integer")
     return Word(
         name=name,
         path=path,
@@ -117,14 +140,17 @@ def _load_word(path: Path) -> Word:
         requires=_strings(meta, "requires", path),
         provides=_strings(meta, "provides", path),
         implements=implements,
-        timeout=int(meta.get("timeout", 1800)),
+        timeout=timeout,
     )
 
 
 def parse_chain(chain: str, words: dict[str, Word]) -> list[Step]:
     steps = []
     for segment in chain.split("|"):
-        tokens = shlex.split(segment)
+        try:
+            tokens = shlex.split(segment)
+        except ValueError as exc:
+            raise VerilexError(f"invalid word syntax in chain {chain!r}: {exc}")
         if not tokens:
             raise VerilexError(f"empty word in chain {chain!r}")
         name, *argv = tokens
@@ -160,14 +186,19 @@ def _bind(state: str, bound: dict[str, str]) -> str:
 
 
 def _strings(meta: dict, key: str, path: Path) -> tuple[str, ...]:
-    value = meta.get(key) or []
+    value = meta.get(key)
+    if value is None:
+        return ()
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         raise VerilexError(f"{path}/word.md: '{key}' must be a list of strings")
     return tuple(value)
 
 
 def _yaml(path: Path) -> dict:
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise VerilexError(f"{path}: malformed YAML: {exc}")
     if not isinstance(data, dict):
         raise VerilexError(f"{path}: expected a mapping")
     return data

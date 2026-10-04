@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""tally: a tiny made-up inventory CLI that stands in for a real product in verilex's tests.
+
+TALLY_DEFECT=drop-adds plants a defect: `add` reports success but stores nothing.
+TALLY_SIMULATE_LOCK=1 makes the store look locked by another process (exit 75).
+"""
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+LOCKED = 75
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="tally")
+    parser.add_argument("--version", action="version", version="tally 1.0")
+    parser.add_argument("--store", type=Path, required=True)
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("open")
+    add = sub.add_parser("add")
+    add.add_argument("name")
+    sub.add_parser("list")
+    args = parser.parse_args()
+    data = args.store / "store.json"
+
+    if os.environ.get("TALLY_SIMULATE_LOCK"):
+        print(f"tally: {args.store} is locked by another process", file=sys.stderr)
+        return LOCKED
+    if args.command == "open":
+        if data.exists():
+            print(f"tally: {args.store} is already open", file=sys.stderr)
+            return 1
+        data.write_text(json.dumps({"items": []}))
+        print(f"opened {args.store}")
+        return 0
+    if not data.exists():
+        print(f"tally: no store at {args.store}; run `tally open` first", file=sys.stderr)
+        return 1
+    items = json.loads(data.read_text())["items"]
+    if args.command == "add":
+        if os.environ.get("TALLY_DEFECT") != "drop-adds":
+            items.append(args.name)
+            data.write_text(json.dumps({"items": items}))
+        print(f"added {args.name}")
+        return 0
+    for name in items:
+        print(name)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

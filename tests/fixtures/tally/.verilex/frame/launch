@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+"""verify-tally Launch: create a disposable store owned by this run."""
+import json
+import os
+import tempfile
+from pathlib import Path
+
+run = os.environ["VERILEX_RUN"]
+adopted = os.environ.get("TALLY_ADOPT_STORE")  # simulates a launch misconfigured to reuse an existing store
+if adopted:
+    store = Path(adopted)
+else:
+    store = Path(os.environ.get("TALLY_STORES") or tempfile.gettempdir()) / f"tally-{run}"
+    store.mkdir(mode=0o700)
+    (store / "owner").write_text(run + "\n")
+print(json.dumps({"instance": {"store": str(store)}}))

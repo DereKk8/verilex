@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""verify-tally Doctor: the store belongs to this run and the CLI answers."""
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+run = os.environ["VERILEX_RUN"]
+store = Path(json.loads(os.environ["VERILEX_INSTANCE"])["store"])
+owner = store / "owner"
+if not owner.is_file() or owner.read_text().strip() != run:
+    sys.exit(f"doctor: {store} is not owned by run {run}; refusing to drive it")
+tally = Path(os.environ["VERILEX_PROJECT_ROOT"], "bin", "tally")
+version = subprocess.run([tally, "--store", store, "--version"], capture_output=True, text=True)
+print(version.stdout.strip())
+sys.exit(0 if version.stdout.strip() == "tally 1.0" else 1)

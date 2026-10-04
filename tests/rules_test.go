@@ -332,6 +332,19 @@ func TestUnclearFootprintIsNeverSkipped(t *testing.T) {
 		equal(t, record.Rerun, "store-glanced: declares no inputs")
 		ranLive(t, record)
 	})
+	t.Run("word declares an empty inputs list", func(t *testing.T) {
+		root := product(t)
+		addWord(t, root, "store-glanced", `echo '{"verdict": "pass", "observation": "fine"}'`+"\n")
+		path := filepath.Join(root, ".verilex", "words", "store-glanced", "word.md")
+		write(t, path, strings.Replace(read(t, path), "requires: [store]", "requires: [store]\ninputs: []", 1), 0644)
+		green(t, root, nil, "store-open | store-glanced")
+		record := green(t, root, nil, "store-open | store-glanced")
+		equal(t, record.Rerun, "store-glanced: declares no inputs")
+		ranLive(t, record)
+		if record.Words[1].Stamp != "" {
+			t.Fatal("a word with an empty inputs list was stamped")
+		}
+	})
 	t.Run("declared input is missing", func(t *testing.T) {
 		root := product(t)
 		path := filepath.Join(root, ".verilex", "words", "store-open", "word.md")

@@ -100,9 +100,9 @@ $ verilex run 'store-open | item-stored apple | item-listed apple'
 green: 3 green, skipped: stamps match run 1767225600-a1b2c3; run 1767225900-d4e5f6
 ```
 
-Anything missing or unclear runs the chain live: a word without `inputs`, an input that is missing, an unreadable ledger, evidence that is gone, a stamp that changed while the run was going. Skipping is all or nothing, because each run starts from a fresh instance: a word that has to run needs the effects of every word before it, and every word after it depends on its new result. `--keep` and `--fresh` always run live. `--json` names the first reason a chain ran live in `rerun`.
+Anything missing or unclear runs the chain live: a word without `inputs` or with an empty `inputs` list, an input that is missing, an unreadable ledger, evidence that is gone, a stamp that changed while the run was going. Skipping is all or nothing, because each run starts from a fresh instance: a word that has to run needs the effects of every word before it, and every word after it depends on its new result. `--keep` and `--fresh` always run live. `--json` names the first reason a chain ran live in `rerun`.
 
-A stamp covers only what it lists. A word that reads anything else (another file, a service, a tool's version) must declare it in `inputs` or `env`, or leave `inputs` out so it is never skipped.
+A stamp covers only what it lists. A word that reads anything else (another file, a service, a tool's version) must declare it in `inputs` or `env`, or leave `inputs` out (or empty) so it is never skipped.
 
 ## Adding verilex to a project
 
@@ -127,7 +127,7 @@ promise: A named item is in the store.
 args: [name]
 requires: [store]
 provides: ["item:{name}"]
-inputs: [bin/tally]      # product paths the result depends on; omit to never skip
+inputs: [bin/tally]      # product paths the result depends on; omit or leave empty to never skip
 env: [TALLY_DEFECT]      # environment variables the result depends on, optional
 implements:
   - verify-tally/features/items.md#item-add

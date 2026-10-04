@@ -30,7 +30,7 @@ type Word struct {
 	Args, Requires, Provides, Implements []string
 	Timeout                              int
 	// Inputs are the product paths the word reads, relative to the project root. A word whose
-	// contract omits 'inputs' has an unknown footprint, so its results are never reused.
+	// contract omits 'inputs', or lists none, has an unknown footprint, so its results are never reused.
 	Inputs         []string
 	InputsDeclared bool
 	// Env names the environment variables whose values the word's result depends on.
@@ -147,7 +147,8 @@ func loadWord(path string) (Word, error) {
 			return Word{}, fmt.Errorf("%s: '%s' must be a list of strings", file, field.key)
 		}
 	}
-	w.InputsDeclared = meta["inputs"] != nil
+	// An empty list covers no product paths, so it proves nothing and counts as undeclared.
+	w.InputsDeclared = len(w.Inputs) > 0
 	for _, input := range w.Inputs {
 		if strings.TrimSpace(input) == "" {
 			return Word{}, fmt.Errorf("%s: 'inputs' entries must be paths", file)

@@ -143,7 +143,7 @@ func loadWord(path string) (Word, error) {
 	if len(w.Implements) == 0 {
 		return Word{}, fmt.Errorf("%s: 'implements' must point at the verify skill's feature map", file)
 	}
-	if !truthy(meta["promise"]) || strings.TrimSpace(fmt.Sprint(meta["promise"])) == "" {
+	if !Truthy(meta["promise"]) || strings.TrimSpace(fmt.Sprint(meta["promise"])) == "" {
 		return Word{}, fmt.Errorf("%s: 'promise' is required", file)
 	}
 	w.Promise = strings.Join(strings.Fields(fmt.Sprint(meta["promise"])), " ")
@@ -291,7 +291,7 @@ func mapping(data []byte) (map[string]any, error) {
 	if err := document.Decode(&value); err != nil {
 		return nil, err
 	}
-	if !truthy(value) {
+	if !Truthy(value) {
 		return map[string]any{}, nil
 	}
 	m, ok := value.(map[string]any)
@@ -342,7 +342,7 @@ func legacyYAML(node *yaml.Node) {
 	}
 }
 
-func truthy(v any) bool {
+func Truthy(v any) bool {
 	switch x := v.(type) {
 	case nil:
 		return false
@@ -352,11 +352,23 @@ func truthy(v any) bool {
 		return x != ""
 	case int:
 		return x != 0
+	case int64:
+		return x != 0
+	case uint:
+		return x != 0
+	case uint64:
+		return x != 0
 	case float64:
+		return x != 0
+	case float32:
 		return x != 0
 	case []any:
 		return len(x) > 0
+	case []string:
+		return len(x) > 0
 	case map[string]any:
+		return len(x) > 0
+	case map[any]any:
 		return len(x) > 0
 	}
 	return true

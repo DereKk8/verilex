@@ -108,6 +108,3 @@ go build -o verilex ./cmd/verilex
 
 The Go behavior tests drive the compiled CLI against tally. The sample product and its words
 use Python 3, so tests require `python3` and a POSIX shell. The verilex core does not require Python.
-
-For direct CLI verification and evidence capture, follow
-[verify-verilex](.cursor/skills/verify-verilex/SKILL.md).

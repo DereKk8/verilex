@@ -101,29 +101,11 @@ func judge(code *int, evidence string, timeout int) (string, any, result, error)
 	if ExitCode(r.Verdict) != *code {
 		return "unverified", fmt.Sprintf("exit %d disagrees with verdict %s", *code, r.Verdict), r, nil
 	}
-	if r.Verdict == "pass" && (!Truthy(r.Observation) || strings.TrimSpace(fmt.Sprint(r.Observation)) == "") {
+	if r.Verdict == "pass" && (!dictionary.Truthy(r.Observation) || strings.TrimSpace(fmt.Sprint(r.Observation)) == "") {
 		return "unverified", "pass without a second observation", r, nil
 	}
 	if r.Verdict == "fail" && !r.PreconditionsHeld {
 		return "unverified", "fail without stating that its preconditions held", r, nil
 	}
 	return r.Verdict, r.Detail, r, nil
-}
-
-func Truthy(value any) bool {
-	switch v := value.(type) {
-	case nil:
-		return false
-	case string:
-		return v != ""
-	case bool:
-		return v
-	case float64:
-		return v != 0
-	case []any:
-		return len(v) > 0
-	case map[string]any:
-		return len(v) > 0
-	}
-	return true
 }

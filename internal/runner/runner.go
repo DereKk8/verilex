@@ -117,7 +117,7 @@ func (r *Run) drive() error {
 		}
 		if entry.Verdict != "pass" {
 			reason := step.Label()
-			if Truthy(entry.Reason) {
+			if dictionary.Truthy(entry.Reason) {
 				reason += ": " + fmt.Sprint(entry.Reason)
 			}
 			r.stop(entry.Verdict, reason)

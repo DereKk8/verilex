@@ -269,10 +269,10 @@ func report(record runner.Record, out io.Writer) {
 			seconds += ".0"
 		}
 		fmt.Fprintf(out, "  [%s] %s  (%ss)\n", word.Verdict, label, seconds)
-		if runner.Truthy(word.Observation) {
+		if dictionary.Truthy(word.Observation) {
 			fmt.Fprintf(out, "      observation: %v\n", word.Observation)
 		}
-		if runner.Truthy(word.Reason) {
+		if dictionary.Truthy(word.Reason) {
 			fmt.Fprintf(out, "      reason: %v\n", word.Reason)
 		}
 		if word.Verdict != "pass" {

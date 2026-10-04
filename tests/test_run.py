@@ -168,10 +168,10 @@ def test_kept_instance_is_listed_until_cleaned_up(product):
 def test_doctor_refusal_after_word_failure_blocks_the_run(product):
     script = (
         'python3 -c "import json, os, pathlib; '
-        'p = pathlib.Path(json.loads(os.environ[\'VERILEX_INSTANCE\'])[\'store\']) / \'owner\'; '
+        "p = pathlib.Path(json.loads(os.environ['VERILEX_INSTANCE'])['store']) / 'owner'; "
         'p.unlink()"\n'
         'echo \'{"verdict": "fail", "preconditions_held": true, "detail": "failed and corrupted"}\'\n'
-        'exit 1\n'
+        "exit 1\n"
     )
     add_word(product, "store-corrupted", script)
     done = verilex(product, "run", "store-open | store-corrupted")
@@ -187,8 +187,8 @@ def test_cleanup_evidence_secret_leak_marks_run_unverified(product):
     cleanup_script = product / ".verilex" / "frame" / "cleanup"
     with open(cleanup_script, "a", encoding="utf-8") as f:
         f.write(
-            '\nfrom pathlib import Path\n'
-            'import os\n'
+            "\nfrom pathlib import Path\n"
+            "import os\n"
             '(Path(os.environ["VERILEX_EVIDENCE"]) / "key.pem").write_text("-----BEGIN PRIVATE KEY-----\\n")\n'
         )
 

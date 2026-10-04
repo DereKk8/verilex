@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from tally_word import result, stored_items, tally
+
+opened = tally("open")
+if opened.returncode != 0:
+    result("fail", preconditions_held=True, detail=f"tally open exited {opened.returncode}")
+items = stored_items()
+if items != []:
+    result("fail", preconditions_held=True, detail=f"a new store holds {items}")
+result("pass", observation="store.json holds no items")

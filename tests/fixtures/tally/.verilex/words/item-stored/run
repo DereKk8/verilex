@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from tally_word import result, stored_items, tally
+
+name = sys.argv[1]
+added = tally("add", name)
+if added.returncode != 0:
+    result("fail", preconditions_held=True, detail=f"tally add exited {added.returncode}")
+if name not in stored_items():
+    result("fail", preconditions_held=True, detail=f"tally said '{added.stdout.strip()}' but store.json lacks {name}")
+result("pass", observation=f"store.json lists {name}")

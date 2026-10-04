@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""verify-tally Cleanup: remove the store only when this run owns it."""
+import json
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+run = os.environ["VERILEX_RUN"]
+instance = json.loads(os.environ["VERILEX_INSTANCE"])
+if instance:
+    store = Path(instance["store"])
+else:
+    store = Path(os.environ.get("TALLY_STORES") or tempfile.gettempdir()) / f"tally-{run}"
+owner = store / "owner"
+if owner.is_file() and owner.read_text().strip() == run:
+    shutil.rmtree(store)
+    print(f"removed {store}")
+elif store.exists():
+    print(f"left {store} alone: not owned by run {run}")

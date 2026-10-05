@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
+	"github.com/DereKk8/verilex/internal/ledger"
 	"github.com/DereKk8/verilex/internal/verdict"
 )
 
@@ -35,14 +36,23 @@ type WordRecord struct {
 }
 
 type Record struct {
-	Run          string           `json:"run"`
-	Project      string           `json:"project"`
-	Root         string           `json:"root"`
-	Chain        string           `json:"chain"`
-	Steps        int              `json:"steps"`
-	Dir          string           `json:"dir"`
-	Started      string           `json:"started"`
-	Instance     any              `json:"instance"`
+	Run      string `json:"run"`
+	Project  string `json:"project"`
+	Root     string `json:"root"`
+	Chain    string `json:"chain"`
+	Steps    int    `json:"steps"`
+	Dir      string `json:"dir"`
+	Started  string `json:"started"`
+	Instance any    `json:"instance"`
+	// Owner is the run that launched the instance, when this run continues another's.
+	Owner string `json:"owner,omitempty"`
+	// Continues names the kept run whose instance this run drives; ContinuedBy, on that kept
+	// run, names the run that took the instance over.
+	Continues   string `json:"continues,omitempty"`
+	ContinuedBy string `json:"continued_by,omitempty"`
+	// History lists, in order, every word that has driven a kept instance, across the runs that
+	// continued it; `verilex run --continue` decides from it what the instance already proves.
+	History      []ledger.Entry   `json:"history,omitempty"`
 	Frame        []Frame          `json:"frame"`
 	Words        []WordRecord     `json:"words"`
 	Verdict      *verdict.Verdict `json:"verdict"`

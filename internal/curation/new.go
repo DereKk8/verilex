@@ -21,7 +21,7 @@ var ScaffoldSteps = []string{"launch", "doctor", "refresh", "cleanup"}
 var stubPurpose = map[string]string{
 	"launch":  `start an instance owned by this run (label it with $VERILEX_RUN) and print {"instance": ...} on stdout`,
 	"doctor":  "exit 0 only when the instance is this run's and healthy enough to drive",
-	"refresh": "bring this run's instance back to the state launch left it in",
+	"refresh": "bring a kept instance up to the current checkout, keeping every state it holds",
 	"cleanup": "tear down only what this run launched",
 }
 

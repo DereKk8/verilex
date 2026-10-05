@@ -46,6 +46,9 @@ type Word struct {
 	InputsDeclared bool
 	// Env names the environment variables whose values the word's result depends on.
 	Env []string
+	// ReadOnly declares that the word only observes the instance and never changes it, so it
+	// may run on a kept instance whatever ran there before. A read-only word provides no states.
+	ReadOnly bool
 }
 
 func (w Word) Run() string { return filepath.Join(w.Path, "run") }
@@ -174,6 +177,14 @@ func loadWord(path string) (Word, error) {
 	for _, name := range w.Env {
 		if !envName.MatchString(name) {
 			return Word{}, fmt.Errorf("%s: 'env' entry %s is not a variable name", file, quote(name))
+		}
+	}
+	if raw, ok := meta["read_only"]; ok {
+		if w.ReadOnly, ok = raw.(bool); !ok {
+			return Word{}, fmt.Errorf("%s: 'read_only' must be true or false", file)
+		}
+		if w.ReadOnly && len(w.Provides) > 0 {
+			return Word{}, fmt.Errorf("%s: a 'read_only' word changes nothing, so it provides no states", file)
 		}
 	}
 	if len(w.Implements) == 0 {

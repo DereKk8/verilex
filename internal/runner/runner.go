@@ -27,6 +27,8 @@ type Run struct {
 	steps    []dictionary.Step
 	patterns []*regexp2.Regexp
 	record   Record
+	// keep is set when the instance outlives the run, which is when its history is recorded.
+	keep bool
 }
 
 func New(project dictionary.Project, chain string, steps []dictionary.Step) (*Run, error) {
@@ -52,42 +54,29 @@ func New(project dictionary.Project, chain string, steps []dictionary.Step) (*Ru
 	return r, nil
 }
 
-// Options shape one run.
-type Options struct {
-	// Keep leaves the instance running; it always needs a live run.
-	Keep bool
-	// Fresh runs the chain live even when every stamp matches.
-	Fresh bool
-}
-
-// Execute skips the chain when the ledger proves every step green under identical stamps;
-// otherwise it runs the chain live inside the trust frame and records its green steps.
-func (r *Run) Execute(opts Options) (Record, error) {
-	stamps := stamp.Chain(r.project, r.steps)
-	book := ledger.At(RunsDir(r.project))
-	switch {
-	case opts.Keep:
-		r.record.Rerun = "--keep needs a live instance"
-	case opts.Fresh:
-		r.record.Rerun = "--fresh asked for a live run"
-	default:
-		labels := make([]string, len(r.steps))
-		for i, step := range r.steps {
-			labels[i] = step.Label()
-		}
-		entries, why := book.Reuse(labels, stamps)
-		if why == "" {
-			return r.reuse(entries, stamps)
-		}
-		r.record.Rerun = why
+// Execute carries out a plan made by Decide for this chain. A fully skipped plan on a fresh
+// instance launches nothing; otherwise the chain runs inside the trust frame, on a fresh instance
+// or on the kept one the plan continues, and the steps the plan skips reuse their proof.
+func (r *Run) Execute(p Plan, opts Options) (Record, error) {
+	r.record.Rerun, r.keep = p.Rerun, opts.Keep
+	if p.kept == nil && p.Skipped() {
+		return r.reuse(p.entries, p.stamps)
 	}
-	err := r.drive(stamps)
+	var err error
+	if p.kept != nil {
+		err = r.handOver(p.kept)
+	}
+	base := len(r.record.History)
+	if err == nil {
+		err = r.drive(p)
+	}
+	r.settle(p.stamps, base)
 	if err != nil {
 		r.stop(verdict.Inconclusive, err.Error())
 	}
 	if opts.Keep {
 		r.record.Cleanup = "kept"
-	} else {
+	} else if r.record.Instance != nil || p.kept == nil {
 		if cleanErr := Cleanup(r.project, &r.record, r.record.Dir); cleanErr != nil {
 			r.record.Verdict = ptr(verdict.Inconclusive)
 			r.record.Reason = ptr(cleanErr.Error())
@@ -98,18 +87,40 @@ func (r *Run) Execute(opts Options) (Record, error) {
 		return r.record, saveErr
 	}
 	// A ledger that misses a result only costs a later re-run, so a failed write never changes the verdict.
-	_ = book.Record(r.proven(stamps))
+	_ = ledger.At(RunsDir(r.project)).Record(r.proven(p.stamps))
 	return r.record, err
+}
+
+// handOver makes this run the owner of a kept instance: from now on only this run may drive or
+// tear it down. The lock and the second read stop two runs from taking over the same instance.
+func (r *Run) handOver(kept *Record) error {
+	unlock, err := lock(filepath.Join(kept.Dir, "run.lock"))
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	current, err := ReadRecord(filepath.Join(kept.Dir, "run.json"))
+	if err != nil {
+		return err
+	}
+	if current.Cleanup != "kept" {
+		return fmt.Errorf("%s no longer keeps its instance (cleanup=%s)", kept.Run, current.Cleanup)
+	}
+	r.record.Instance, r.record.Owner, r.record.Continues = current.Instance, current.owner(), current.Run
+	if r.keep {
+		r.record.History = append([]ledger.Entry{}, current.History...)
+	}
+	if err = r.save(); err != nil {
+		return err
+	}
+	current.Cleanup, current.ContinuedBy = "continued", r.record.Run
+	return Save(current.Dir, &current)
 }
 
 // reuse records a run that relies on earlier green results instead of launching anything.
 func (r *Run) reuse(entries []ledger.Entry, stamps []stamp.Stamp) (Record, error) {
-	for i, step := range r.steps {
-		r.record.Words = append(r.record.Words, WordRecord{
-			Word: step.Word.Name, Args: step.Argv, Provides: step.Provides, Implements: step.Word.Implements,
-			Verdict: verdict.Green, Observation: entries[i].Observation, Evidence: entries[i].Evidence,
-			Stamp: stamps[i].Digest, ReliesOn: entries[i].Run,
-		})
+	for i := range r.steps {
+		r.record.Words = append(r.record.Words, r.reused(i, entries[i], stamps[i]))
 	}
 	r.record.Skipped = true
 	r.record.Verdict = ptr(verdict.Green)
@@ -119,27 +130,62 @@ func (r *Run) reuse(entries []ledger.Entry, stamps []stamp.Stamp) (Record, error
 	return r.record, r.save()
 }
 
+func (r *Run) reused(i int, entry ledger.Entry, s stamp.Stamp) WordRecord {
+	step := r.steps[i]
+	return WordRecord{
+		Word: step.Word.Name, Args: step.Argv, Provides: step.Provides, Implements: step.Word.Implements,
+		Verdict: verdict.Green, Observation: entry.Observation, Evidence: entry.Evidence,
+		Stamp: s.Digest, ReliesOn: entry.Run,
+	}
+}
+
 // proven returns the ledger entries for this run's green steps. A run that ended inconclusive
-// proves nothing, and a step whose stamp changed while the run was going is not recorded.
+// proves nothing, and a step whose stamp changed while the run was going is not recorded. A run
+// on a continued instance proves nothing for a fresh one: that instance's history is not what
+// the stamps claim, so its results stand only in the instance's own history.
 func (r *Run) proven(before []stamp.Stamp) map[string]ledger.Entry {
 	entries := map[string]ledger.Entry{}
-	if r.record.Verdict == nil || *r.record.Verdict == verdict.Inconclusive {
+	if r.record.Verdict == nil || *r.record.Verdict == verdict.Inconclusive || r.record.Continues != "" {
 		return entries
 	}
 	after := stamp.Chain(r.project, r.steps)
 	for i, word := range r.record.Words {
-		if word.Verdict != verdict.Green || before[i].Digest == "" || before[i].Digest != after[i].Digest {
+		if word.Verdict != verdict.Green || word.ReliesOn != "" || before[i].Digest == "" || before[i].Digest != after[i].Digest {
 			continue
 		}
-		entries[before[i].Slot] = ledger.Entry{
-			Label: r.steps[i].Label(), Verdict: verdict.Green, Stamp: before[i].Digest, Components: before[i].Components,
-			Run: r.record.Run, Evidence: word.Evidence, Observation: word.Observation, Recorded: now(),
-		}
+		entries[before[i].Slot] = r.entry(i, word, before[i])
 	}
 	return entries
 }
 
-func (r *Run) drive(stamps []stamp.Stamp) error {
+// settle drops the proof of every history entry this run added whose stamp changed while the
+// run was going, for example because refresh rewrote an input: the instance holds its effects,
+// but nothing may rely on them, so a later --continue that needs the word again refuses.
+func (r *Run) settle(before []stamp.Stamp, base int) {
+	if len(r.record.History) == base {
+		return
+	}
+	after := stamp.Chain(r.project, r.steps)
+	for k := base; k < len(r.record.History); k++ {
+		for i, s := range before {
+			if s.Slot == r.record.History[k].Slot && s.Digest != after[i].Digest {
+				r.record.History[k].Stamp = ""
+			}
+		}
+	}
+}
+
+func (r *Run) entry(i int, word WordRecord, s stamp.Stamp) ledger.Entry {
+	return ledger.Entry{
+		Label: r.steps[i].Label(), Verdict: word.Verdict, Stamp: s.Digest, Components: s.Components,
+		Run: r.record.Run, Evidence: word.Evidence, Observation: word.Observation, Recorded: now(),
+	}
+}
+
+func (r *Run) drive(p Plan) error {
+	if p.kept != nil {
+		return r.resume(p)
+	}
 	frame, err := r.frame("launch", "launch")
 	if err != nil {
 		return err
@@ -163,15 +209,46 @@ func (r *Run) drive(stamps []stamp.Stamp) error {
 		return nil
 	}
 	r.record.Instance = instance
+	if r.keep {
+		r.record.History = []ledger.Entry{}
+	}
 	if err = r.save(); err != nil {
 		return err
 	}
+	return r.words(p)
+}
+
+// resume refreshes a kept instance up to the current checkout, keeping its states, before the
+// doctor vouches for it again.
+func (r *Run) resume(p Plan) error {
+	frame, err := r.frame("refresh", "refresh")
+	if err != nil {
+		return err
+	}
+	if frame.Exit == nil || *frame.Exit != 0 {
+		r.stop(verdict.Inconclusive, "refresh exited "+exitText(frame.Exit))
+		return nil
+	}
+	return r.words(p)
+}
+
+// words runs the chain on the instance, after the doctor vouches for it. The plan's skipped
+// steps come first: they reuse proof the instance or the ledger already holds.
+func (r *Run) words(p Plan) error {
+	stamps := p.stamps
 	healthy, err := r.doctor("doctor")
 	if err != nil || !healthy {
 		return err
 	}
 	available := map[string]bool{}
 	for index, step := range r.steps {
+		if index < len(p.entries) {
+			r.record.Words = append(r.record.Words, r.reused(index, p.entries[index], stamps[index]))
+			for _, state := range step.Provides {
+				available[state] = true
+			}
+			continue
+		}
 		states := make([]string, 0, len(available))
 		for s := range available {
 			states = append(states, s)
@@ -183,6 +260,11 @@ func (r *Run) drive(stamps []stamp.Stamp) error {
 		}
 		entry.Stamp = stamps[index].Digest
 		r.record.Words = append(r.record.Words, entry)
+		if r.record.History != nil {
+			applied := r.entry(index, entry, stamps[index])
+			applied.Slot, applied.ReadOnly = stamps[index].Slot, step.Word.ReadOnly
+			r.record.History = append(r.record.History, applied)
+		}
 		if err = r.save(); err != nil {
 			return err
 		}
@@ -215,7 +297,7 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 		States   []string          `json:"states"`
 		Args     map[string]string `json:"args"`
 		Evidence string            `json:"evidence"`
-	}{r.record.Run, r.record.Instance, states, args, evidence}
+	}{r.record.owner(), r.record.Instance, states, args, evidence}
 	stdin, err := json.Marshal(state)
 	if err != nil {
 		return WordRecord{}, err
@@ -306,7 +388,7 @@ func Cleanup(project dictionary.Project, record *Record, dir string) error {
 		record.Cleanup = "done"
 	}
 	kept := true
-	for _, word := range record.Words {
+	for _, word := range live(record.Words) {
 		info, err := os.Stat(filepath.Join(word.Evidence, "stdout"))
 		if err != nil || info.IsDir() {
 			kept = false
@@ -331,7 +413,7 @@ func Cleanup(project dictionary.Project, record *Record, dir string) error {
 
 func environment(project dictionary.Project, record *Record, evidence string) []string {
 	instance, _ := json.Marshal(record.Instance)
-	values := map[string]string{"VERILEX_RUN": record.Run, "VERILEX_PROJECT_ROOT": project.Root, "VERILEX_INSTANCE": string(instance), "VERILEX_EVIDENCE": evidence}
+	values := map[string]string{"VERILEX_RUN": record.owner(), "VERILEX_PROJECT_ROOT": project.Root, "VERILEX_INSTANCE": string(instance), "VERILEX_EVIDENCE": evidence}
 	env := []string{}
 	for _, v := range os.Environ() {
 		key, _, _ := strings.Cut(v, "=")
@@ -343,6 +425,14 @@ func environment(project dictionary.Project, record *Record, evidence string) []
 		env = append(env, key+"="+values[key])
 	}
 	return env
+}
+
+// owner is the run that launched a record's instance; frame steps and words see it as VERILEX_RUN.
+func (r Record) owner() string {
+	if r.Owner != "" {
+		return r.Owner
+	}
+	return r.Run
 }
 
 func exitText(code *int) string {

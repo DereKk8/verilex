@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""verify-tally Refresh: bring a kept store up to the current checkout without losing its items.
+
+tally reads its code from the checkout on every call, so there is nothing to restart; refresh
+only confirms the kept store is still this run's and still readable.
+"""
+import json
+import os
+import sys
+from pathlib import Path
+
+run = os.environ["VERILEX_RUN"]
+store = Path(json.loads(os.environ["VERILEX_INSTANCE"])["store"])
+owner = store / "owner"
+if not owner.is_file() or owner.read_text().strip() != run:
+    sys.exit(f"refresh: {store} is not owned by run {run}; refusing to touch it")
+data = store / "store.json"
+items = json.loads(data.read_text())["items"] if data.exists() else []
+print(f"kept {store} with {len(items)} item(s)")

@@ -21,6 +21,10 @@ mkdir -m 700 "$STORE" && echo "$RUN_ID" > "$STORE/owner"
 
 Confirm `cat "$STORE/owner"` prints `$RUN_ID` and `bin/tally --version --store "$STORE"` prints `tally 1.0`. Never drive a store this run did not create.
 
+## Refresh
+
+To keep driving a store from an earlier session, confirm its `owner` file still names that session's run and `store.json` still reads. tally loads its code from the checkout on every call, so nothing restarts.
+
 ## Drive
 
 Run `bin/tally --store "$STORE" <command>` as a user does. Follow the feature files for each command.

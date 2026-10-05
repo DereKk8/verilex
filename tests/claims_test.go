@@ -319,6 +319,61 @@ func TestProseChangeInSubFeatureFlagsClaimForReview(t *testing.T) {
 	contains(t, plan(t, root, chain).stdout, "plan: skip 3, run 0\n")
 }
 
+// Rule: a dated sentence in the sub-feature is read like any other, so a rule written with a
+// date asks for review. Only the explicit run-history form (`Verified 2026-09-12: ...` or
+// `2026-09-12: ...`) is left out. Any edit inside a fenced block of the sub-feature asks for
+// review too, while an edit to an inline command does not.
+func TestDatedRulesAndFencedBlocksFlagClaimForReview(t *testing.T) {
+	root := curated(t)
+	green(t, root, nil, chain)
+	items := feature(root, "items.md")
+	original := read(t, items)
+	flagged := func(reason string) {
+		t.Helper()
+		equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: claim item-added needs review: "+itemAdd+": "+reason+"\n")
+		equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; "+headline("item-stored apple: drift-suspect: claim item-added needs review: "+itemAdd+": "+reason)+"\n")
+	}
+	prose := func() string {
+		t.Helper()
+		out := verilex(t, root, nil, "claims").stdout
+		i := strings.Index(out, "then pin prose ")
+		if i < 0 {
+			t.Fatalf("no prose review: %s", out)
+		}
+		return out[i+len("then pin prose ") : i+len("then pin prose ")+12]
+	}
+	addStep := func(text string) {
+		t.Helper()
+		write(t, items, strings.Replace(read(t, items), "`store.json` lists NAME.\n", "`store.json` lists NAME."+text+"\n", 1), 0644)
+	}
+
+	addStep(" Since 2026-10-01 a NAME added twice must exit 2.")
+	flagged("requirement no claim maps: Since 2026-10-01 a NAME added twice must exit 2.")
+	write(t, items, original, 0644)
+	addStep(" On 2026-10-01 the store file moved to format 2.")
+	flagged("prose changed: check that the claim still holds, then pin prose " + prose())
+	write(t, items, original, 0644)
+	addStep(" Verified 2026-10-01: it exits 0. 2026-10-02: run 7 was green.")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
+	contains(t, plan(t, root, chain).stdout, "plan: skip 3, run 0\n")
+
+	// A fenced block added under the step, then an edit inside it, each ask for review.
+	write(t, items, original, 0644)
+	addStep("\n\n  ```sh\n  bin/tally --store \"$STORE\" add NAME\n  ```")
+	withFence := prose()
+	flagged("prose changed: check that the claim still holds, then pin prose " + withFence)
+	edit(t, claimFile(root, "item-added"), "prose: 2948a95bd310", "prose: "+withFence)
+	admitted(t, root, "item-stored")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
+	ranLive(t, green(t, root, nil, chain))
+	edit(t, items, "  bin/tally --store \"$STORE\" add NAME\n", "  bin/tally --store \"$STORE\" --quiet add NAME\n")
+	edited := prose()
+	if edited == withFence {
+		t.Fatal("the fence edit kept the prose")
+	}
+	flagged("prose changed: check that the claim still holds, then pin prose " + edited)
+}
+
 // Rule: another claim's mapping covers a requirement sentence only when a curator admitted one
 // of its words for the claim as it is now. A claim without a word, a stub or never-run word, a
 // word with judged live uses but no admission, or a word pinned to an older version covers

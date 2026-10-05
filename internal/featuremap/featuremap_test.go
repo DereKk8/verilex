@@ -147,6 +147,7 @@ func TestPinFlagsProseChangesButNotCommands(t *testing.T) {
 		"run sentence": {"Run `tally add NAME`.", "Run `tally add NAME`, which must exit 2 when NAME is stored."},
 		"definition":   {"stores a named item", "keeps a named item"},
 		"new sentence": {"lists NAME.\n", "lists NAME. Never add a NAME twice.\n"},
+		"dated prose":  {"lists NAME.\n", "lists NAME. On 2026-10-01 the store moved to format 2.\n"},
 	} {
 		a := pin(strings.Replace(runbook, edit[0], edit[1], 1), []string{added})
 		if a.Prose == base.Prose {
@@ -157,6 +158,7 @@ func TestPinFlagsProseChangesButNotCommands(t *testing.T) {
 	for name, edit := range map[string][2]string{
 		"command":     {"Run `tally add NAME`.", "Run `tally --store \"$STORE\" add NAME`."},
 		"run history": {"lists NAME.\n", "lists NAME. Verified 2026-09-12: it exits 0.\n"},
+		"bare date":   {"lists NAME.\n", "lists NAME. 2026-09-12: run 3 was green.\n"},
 		"layout":      {"Run `tally add NAME`. Expect", "Run   `tally add NAME`.\n  Expect"},
 		"emphasis":    {"stores a named item", "stores a **named** item"},
 	} {
@@ -164,6 +166,32 @@ func TestPinFlagsProseChangesButNotCommands(t *testing.T) {
 			t.Fatalf("%s: %#v", name, a)
 		}
 	}
+	// A dated rule is a rule: only the explicit run-history form is left out.
+	dated := "Since 2026-10-01 a NAME added twice must exit 2."
+	reviews(t, pin(strings.Replace(runbook, "lists NAME.\n", "lists NAME. "+dated+"\n", 1), []string{added}), "requirement no claim maps: "+dated)
+	reviews(t, pin(strings.Replace(runbook, "lists NAME.\n", "lists NAME. "+dated+"\n", 1), []string{added, dated}))
+
+	// Any edit inside a fenced block of the sub-feature asks for review; trailing spaces do not.
+	fenced := strings.Replace(runbook, "`store.json` lists NAME.\n", "`store.json` lists NAME.\n\n  ```sh\n  tally add NAME\n  ```\n", 1)
+	pinFenced := pinner(t, fenced)
+	if a := pinFenced(fenced, []string{added}); len(a.Review) != 0 {
+		t.Fatalf("%#v", a)
+	}
+	for name, edit := range map[string][2]string{
+		"command": {"  tally add NAME\n", "  tally --quiet add NAME\n"},
+		"info":    {"```sh", "```bash"},
+		"added":   {"  tally add NAME\n", "  tally add NAME\n  tally list\n"},
+	} {
+		a := pinFenced(strings.Replace(fenced, edit[0], edit[1], 1), []string{added})
+		reviews(t, a, changed(a))
+		if name == "command" && a.Prose == base.Prose {
+			t.Fatal("fence edit kept the prose")
+		}
+	}
+	if a := pinFenced(strings.Replace(fenced, "  tally add NAME\n", "  tally add NAME  \n", 1), []string{added}); len(a.Review) != 0 {
+		t.Fatalf("trailing spaces asked for review: %#v", a)
+	}
+
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "skills", "verify-x"), 0755); err != nil {
 		t.Fatal(err)

@@ -68,8 +68,8 @@
       137,
       143
      ],
-     "summary": "Load reads claims and words together so coverage can depend on which claims words prove.",
-     "rationale": "Coverage is a property of the whole dictionary, so it has one owner: `verilex claims`, check, plan and propose all see the same Covered.",
+     "summary": "Load reads claims and words together and binds each word; claim coverage is left to lifecycle.Load.",
+     "rationale": "Coverage depends on admissions, which lifecycle owns, so dictionary returns claims without Covered and every production caller loads through lifecycle.",
      "author": "fm/verilex-claim-model"
     },
     {

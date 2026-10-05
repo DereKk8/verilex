@@ -1,0 +1,59 @@
+# Claims
+
+A claim (`.verilex/claims/<claim>.yaml`) is what is true once a word passes, plus the evidence that proves it. `verilex claims` lists each claim as `<claim>@<version>`, where the version comes from a fingerprint of the claim's sentence, args, entry points, preconditions, pinned `requires` and `provides`, and evidence contract. Each word pins one claim version and entry point. A pass is evidence only for the version it ran against, and a chain that holds a word pinned to an older version is refused before launch. A claim's sources anchor it on a sub-feature id and the requirement sentences it maps to. When one of those changes, the claim needs review and no admitted word that proves it skips. The claim's pinned states bind every word that proves it, so a chain that breaks them is refused before launch.
+
+## Sub-features
+
+- `claims-list` lists every claim with its version, sentence, entry points and the words that prove it; `--json` adds the fingerprint, evidence contract and source anchors.
+- `claims-stable` keeps the version when only layout changes (line wraps, spacing, key order).
+- `claims-version` makes a new version when the sentence or the evidence contract changes, and lists the words still pinned to the old one as stale.
+- `claims-stale-refused` refuses a chain that holds a stale word before anything starts, in `run` and `plan`.
+- `claims-not-reused` runs a re-pinned word live (`claim changed`) instead of reusing the pass recorded for the old version, and counts no use of the old version toward `propose`.
+- `claims-review` flags a claim when a requirement sentence it maps to changes, makes its admitted words drift-suspect, and asks for nothing when only commands, prose or dated run history change.
+- `claims-reviewed` clears the review when the claim is mapped to the new sentence, keeping its version and the passes recorded for it.
+- `claims-subfeature-gone` flags a claim whose sub-feature id is gone from the feature file.
+- `claims-pinned-rule` refuses a chain in which a word runs before a state its claim requires, even when the word declares no states of its own.
+- `claims-variant` lets a second word prove the same claim and provide its states.
+- `claims-binding-refused` refuses a dictionary in which a word names an entry point its claim does not list.
+
+## How to get to it (user POV)
+
+- Run `verilex claims [--json]` in a product checkout.
+- Edit `.verilex/claims/<claim>.yaml`, a word's `claim:` pin, or the verify skill's feature map, then run `verilex claims`, `verilex check`, `verilex plan` or `verilex run`.
+
+## Driving it with vx
+
+Preconditions:
+
+- A fresh session that passes the doctor. Everything from **Baseline** on needs the admitted baseline (`admit-all`).
+- `F` is `$S/tally/.cursor/skills/verify-tally/features/items.md` and `K` is `$S/tally/.verilex/claims/item-added.yaml`. `<V1>` is the `item-added` version that **List** prints. Restore edited files by copying them from `"$PWD/tests/fixtures/tally/..."` with `command cp`.
+
+- **List.** Run `"$S/vx" cl-list verilex claims`. Exit `0`. It prints `item-added@<V1>  A named item is in the store.`, `item-listed@<version>  A stored item shows up when a user lists the store.` and `store-opened@<version>  A new, empty store is open and ready for items.`, each followed by `  entry: cli  words: <word>` naming `item-stored`, `item-listed` and `store-open`.
+- **List, second view.** Run `"$S/vx" cl-words verilex words`. Each word shows `claim:    <claim>@<version> via cli` with the same pins.
+- **JSON.** Run `"$S/vx" cl-json verilex claims --json`, then `"$S/vx" cl-json-read python3 -c 'import json,sys; c={x["claim"]: x for x in json.load(open(sys.argv[1]))}["item-added"]; print(c["fingerprint"].startswith(c["version"]), len(c["fingerprint"]), c["entry"], c["requires"], c["provides"], c["evidence"]["observation"], [(s["ref"], s["requirements"], len(s["hash"])) for s in c["sources"]], c["words"])' <evidence>/stdout` with the `cl-json` evidence directory. It prints ``True 64 ['cli'] ['store'] ['item:{name}'] store.json lists NAME. [('verify-tally/features/items.md#item-add', ['Expect exit 0 and `added NAME`; `store.json` lists NAME.'], 64)] ['item-stored'] ``.
+- **Stable.** Run `sed -i 's/^sentence: A named item is in the store\./sentence: >-\n  A named   item\n  is in the store./' "$K"`, then `"$S/vx" cl-stable verilex claims`. `item-added` still prints `@<V1>`. Run `"$S/vx" cl-stable-file cat "$K"` to see the folded sentence. Restore `$K`.
+- **Baseline.** Run `admit-all`, then `"$S/vx" cl-baseline verilex run 'store-open | item-stored apple | item-listed apple'` (live, run `<A>`), then `"$S/vx" cl-baseline-plan verilex plan 'store-open | item-stored apple | item-listed apple'`: `plan: skip 3, run 0`, relying on `<A>`.
+- **Noise asks for nothing.** Run `sed -i 's/add NAME`\./--quiet add NAME`./' "$F"` and `echo 'Verified 2026-09-12: `tally add` exits 0.' >> "$F"`. Run `"$S/vx" cl-noise verilex claims` (no `review:` line), `"$S/vx" cl-noise-check verilex check` (`check: no drift (3 admitted)`) and `"$S/vx" cl-noise-plan verilex plan 'store-open | item-stored apple | item-listed apple'` (`plan: skip 3, run 0`).
+- **Review.** Run ``sed -i 's/`store.json` lists NAME\./`store.json` must list NAME./' "$F"``, then `"$S/vx" cl-review verilex claims`. The `item-added@<V1>` block keeps `<V1>` and gains ``  review: verify-tally/features/items.md#item-add: requirement changed or gone: Expect exit 0 and `added NAME`; `store.json` lists NAME. ``
+- **Review, second view.** Run `"$S/vx" cl-review-check verilex check`: `check: 1 of 3 admitted drift-suspect; they always run` and `  item-stored: claim item-added needs review: <same reason>`. Run `"$S/vx" cl-review-plan verilex plan 'store-open | item-stored apple | item-listed apple'`: `plan: skip 0, run 3; item-stored apple: drift-suspect: claim item-added needs review: <same reason>`.
+- **Reviewed.** Map the claim to the new sentence with ``sed -i 's/`store.json` lists NAME\./`store.json` must list NAME./' "$K"``. Run `"$S/vx" cl-reviewed verilex claims` (no `review:` line, still `@<V1>`) and `"$S/vx" cl-reviewed-plan verilex plan 'store-open | item-stored apple | item-listed apple'` (`plan: skip 3, run 0`, still relying on `<A>`).
+- **Sub-feature gone.** Run ``sed -i 's/`item-add`/`item-put`/' "$F"``, then `"$S/vx" cl-gone verilex claims`. It prints `  review: verify-tally/features/items.md#item-add: sub-feature item-add is gone`. Restore `$F` and `$K`, then `"$S/vx" cl-restored-1 verilex check` prints `check: no drift (3 admitted)`.
+- **Pinned rule.** Create a variant: `mkdir "$S/tally/.verilex/words/item-put"`, `command cp "$S/tally/.verilex/words/item-stored/run" "$S/tally/.verilex/words/item-put/"`, and `printf -- '---\nword: item-put\npromise: A user puts a named item in the store.\nargs: [name]\nclaim: item-added@<V1>\nentry: cli\ninputs: [bin/tally]\n---\n' > "$S/tally/.verilex/words/item-put/word.md"`. Run `"$S/vx" cl-pinned verilex run 'item-put apple | store-open'`. Stderr `verilex: refused: item-put apple requires store, pinned by claim item-added; nothing earlier provides it`, exit `2`.
+- **Pinned rule, second view.** Run `"$S/vx" cl-pinned-runs verilex runs` and `"$S/vx" cl-pinned-stores ls -A "$S/stores"`. The run list is the same as before the refusal and no store exists.
+- **Variant.** Run `"$S/vx" cl-variant verilex run 'store-open | item-put apple | item-listed apple'`: `green: 3 green; run <RUN>`, exit `0`. `item-listed apple` requires `item:apple`, which `item-put` provides only through its claim. Run `"$S/vx" cl-variant-claims verilex claims`: `item-added@<V1>` lists `words: item-put, item-stored`.
+- **Binding refused.** Run `sed -i 's/^entry: cli$/entry: api/' "$S/tally/.verilex/words/item-put/word.md"`, then `"$S/vx" cl-binding verilex words`. Stderr names `'entry' must name the entry point the word exercises, one of claim item-added's: cli`, exit `2`. Remove the variant with `command rm -rf "$S/tally/.verilex/words/item-put"`.
+- **New version.** Run `sed -i 's/observation: store.json lists NAME\./observation: store.json lists NAME exactly once./' "$K"`, then `"$S/vx" cl-version verilex claims`. It prints `item-added@<V2>`, a version other than `<V1>`, and `  entry: cli  words: stale: item-stored pins item-added@<V1>`.
+- **Stale refused.** Run `"$S/vx" cl-stale verilex run 'store-open | item-stored apple | item-listed apple'` and `"$S/vx" cl-stale-plan verilex plan 'store-open | item-stored apple | item-listed apple'`. Both print `verilex: refused: item-stored pins claim item-added@<V1>, which is now item-added@<V2>; a pass proves only the version it ran against: check that item-stored still proves the claim, then pin item-added@<V2>` and exit `2`. Run `"$S/vx" cl-stale-runs verilex runs`: no run was added. Run `"$S/vx" cl-stale-other verilex run 'store-open'`: a chain without the stale word is not refused (`green`, skipped on its stamp).
+- **Not reused.** Re-pin with `sed -i 's/item-added@<V1>/item-added@<V2>/' "$S/tally/.verilex/words/item-stored/word.md"`. Run `"$S/vx" cl-repin-plan verilex plan 'store-open | item-stored apple | item-listed apple'`: `plan: skip 0, run 3; item-stored apple: claim changed`. Run `"$S/vx" cl-repin-propose verilex propose item-stored`: `verilex: refused: item-stored has counted uses in 0 run(s); ...`, exit `2`.
+- **Not reused, second view.** Run `"$S/vx" cl-repin-run verilex run 'store-open | item-stored apple | item-listed apple'` (live, run `<R>`), then `"$S/vx" cl-repin-record python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r.get("skipped", False), [(w["word"], w.get("proves"), w.get("entry"), w.get("relies_on", "")) for w in r["words"]])' "$S/home/tally/runs/<R>/run.json"`. It prints `False` and, among the words, `('item-stored', 'item-added@<V2>', 'cli', '')`: the word ran live and proved the new version.
+- **Restore.** Copy `$K` and `item-stored/word.md` back from the fixture, then `"$S/vx" cl-restored verilex check` prints `check: no drift (3 admitted)` and `"$S/vx" cl-restored-claims verilex claims` lists `item-added@<V1>` with `words: item-stored`. `"$S/vx" cl-restored-diff diff -r "$S/tally/.verilex" "$PWD/tests/fixtures/tally/.verilex"` shows only the three `admission.json` files.
+
+## Gotchas
+
+- The version is the first 12 hex digits of the fingerprint. Copy it from `verilex claims`; it is not a counter.
+- Sources are not part of a claim's identity: re-mapping a requirement keeps the version and every pass recorded for it. Change the sentence or evidence contract when the claim's meaning changed.
+- Only the sentences a source lists count. A change to another sub-feature's requirement (for example `Expect NAME on its own line.`) flags `item-listed`, not `item-added`.
+- `verilex claims` and `verilex check` exit `0` whatever they report. Read stdout.
+- `verilex claims` loads the whole dictionary, so a word contract error (as in **Binding refused**) refuses it too.
+- The `sed` commands with `\n` in the replacement need GNU sed.
+- Editing a word's `claim:` pin changes its files, so an admitted word becomes drift-suspect until it is proposed and admitted again.

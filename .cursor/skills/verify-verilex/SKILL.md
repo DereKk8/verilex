@@ -1,6 +1,6 @@
 ---
 name: verify-verilex
-description: "Drive the verilex CLI as its users do, against a disposable copy of the tally sample product with an isolated VERILEX_HOME; use when proving verilex behavior (run, plan, --continue, words, runs, cleanup, new, propose, admit, gap, check, the three verdicts and quiet output) on a fresh or a given verilex build."
+description: "Drive the verilex CLI as its users do, against a disposable copy of the tally sample product with an isolated VERILEX_HOME; use when proving verilex behavior (run, plan, --continue, words, claims, runs, cleanup, new, propose, admit, gap, check, the three verdicts and quiet output) on a fresh or a given verilex build."
 ---
 
 # Verify verilex
@@ -78,7 +78,8 @@ Each feature file lists its own gotchas. These traps cross features:
 - Only variables in a word's `env` enter its stamp. Probe frame-only variables such as `TALLY_ADOPT_STORE` with `--fresh`.
 - `verilex plan` and `verilex check` exit `0` whatever they report. Read stdout.
 - `verilex runs` sorts by run id, so two runs in the same second are out of time order. Use the id a command printed.
-- Edits to `$S/tally` (words, `config.yaml`, the tally feature map) change stamps or cause drift. Restore them before the next recipe.
+- Edits to `$S/tally` (words, claims, `config.yaml`, the tally feature map) change stamps, versions or cause drift. Restore them before the next recipe.
+- The tally words prove claims, so a feature-map edit causes drift only when it changes a requirement sentence or sub-feature id a claim maps to. Appending prose flags nothing (see [claims.md](features/claims.md)).
 
 ## Helpers
 

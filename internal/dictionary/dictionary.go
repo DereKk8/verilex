@@ -2,6 +2,7 @@
 package dictionary
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,9 +18,19 @@ import (
 
 var frameSteps = []string{"launch", "doctor", "cleanup"}
 
+// DefaultSkillDirs are where verify skills live when config.yaml names no 'skills'.
+var DefaultSkillDirs = []string{".cursor/skills", ".claude/skills", ".agents/skills"}
+
+// ErrNoProject means no .verilex/config.yaml exists in the start directory or its parents.
+var ErrNoProject = errors.New("no .verilex/config.yaml")
+
+// WordName is the shape of a word: letters or digits in any script, then '.', '_' or '-'.
+var WordName = regexp.MustCompile(`^[\pL\pN][\pL\pN._-]*$`)
+
 type Project struct {
 	Root, Name     string
 	SecretPatterns []*regexp2.Regexp
+	SkillDirs      []string
 }
 
 func (p Project) Dir() string              { return filepath.Join(p.Root, ".verilex") }
@@ -62,7 +73,13 @@ func FindProject(start string) (Project, error) {
 			if !ok || !regexp.MustCompile(`^[A-Za-z0-9._-]+$`).MatchString(name) {
 				return Project{}, fmt.Errorf("%s: 'project' must be a plain name", config)
 			}
-			p := Project{Root: root, Name: name}
+			p := Project{Root: root, Name: name, SkillDirs: DefaultSkillDirs}
+			if data["skills"] != nil {
+				p.SkillDirs, err = stringsList(data["skills"])
+				if err != nil || len(p.SkillDirs) == 0 {
+					return Project{}, fmt.Errorf("%s: 'skills' must be a list of directories holding verify skills", config)
+				}
+			}
 			if data["secret_patterns"] != nil {
 				patterns, err := stringsList(data["secret_patterns"])
 				if err != nil {
@@ -87,7 +104,7 @@ func FindProject(start string) (Project, error) {
 			break
 		}
 	}
-	return Project{}, fmt.Errorf("no .verilex/config.yaml in %s or its parents", start)
+	return Project{}, fmt.Errorf("%w in %s or its parents", ErrNoProject, start)
 }
 
 // CompilePattern retains lookaround and backreferences accepted by the word contract.

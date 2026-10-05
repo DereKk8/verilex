@@ -10,7 +10,7 @@ A **word** is a reusable, executable piece that drives the product through a sur
 
 verilex holds execution only. The project's verification skill (a [pstack](https://github.com/cursor/plugins/tree/main/pstack)-style `verify-*` skill with its feature map) keeps the meaning: what a feature is, how a user reaches it, what proves it and its traps. Every word points back at the feature-map entries it puts into action, and verilex never replaces the skill. When a word is not green, verilex prints those entries so the agent can continue by hand.
 
-This slice holds the chain runner, its trust frame, the three verdicts, quiet output and stamp-based skipping. Reusing a kept instance, word invention and curation come later.
+This slice holds the chain runner, its trust frame, the three verdicts, quiet output, stamp-based skipping, and the word lifecycle (invention and curation). Reusing a kept instance comes later.
 
 ## Install
 
@@ -25,10 +25,15 @@ The core is Go; frame steps and words can use any language installed on the prod
 
 | Command | Does |
 |---|---|
-| `verilex run '<chain>' [--keep] [--fresh] [--json]` | Plans the chain, skips it when every proof stamp matches, else launches an owned instance, runs each word, cleans up |
-| `verilex words` | Lists the dictionary with each word's promise, `requires` and `provides` |
+| `verilex run '<chain>' [--keep] [--fresh] [--json]` | Plans the chain, skips it when every proof stamp matches and every word is admitted, else launches an owned instance, runs each word, cleans up |
+| `verilex words` | Lists the dictionary with each word's promise, `requires`, `provides` and lifecycle status |
 | `verilex runs` | Lists this project's runs and whether each instance was cleaned up |
 | `verilex cleanup <run>` | Tears down an instance kept with `--keep` |
+| `verilex new <word> --implements <ref>` | Scaffolds a provisional word that implements a feature-map section |
+| `verilex propose <word>` | Builds a curator packet for a word used in at least two runs |
+| `verilex admit <word> --verdict <file>` | Records an outside curator's `admit` or `reject` verdict |
+| `verilex gap '<description>'` | Notes a product moment the feature map has no section for |
+| `verilex check` | Reports admitted words that are drift-suspect |
 
 Exit codes: `0` green, `1` red, `2` inconclusive or refused.
 
@@ -87,33 +92,56 @@ Every run goes through the project's frame, and no word can opt out of it:
 
 Every word result carries a proof stamp: a fingerprint of everything the result depended on.
 
-- the word's own directory (`word.md`, `run` and anything beside them, with permissions);
+- the word's own directory (`word.md`, `run`, its `admission.json` and anything beside them, with permissions);
 - everything in `.verilex/words/` outside word directories (helpers words share), `.verilex/config.yaml` and `.verilex/frame/`;
 - the paths in the word's `inputs` and the values of the variables in its `env`;
 - the verilex executable;
 - the stamp of the step before it, so a change anywhere upstream reaches every later word.
 
-After a run that is not inconclusive, verilex records each green word in a ledger at `~/.local/state/verilex/<project>/runs/ledger.json`, keyed by the chain prefix that ends in that word. A later `verilex run` skips the chain only when every word's stamp matches a recorded green result and that result's evidence still exists. A skipped run launches nothing and names the run it relies on:
+After a run that is not inconclusive, verilex records each green word in a ledger at `~/.local/state/verilex/<project>/runs/ledger.json`, keyed by the chain prefix that ends in that word. A later `verilex run` skips the chain only when every word is admitted (see [the word lifecycle](#the-word-lifecycle)), every word's stamp matches a recorded green result, and that result's evidence still exists. A skipped run launches nothing and names the run it relies on:
 
 ```
 $ verilex run 'store-open | item-stored apple | item-listed apple'
 green: 3 green, skipped: stamps match run 1767225600-a1b2c3; run 1767225900-d4e5f6
 ```
 
-Anything missing or unclear runs the chain live: a word without `inputs` or with an empty `inputs` list, an input that is missing, an unreadable ledger, evidence that is gone, a stamp that changed while the run was going. Skipping is all or nothing, because each run starts from a fresh instance: a word that has to run needs the effects of every word before it, and every word after it depends on its new result. `--keep` and `--fresh` always run live. `--json` names the first reason a chain ran live in `rerun`.
+Anything missing or unclear runs the chain live: a word without `inputs` or with an empty `inputs` list, an input that is missing, an unreadable ledger, evidence that is gone, a stamp that changed while the run was going. A **provisional** or **drift-suspect** word, or one whose admission record cannot be read, also runs the chain live, however well its stamp matches: its results are still recorded, but none is trusted until the word is admitted and unchanged. Skipping is all or nothing, because each run starts from a fresh instance: a word that has to run needs the effects of every word before it, and every word after it depends on its new result. `--keep` and `--fresh` always run live. `--json` names the first reason a chain ran live in `rerun`, for example `item-listed apple: provisional; only admitted words are skipped`.
 
 A stamp covers only what it lists. A word that reads anything else (another file, a service, a tool's version) must declare it in `inputs` or `env`, or leave `inputs` out (or empty) so it is never skipped.
+
+## The word lifecycle
+
+A word is **provisional** until an outside curator admits it. verilex never calls a model and never edits a verify skill.
+
+1. **Invent.** `verilex new item-renamed --implements verify-tally/features/items.md#item-add` writes `.verilex/words/item-renamed/` with a contract stub and a `run` that claims `blocked` until written, so its steps are `inconclusive`. Every `--implements` must resolve to a feature-map section, or `new` refuses. In a project without `.verilex/`, `new` also creates `config.yaml` and frame stubs (`launch`, `doctor`, `refresh`, `cleanup`) that exit 2, so every run is `inconclusive` until they are written. `refresh` is a stub for bringing an instance back to its launched state; the core does not call it yet.
+2. **Use.** Provisional words run in chains like any other, always live. A use counts when the word's step was `green` or `red` in a live run whose verdict was `green` or `red`. Inconclusive steps, inconclusive runs and skipped runs do not count, and a run counts once however often the word appears in it.
+3. **Propose.** `verilex propose <word>` refuses a word with counted uses in fewer than two different runs. Otherwise it writes one self-contained JSON packet to `~/.local/state/verilex/<project>/proposals/<word>/<id>.json`: the word's files, its uses with verdicts and evidence paths, the text and hash of each feature-map section it implements, the whole dictionary with each word's status, and instructions for the curator.
+4. **Admit.** The curator writes a verdict file:
+
+   ```json
+   {"word": "item-renamed", "packet": "<id>", "verdict": "admit", "curator": "<model that judged>", "reason": "..."}
+   ```
+
+   `verilex admit <word> --verdict <file>` refuses a verdict whose packet is unknown, or whose word files or sections changed since the packet was built. Both verdicts are kept beside the packet. Only `admit` writes `.verilex/words/<word>/admission.json` (date, curator, packet, counted runs, word digest, and the hash of each implemented section); a rejected word stays as it was. The admission record is part of the word's stamp, so admitting a word runs its chains live once more before they can be skipped.
+5. **Drift.** `verilex check` compares each admitted word's stored section hashes and word digest with the project now. A changed or missing section, or changed word files, makes the word **drift-suspect**: it always runs, and no earlier result is trusted for it, even though a feature-map section is not part of its stamp. Drift is computed on every call, never cached. Propose a drift-suspect word again to re-admit it.
+
+`verilex gap 'A user renames an item'` writes a note to `.verilex/gaps/` for the verify skill's owner when the feature map has no section for a product moment.
+
+A reference is `<skill>/<file>#<section>`, looked up under the project's skill directories. The section is the heading whose slug matches, up to the next heading of the same or a higher level. A sub-feature id written as inline code in the file (`` `item-add` ``) selects the whole feature file, since a sub-feature's meaning spreads across its file.
 
 ## Adding verilex to a project
 
 ```
 .verilex/
-  config.yaml          project: <name>; optional secret_patterns: [<regex>, ...]
+  config.yaml          project: <name>; optional secret_patterns: [<regex>, ...];
+                       optional skills: [<dir>, ...] (default .cursor/skills, .claude/skills, .agents/skills)
   frame/launch         prints {"instance": <anything>} on stdout
   frame/doctor         exit 0 when the instance is this run's and healthy
   frame/cleanup        removes what this run launched
   words/<word>/word.md contract (YAML frontmatter) and a short description
   words/<word>/run     the executable word
+  words/<word>/admission.json  written by `verilex admit`; absent while the word is provisional
+  gaps/                notes from `verilex gap` for the verify skill's owner
 ```
 
 Frame steps and words receive these environment variables: `VERILEX_RUN` (the run id; label everything you launch with it), `VERILEX_INSTANCE` (the launch's `instance`, as JSON; `null` if launch failed), `VERILEX_PROJECT_ROOT` and `VERILEX_EVIDENCE` (this step's evidence directory).

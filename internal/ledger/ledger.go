@@ -36,8 +36,9 @@ type Ledger struct{ path string }
 // At opens the ledger kept in dir.
 func At(dir string) Ledger { return Ledger{filepath.Join(dir, "ledger.json")} }
 
-// Reuse returns a recorded green entry for every step when each step's stamp matches one exactly
-// and its evidence still exists. Otherwise it returns why the chain has to run.
+// Reuse returns a recorded green entry for every step when each step's stamp matches one exactly,
+// its evidence still exists and no step is held (its word provisional or drift-suspect).
+// Otherwise it returns why the chain has to run.
 // Reuse is all or nothing: every run launches a fresh instance, so a step that runs needs the
 // effects of every step before it, and every step after it depends on its new result.
 func (l Ledger) Reuse(labels []string, stamps []stamp.Stamp) ([]Entry, string) {
@@ -63,6 +64,9 @@ func (l Ledger) Reuse(labels []string, stamps []stamp.Stamp) ([]Entry, string) {
 		}
 		if info, err := os.Stat(filepath.Join(entry.Evidence, "stdout")); err != nil || info.IsDir() {
 			return nil, labels[i] + ": evidence from run " + entry.Run + " is gone"
+		}
+		if s.Hold != "" {
+			return nil, labels[i] + ": " + s.Hold
 		}
 		entries = append(entries, entry)
 	}

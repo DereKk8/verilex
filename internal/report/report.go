@@ -35,7 +35,7 @@ func Human(record runner.Record, out io.Writer) {
 	labels := []string{}
 	step := func(v verdict.Verdict, label, cause, evidence string) {
 		labels = append(labels, label)
-		if cause = oneLine(cause); cause != "" {
+		if cause = OneLine(cause); cause != "" {
 			label += ": " + cause
 		}
 		fmt.Fprintf(out, "  %s  %s\n    evidence: %s\n", v, label, evidence)
@@ -68,7 +68,7 @@ func Human(record runner.Record, out io.Writer) {
 	frame("doctor-after-failure")
 	frame("cleanup")
 	if v != verdict.Green && record.Reason != nil && *record.Reason != "" && !explained(*record.Reason, labels) {
-		fmt.Fprintf(out, "  cause: %s\n", oneLine(*record.Reason))
+		fmt.Fprintf(out, "  cause: %s\n", OneLine(*record.Reason))
 	}
 	if record.Cleanup == "kept" {
 		fmt.Fprintf(out, "kept: tear down with `verilex cleanup %s`\n", record.Run)
@@ -89,7 +89,7 @@ func Plan(p runner.Plan, out io.Writer) {
 		fmt.Fprintf(out, " on the instance kept by %s", p.Continues)
 	}
 	if p.Rerun != "" {
-		fmt.Fprintf(out, "; %s", oneLine(p.Rerun))
+		fmt.Fprintf(out, "; %s", OneLine(p.Rerun))
 	}
 	fmt.Fprintln(out)
 	for _, s := range p.Skip {
@@ -171,7 +171,8 @@ func explained(reason string, labels []string) bool {
 	return false
 }
 
-func oneLine(text string) string {
+// OneLine writes a cause on one line, cut to a length a terminal line can hold.
+func OneLine(text string) string {
 	text = strings.Join(strings.Fields(text), " ")
 	if runes := []rune(text); len(runes) > maxCause {
 		text = string(runes[:maxCause-1]) + "…"
@@ -187,7 +188,7 @@ func Ticket(t ticket.Ticket, out io.Writer) {
 		tokens = strconv.Itoa(t.TokenBudget)
 	}
 	for _, field := range []struct{ name, value string }{
-		{"intent", oneLine(t.Intent)}, {"diff", t.Diff}, {"profile", t.Profile}, {"harness", t.Harness}, {"model", t.Model},
+		{"intent", OneLine(t.Intent)}, {"diff", t.Diff}, {"profile", t.Profile}, {"harness", t.Harness}, {"model", t.Model},
 		{"effort", t.Effort}, {"token_budget", tokens}, {"time_budget", t.TimeBudget},
 	} {
 		if field.value == "" {

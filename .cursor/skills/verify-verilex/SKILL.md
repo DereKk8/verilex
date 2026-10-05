@@ -1,6 +1,6 @@
 ---
 name: verify-verilex
-description: "Drive the verilex CLI as its users do, against a disposable copy of the tally sample product with an isolated VERILEX_HOME; use when proving verilex behavior (run, plan, --continue, run tickets and profiles, words, claims, runs, cleanup, new, propose, admit, gap, check, the three verdicts, quiet output, parallel runs and the shared ledger across stateless instances) on a fresh or a given verilex build."
+description: "Drive the verilex CLI as its users do, against a disposable copy of the tally sample product with an isolated VERILEX_HOME; use when proving verilex behavior (run, plan, --continue, run tickets and profiles, words, claims, onboard, index, runs, cleanup, new, propose, admit, gap, check, the three verdicts, quiet output, parallel runs and the shared ledger across stateless instances) on a fresh or a given verilex build."
 ---
 
 # Verify verilex
@@ -59,7 +59,7 @@ Proof standards:
 
 - Drive the real user path: the `verilex` CLI in a product checkout. Never call Go packages or edit `$S/home` by hand to reach a state.
 - Every proof is the action plus a second observation from another `vx` call: `verilex runs`, `verilex words`, `verilex plan`, a file under `$S/home` or `$S/tally`, or `ls "$TALLY_STORES"`. A verdict line alone is not proof.
-- Check side effects alongside the printed line: run records, ledger skips, packets, `admission.json`, gap notes, stores created and removed.
+- Check side effects alongside the printed line: run records, ledger skips, onboarding records, `grouping.yaml`, packets, `admission.json`, gap notes, stores created and removed.
 - A refusal is proved by its stderr, exit `2`, and an unchanged second view (no new run in `verilex runs`, an unchanged store).
 - verilex's own evidence paths (`$S/home/tally/runs/...`) vanish at cleanup. Copy what the proof needs first: `"$S/vx" <label> cat <path>`.
 - Record the feature file and sub-feature id with each proof. Report a path you could not reach with its attempted command and unmet precondition; never report it as verified through another path.
@@ -77,7 +77,7 @@ It tears down every run that `verilex runs` shows as `cleanup=kept` with `verile
 Each feature file lists its own gotchas. These traps cross features:
 
 - Provisional words never skip, and `--continue` refuses a kept instance whose history holds one. Run `admit-all` first.
-- The first run after an admission is live (`word changed`), because `admission.json` is part of every stamp.
+- The first run after onboarding is live (`word admission changed`), because each onboarding decision's seal is part of every stamp.
 - Only variables in a word's `env` enter its stamp. Probe frame-only variables such as `TALLY_ADOPT_STORE` with `--fresh`.
 - `verilex plan` and `verilex check` exit `0` whatever they report. Read stdout.
 - `verilex runs` sorts by run id, so two runs in the same second are out of time order. Use the id a command printed.
@@ -95,7 +95,7 @@ All live in `.cursor/skills/verify-verilex/scripts/` and are executable.
 | `launch [--bin PATH]` | create a session; prints `session:`, `binary:`, `evidence:` |
 | `doctor SESSION` | read-only health check |
 | `"$S/vx" LABEL CMD...` | run one command in the session and keep its transcript (wraps `capture SESSION LABEL CMD...`) |
-| `admit-all SESSION` | baseline for skip, plan and `--continue`: two green runs of `store-open \| item-stored apple \| item-listed apple`, then `propose` and `admit` for all three words; prints `admitted words: 3`. Run it once per session. |
+| `admit-all SESSION` | baseline for skip, plan and `--continue`: two green runs of `store-open \| item-stored apple \| item-listed apple`, then `onboard` for all three words; prints `admitted words: 3`. Run it once per session. |
 | `snapshot SESSION` | read-only sha256 of every file in `$S/tally`, `$S/tickets` and `$S/config`; diff two snapshots to prove nothing changed |
 | `hold-word SESSION [--remove]` | install (or remove) `store-held`, a probe word that holds its run until `touch "$S/hold/<run>.go"`, so several runs are in flight at once |
 | `ledger-audit LEDGER HOME...` | audit a ledger against the run records of the homes that wrote it, without verilex code: prints `proven`, `passes`, `lost`, `forged`, `damaged` and `unowned` counts; exits 1 on any lost, forged or damaged pass |

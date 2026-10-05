@@ -5,6 +5,8 @@ provides: [store]
 evidence:
   action: "`tally open` exits 0 and prints `opened`."
   observation: store.json holds no items.
+defects:
+  dirty-open: {TALLY_DEFECT: dirty-opens}
 sources:
   - ref: verify-tally/features/store.md#store-open
     prose: 3742352a752d

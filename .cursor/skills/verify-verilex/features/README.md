@@ -16,13 +16,13 @@ This directory is the maintained source for verifying the user-facing behavior o
 - Run every command through `"$S/vx" <label> ...` from the repository root.
 - `<RUN>`, `<KEPT>` and `<PACKET>` stand for ids printed by an earlier step of the same recipe. Copy them from that output.
 - Treat commands as literal. Keep the quoted chain and flags unchanged.
-- Restore any edit to `$S/tally` before the next recipe, and confirm with `verilex check` (no drift) or `"$S/vx" restored diff -r "$S/tally/.verilex" "$PWD/tests/fixtures/tally/.verilex"` (only `admission.json` files and `gaps/` differ).
+- Restore any edit to `$S/tally` before the next recipe, and confirm with `verilex check` (no drift) or `"$S/vx" restored diff -r "$S/tally/.verilex" "$PWD/tests/fixtures/tally/.verilex"` (only `grouping.yaml`, `gaps/` and any `admission.json` of a probe word differ).
 - The default chain is `store-open | item-stored apple | item-listed apple`. `item-listed` is the only `read_only` word.
 
 ## Proof and skip reporting
 
 - Capture the command and its result, then a second observation from another `vx` call.
-- Exit codes: `run` gives `0` green, `1` red, `2` inconclusive or refused. `plan`, `words`, `runs`, `check`, `gap`, `new`, `propose`, `admit` give `0` on success and `2` when refused.
+- Exit codes: `run` gives `0` green, `1` red, `2` inconclusive or refused. `plan`, `words`, `runs`, `check`, `index`, `gap`, `new`, `propose`, `admit` give `0` on success and `2` when refused. `onboard` gives `0` onboarded or undecided, `1` rejected, `2` inconclusive or refused.
 - A refusal prints `verilex: refused: ...` on stderr, exits `2`, and adds no run to `verilex runs`.
 - Record the feature file and sub-feature id with every evidence directory.
 - Report an unreachable path with the attempted command and the unmet precondition.
@@ -44,8 +44,10 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Runs](runs.md) - `verilex runs`: every run with verdict and cleanup state.
 - [Cleanup](cleanup.md) - `verilex cleanup`: tear down a kept instance.
 - [New word](new.md) - `verilex new`: scaffold a provisional word, and a whole `.verilex/` in a new project.
-- [Propose](propose.md) - `verilex propose`: the curator packet after two counted uses.
-- [Admit](admit.md) - `verilex admit`: record a curator's admit or reject verdict.
+- [Onboard](onboard.md) - `verilex onboard`: admit a word that proves a claim through the mapping, non-proof, mechanical match, planted-defect gate and behavioral check, and answer an undecided word's decision request.
+- [Index](index.md) - `verilex index`: the generated three-tier word index, intent lookup and change lookup.
+- [Propose](propose.md) - `verilex propose`: the curator packet for a word without a claim after two counted uses.
+- [Admit](admit.md) - `verilex admit`: record a curator's admit or reject verdict for a word without a claim.
 - [Gap](gap.md) - `verilex gap`: note a product moment the feature map lacks.
 - [Check](check.md) - `verilex check`: report drift-suspect admitted words.
 - [Claims](claims.md) - `verilex claims`: claim versions, stale pins, review of changed, moved and unmapped requirements and of changed prose, drift after a remap, coverage only through admitted words, and pinned rules.

@@ -30,4 +30,4 @@ Preconditions:
 ## Gotchas
 
 - Runs are sorted by run id (`<epoch>-<hex>`). Two runs in the same second are not in time order, so find a run by the id its command printed, never with `tail -1`.
-- `inconclusive` runs are listed too. Only `verilex propose` skips them when counting uses.
+- `inconclusive` runs are listed too. Only `verilex onboard` and `verilex propose` skip them when counting uses.

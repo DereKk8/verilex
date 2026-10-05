@@ -4,12 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
@@ -87,22 +85,11 @@ type Packet struct {
 	WordDigest string               `json:"word_digest"`
 	Uses       []Use                `json:"uses"`
 	Sections   []featuremap.Section `json:"sections"`
-	Claim      *ClaimPacket         `json:"claim,omitempty"`
 	Dictionary []Entry              `json:"dictionary"`
 	Curator    string               `json:"curator_instructions"`
 }
 
-// ClaimPacket is the claim version a word proves, as the curator sees it: the claim file, the
-// entry point the word exercises, and where each source anchors the claim in the verify skill.
-type ClaimPacket struct {
-	Pin         string              `json:"pin"`
-	Fingerprint string              `json:"fingerprint"`
-	Entry       string              `json:"entry"`
-	Text        string              `json:"text"`
-	Sources     []featuremap.Anchor `json:"sources"`
-}
-
-const instructions = `Judge whether this word belongs in the shared dictionary. Admit it only when its promise is one real product moment a user would recognize, its run proves exactly that promise with a second observation, its uses' evidence backs the verdicts they report, it faithfully implements the feature-map sections listed (for a word that proves a claim: it proves exactly that claim version, through its entry point, with the action and observation the claim's evidence contract names and none of its non-proofs), and no dictionary word already covers it (a variant that proves the same claim through another mechanism is not a duplicate). Write your verdict as a JSON file {"word": <word>, "packet": <id>, "verdict": "admit" or "reject", "curator": <the model that judged>, "reason": <one or two sentences>} and record it with ` + "`verilex admit <word> --verdict <file>`."
+const instructions = `Judge whether this word belongs in the shared dictionary. Admit it only when its promise is one real product moment a user would recognize, its run proves exactly that promise with a second observation, its uses' evidence backs the verdicts they report, it faithfully implements the feature-map sections listed, and no dictionary word already covers it. Write your verdict as a JSON file {"word": <word>, "packet": <id>, "verdict": "admit" or "reject", "curator": <the model that judged>, "reason": <one or two sentences>} and record it with ` + "`verilex admit <word> --verdict <file>`."
 
 // Propose builds the curator packet for a word and stores it in the project's state
 // directory. It refuses a word with fewer than MinRuns counted uses and an admitted word
@@ -116,15 +103,15 @@ func Propose(p dictionary.Project, name string) (Packet, string, error) {
 	if err != nil {
 		return Packet{}, "", err
 	}
+	if err = onboardOnly(w); err != nil {
+		return Packet{}, "", err
+	}
 	status, err := lifecycle.StatusOf(p, w)
 	if err != nil {
 		return Packet{}, "", err
 	}
 	if status.State == lifecycle.Admitted {
 		return Packet{}, "", fmt.Errorf("%s is already admitted and nothing it implements changed", name)
-	}
-	if w.Stale != "" {
-		return Packet{}, "", errors.New(w.Stale)
 	}
 	uses, err := Uses(p, w)
 	if err != nil {
@@ -136,10 +123,6 @@ func Propose(p dictionary.Project, name string) (Packet, string, error) {
 	implemented, err := sections(p, w)
 	if err != nil {
 		return Packet{}, "", fmt.Errorf("%v; point the word at a feature-map section, or record the moment with `verilex gap`", err)
-	}
-	proves, err := claimPacket(p, w)
-	if err != nil {
-		return Packet{}, "", err
 	}
 	files, err := wordFiles(w)
 	if err != nil {
@@ -157,7 +140,7 @@ func Propose(p dictionary.Project, name string) (Packet, string, error) {
 		}
 		dictionaryEntries = append(dictionaryEntries, Entry{other.Name, s.State, other.Promise, other.Args, other.Requires, other.Provides, other.Implements, other.Proves()})
 	}
-	packet := Packet{Project: p.Name, Created: now(), Word: name, Status: status.State, Files: files, WordDigest: digest, Uses: uses, Sections: implemented, Claim: proves, Dictionary: dictionaryEntries, Curator: instructions}
+	packet := Packet{Project: p.Name, Created: now(), Word: name, Status: status.State, Files: files, WordDigest: digest, Uses: uses, Sections: implemented, Dictionary: dictionaryEntries, Curator: instructions}
 	data, err := json.Marshal(packet)
 	if err != nil {
 		return Packet{}, "", err
@@ -170,27 +153,6 @@ func Propose(p dictionary.Project, name string) (Packet, string, error) {
 	}
 	path := filepath.Join(dir, packet.ID+".json")
 	return packet, path, writeJSON(path, packet)
-}
-
-// claimPacket shows the curator the claim a word proves; nil for a word without one. A claim
-// that needs review is refused: the curator would judge the word against a claim the verify
-// skill no longer backs.
-func claimPacket(p dictionary.Project, w dictionary.Word) (*ClaimPacket, error) {
-	if w.Claim == nil {
-		return nil, nil
-	}
-	anchors, review, err := lifecycle.Review(p, *w.Claim)
-	if err != nil {
-		return nil, err
-	}
-	if len(review) > 0 {
-		return nil, fmt.Errorf("claim %s needs review: %s; bring its sources in line with the verify skill first", w.Claim.Name, strings.Join(review, "; "))
-	}
-	text, err := os.ReadFile(w.Claim.Path)
-	if err != nil {
-		return nil, err
-	}
-	return &ClaimPacket{Pin: w.Claim.Pin(), Fingerprint: w.Claim.Fingerprint, Entry: w.Entry, Text: string(text), Sources: anchors}, nil
 }
 
 func proposalsDir(p dictionary.Project, word string) string {

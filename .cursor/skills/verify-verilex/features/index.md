@@ -1,0 +1,43 @@
+# Index
+
+`verilex index` prints the word index for this product, generated on every call from the claims, the words and the grouping file; nothing is cached or written. Tier 1 lists the claims active for this product, tier 2 one claim's words, tier 3 one word's run details. `--intent '<text>'` finds the claims an intent names. `--changed <file>` lists the claims touched files affect and, for every known chain that holds one of their words, the decision `verilex plan` makes.
+
+## Sub-features
+
+- `index-active` lists only the claims a word is onboarded for in this product (tier 1), so words the product never used never grow it.
+- `index-claim` lists a claim's words active for this product with the alias each pins, or every word, marked `dormant` or `provisional`, when none is active (tier 2).
+- `index-word` prints one word's args, entry point, states, inputs, environment, timeout, status and the chain onboarding proved it on (tier 3).
+- `index-intent` returns the claims an intent names, best first, and nothing for an intent no claim names.
+- `index-changed` lists the claims whose dependencies cover touched files, and agrees with `verilex plan` on every chain it reports.
+- `index-deterministic` prints the same index for the same records and writes nothing.
+- `index-one-lookup` refuses to mix a tier, `--intent` and `--changed`.
+
+## How to get to it (user POV)
+
+- Run `verilex index`, then `verilex index <claim>` and `verilex index <claim> <word>` to go one tier deeper.
+- Run `verilex index --intent '<what to prove>'` or `verilex index --changed <file> [--changed <file>...]`. Add `--json` to any of them.
+
+## Driving it with vx
+
+Preconditions:
+
+- A fresh session that passes the doctor, with the admitted baseline (`admit-all`), then one live run of the default chain (`"$S/vx" idx-live verilex run 'store-open | item-stored apple | item-listed apple'`, run `<A>`).
+
+- **Active.** Run `"$S/vx" idx-tier1 verilex index`. Stdout ``index tally: 3 active claim(s); `verilex index <claim>` lists a claim's words``, then `item-added  A named item is in the store.`, `item-listed  A stored item shows up when a user lists the store.` and `store-opened  A new, empty store is open and ready for items.`, exit `0`.
+- **Claim.** Run `"$S/vx" idx-tier2 verilex index item-added`. Stdout `item-added@<V1>  A named item is in the store.`, `  entry: cli  requires: store  provides: item:{name}` and `  item-stored <name>`.
+- **Word.** Run `"$S/vx" idx-tier3 verilex index item-added item-stored`. Stdout `item-stored <name>  proves item-added@<V1> through cli; admitted`, `  requires: store  provides: item:{name}`, `  inputs: bin/tally  env: TALLY_DEFECT, TALLY_SIMULATE_LOCK  timeout: 1800s` and `  proven on: store-open | item-stored apple`.
+- **Dormant variants.** Add five provisional variants: `for n in 1 2 3 4 5; do command cp -r "$S/tally/.verilex/words/item-stored" "$S/tally/.verilex/words/item-stored-$n" && sed -i "s/^word: item-stored$/word: item-stored-$n/" "$S/tally/.verilex/words/item-stored-$n/word.md"; done`. Run `"$S/vx" idx-tier1-variants verilex index`: the same four lines as **Active**. Run `"$S/vx" idx-tier2-variants verilex index item-added`: still only `  item-stored <name>`, because a claim with a word active here lists only its active words. Run `"$S/vx" idx-claims-variants verilex claims`: `item-added` lists `words: item-stored, item-stored-1, ..., item-stored-5`. Remove them with `command rm -rf "$S/tally/.verilex/words"/item-stored-?`.
+- **Another product.** Run `sed -i 's/^project: tally$/project: tally-b/' "$S/tally/.verilex/config.yaml"`, then `"$S/vx" idx-b-tier1 verilex index`: ``index tally-b: no active claims; find one with `verilex index --intent '<what to prove>'` ``. Run `"$S/vx" idx-b-tier2 verilex index item-added`: `  item-stored <name>  (dormant)`. Run `"$S/vx" idx-b-intent verilex index --intent 'a named item is in the store'`: `item-added  A named item is in the store.  (dormant)` comes first. Restore with `sed -i 's/^project: tally-b$/project: tally/' "$S/tally/.verilex/config.yaml"`.
+- **Intent.** Run `"$S/vx" idx-intent verilex index --intent 'a user lists the store'`. Stdout `intent: 1 claim(s) for 'a user lists the store'` and `item-listed  A stored item shows up when a user lists the store.` Run `"$S/vx" idx-intent-none verilex index --intent 'prove tenants still provision'`: `intent: 0 claim(s) for 'prove tenants still provision'`.
+- **Changed, nothing to run.** Run `"$S/vx" idx-changed-bin verilex index --changed bin/tally`. Stdout `changed: 3 claim(s); 0 of 3 known chain(s) must re-run`, the three claim lines, and ``  3 chain(s) still skip: `verilex plan '<chain>'` cites the run each relies on``. Run `"$S/vx" idx-changed-bin-plan verilex plan 'store-open | item-stored apple'`: `plan: skip 2, run 0`, relying on `<A>`.
+- **Changed, word.** Run `echo >> "$S/tally/.verilex/words/item-listed/run"`, then `"$S/vx" idx-changed-word verilex index --changed .verilex/words/item-listed/run`. Stdout `changed: 1 claim(s); 1 of 1 known chain(s) must re-run`, `item-listed  A stored item shows up when a user lists the store.` and `  run  store-open | item-stored apple | item-listed apple: item-listed apple: word changed`. Run `"$S/vx" idx-changed-word-plan verilex plan 'store-open | item-stored apple | item-listed apple'`: `plan: skip 0, run 3; item-listed apple: word changed`. Restore with `sed -i '$d' "$S/tally/.verilex/words/item-listed/run"`.
+- **Changed, requirement.** Run ``sed -i 's/Expect exit 0 and `added NAME`/Expect exit 0 and `stored NAME`/' "$S/tally/.cursor/skills/verify-tally/features/items.md"``, then `"$S/vx" idx-changed-req verilex index --changed .cursor/skills/verify-tally/features/items.md --json`. Run `"$S/vx" idx-changed-req-read python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); print([x["claim"] for x in c["claims"]]); [print(x["chain"], x["run"], x.get("reason", "")[:60]) for x in c["chains"]]' <evidence>/stdout` with the `idx-changed-req` evidence directory: `['item-added', 'item-listed']`, and each chain with `True` and a reason that starts `item-stored apple: drift-suspect: claim item-added needs review`. Run `"$S/vx" idx-changed-req-plan verilex plan 'store-open | item-stored apple' --json` and compare its `rerun` with that chain's `reason`: they are equal. Restore the feature file from `"$PWD/tests/fixtures/tally/.cursor/skills/verify-tally/features/items.md"`.
+- **Deterministic.** Run `touch "$S/marker"`, then `"$S/vx" idx-json-1 verilex index item-added --json` and `"$S/vx" idx-json-2 verilex index item-added --json`. Run `"$S/vx" idx-json-same cmp <evidence-1>/stdout <evidence-2>/stdout` with the two evidence directories (exit `0`) and `"$S/vx" idx-nothing-written find "$S/tally/.verilex" "$S/home" -newer "$S/marker" -type f`: no file.
+- **One lookup.** Run `"$S/vx" idx-mixed verilex index --intent 'an item' item-added`. Stderr ``verilex: refused: look up one thing at a time: a tier (`verilex index [claim [word]]`), --intent, or --changed``, exit `2`.
+
+## Gotchas
+
+- A claim is active for a product only through a word onboarded there. `admit-all` onboards the three tally words for `tally`; after a product rename every claim is dormant until its words are onboarded in the new product (see [onboard.md](onboard.md) **Another product**).
+- `--changed` reports chains from onboarding decisions and from this product's run records only. A chain never run here is not listed.
+- The text form cuts a long reason to 300 characters with `…`, as `plan` does; `--json` holds the whole reason.
+- `verilex index` exits `0` for every lookup it can answer, also when it finds nothing. Read stdout.

@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
+	"github.com/DereKk8/verilex/internal/grouping"
 	"github.com/DereKk8/verilex/internal/lifecycle"
 )
 
@@ -28,8 +29,8 @@ type Stamp struct {
 	// Digest covers every component; it is empty when the step cannot be stamped.
 	Digest string
 	// Components maps each thing the result depended on to its fingerprint:
-	// verilex, frame, shared, word, claim, "claim sources", "input <path>", "env <NAME>" and
-	// upstream.
+	// verilex, frame, shared, word, "word admission", claim, "claim sources", "input <path>",
+	// "env <NAME>" and upstream.
 	Components map[string]string
 	// Unclear says why the step has no stamp.
 	Unclear string
@@ -43,6 +44,7 @@ type Stamp struct {
 // change anywhere before a step changes its stamp too: every earlier word drives the same instance.
 func Chain(project dictionary.Project, steps []dictionary.Step) []Stamp {
 	h := hasher{cache: map[string]result{}}
+	h.grouping, h.groupingErr = grouping.Load(project)
 	common := map[string]string{"verilex": format}
 	unclear := ""
 	if exe, err := os.Executable(); err != nil {
@@ -126,7 +128,11 @@ type result struct {
 	err    error
 }
 
-type hasher struct{ cache map[string]result }
+type hasher struct {
+	cache       map[string]result
+	grouping    grouping.Grouping
+	groupingErr error
+}
 
 func (h hasher) word(word dictionary.Word, root string, components map[string]string) string {
 	if !word.InputsDeclared {
@@ -147,6 +153,15 @@ func (h hasher) word(word dictionary.Word, root string, components map[string]st
 		// Sources are not identity, yet a pass recorded before they were re-mapped was judged
 		// against other requirement sentences, so the first run after a re-map goes live.
 		components["claim sources"] = c.SourcesDigest()
+		// The onboarding decision admits the word the way an admission record admits a word
+		// without a claim, so onboarding runs the word's chains live once more.
+		if h.groupingErr != nil {
+			return "grouping: " + h.groupingErr.Error()
+		}
+		components["word admission"] = "none"
+		if d, ok := h.grouping.Words[word.Name]; ok {
+			components["word admission"] = d.Seal
+		}
 	}
 	for _, input := range word.Inputs {
 		path := input

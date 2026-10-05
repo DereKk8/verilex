@@ -23,7 +23,7 @@ Preconditions:
 
 - **Live (pristine).** Before any run, run `"$S/vx" plan-pristine verilex plan 'store-open | item-stored apple | item-listed apple'`. It prints `plan: skip 0, run 3; store-open: no green result on record` and exit `0`.
 - **Live (provisional).** Run `"$S/vx" plan-first-run verilex run 'store-open | item-stored apple | item-listed apple'` (green), then `"$S/vx" plan-provisional verilex plan 'store-open | item-stored apple | item-listed apple'`. It prints `plan: skip 0, run 3; store-open: provisional; only admitted words are skipped` and exit `0`.
-- **Live after admission.** Run `admit-all`, then `"$S/vx" plan-after-admit verilex plan 'store-open | item-stored apple | item-listed apple'`. It prints `plan: skip 0, run 3; store-open: word changed`.
+- **Live after admission.** Run `admit-all`, then `"$S/vx" plan-after-admit verilex plan 'store-open | item-stored apple | item-listed apple'`. It prints `plan: skip 0, run 3; store-open: word admission changed`.
 - **Plan matches run.** Run `"$S/vx" plan-run verilex run 'store-open | item-stored apple | item-listed apple'` (live, run `<A>`), then `"$S/vx" plan-skip verilex plan 'store-open | item-stored apple | item-listed apple'`. It prints `plan: skip 3, run 0` and three `skip  <step>  relies on run <A>` lines. Then `"$S/vx" plan-skip-run verilex run 'store-open | item-stored apple | item-listed apple'` prints `skipped: stamps match run <A>`.
 - **Plan runs nothing.** Run `"$S/vx" plan-runs verilex runs` before and after a `plan` call. The list is unchanged.
 - **No green result.** Run `"$S/vx" plan-newarg verilex plan 'store-open | item-stored pear'`. It prints `plan: skip 0, run 2; item-stored pear: no green result on record`.
@@ -38,4 +38,4 @@ Preconditions:
 - `plan` exits `0` whether it would skip or run. Read the `skip N, run M` line, not the exit code.
 - `plan --continue` refuses exactly as `run --continue` would, including with provisional words (see [continue.md](continue.md)).
 - `no green result on record` is checked before `provisional`, so a pristine session never shows the provisional reason.
-- A `plan` right after `admit-all` reports `word changed`, not `provisional`: the admission record is part of the stamp.
+- A `plan` right after `admit-all` reports `word admission changed`, not `provisional`: the seal of each word's onboarding decision is part of its stamp.

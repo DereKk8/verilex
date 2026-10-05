@@ -14,6 +14,7 @@ import (
 	"github.com/DereKk8/verilex/internal/curation"
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/featuremap"
+	"github.com/DereKk8/verilex/internal/grouping"
 	"github.com/DereKk8/verilex/internal/lifecycle"
 )
 
@@ -32,6 +33,30 @@ func changeAddRequirement(t *testing.T, root string) {
 	t.Helper()
 	items := feature(root, "items.md")
 	write(t, items, strings.Replace(read(t, items), "Expect exit 0 and `added NAME`", "Expect exit 0 and `stored NAME`", 1), 0644)
+}
+
+// withoutClaims rewrites tally's words into words that name feature-map sections instead of
+// proving claims, the words the curator flow (propose and admit) still serves.
+func withoutClaims(t *testing.T, root string) {
+	t.Helper()
+	contracts := map[string]string{
+		"store-open":  "promise: A new, empty store is open and ready for items.\nrequires: []\nprovides: [store]\nimplements:\n  - verify-tally/features/store.md#store-open\n",
+		"item-stored": "promise: A named item is in the store.\nargs: [name]\nrequires: [store]\nprovides: [\"item:{name}\"]\nimplements:\n  - " + itemAdd + "\n",
+		"item-listed": "promise: A stored item shows up when a user lists the store.\nargs: [name]\nrequires: [\"item:{name}\"]\nprovides: []\nread_only: true\nimplements:\n  - verify-tally/features/items.md#item-list\n",
+	}
+	for word, contract := range contracts {
+		write(t, filepath.Join(root, ".verilex", "words", word, "word.md"), "---\nword: "+word+"\n"+contract+"inputs: [bin/tally]\nenv: [TALLY_DEFECT, TALLY_SIMULATE_LOCK]\n---\n", 0644)
+	}
+}
+
+// onboard runs onboarding for a word that must join the vocabulary.
+func onboard(t *testing.T, root, word string, flags ...string) output {
+	t.Helper()
+	done := verilex(t, root, nil, append([]string{"onboard", word}, flags...)...)
+	if done.code != 0 {
+		t.Fatalf("onboard %s: %d\n%s%s", word, done.code, done.stdout, done.stderr)
+	}
+	return done
 }
 
 func feature(root, file string) string {
@@ -159,6 +184,7 @@ func TestNewCreatesVerilexWithFrameStubsInBareProject(t *testing.T) {
 
 func TestProposeNeedsUsesInTwoDifferentRuns(t *testing.T) {
 	root := product(t)
+	withoutClaims(t, root)
 	done := verilex(t, root, nil, "propose", "item-stored")
 	equal(t, done.code, 2)
 	equal(t, done.stderr, "verilex: refused: item-stored has counted uses in 0 run(s); propose needs at least 2 different runs in which it was green or red\n")
@@ -182,14 +208,10 @@ func TestProposeNeedsUsesInTwoDifferentRuns(t *testing.T) {
 			t.Fatalf("use evidence %s: %v", use.Evidence, err)
 		}
 	}
-	equal(t, len(packet.Sections), 0)
-	equal(t, packet.Claim.Pin, pinOf(t, root, "item-added"))
-	equal(t, packet.Claim.Entry, "cli")
-	contains(t, packet.Claim.Text, "sentence: A named item is in the store.")
-	equal(t, len(packet.Claim.Sources), 1)
-	equal(t, packet.Claim.Sources[0].Ref, itemAdd)
-	equal(t, packet.Claim.Sources[0].Requirements, []string{addRequirement})
-	equal(t, packet.Claim.Sources[0].Review, []string(nil))
+	equal(t, len(packet.Sections), 1)
+	equal(t, packet.Sections[0].Ref, itemAdd)
+	equal(t, packet.Sections[0].File, filepath.Join(".cursor", "skills", "verify-tally", "features", "items.md"))
+	contains(t, packet.Sections[0].Text, "Expect exit 0 and `added NAME`")
 	contains(t, packet.Files["word.md"], "word: item-stored")
 	contains(t, packet.Files["run"], "tally(\"add\", name)")
 	names := []string{}
@@ -202,6 +224,7 @@ func TestProposeNeedsUsesInTwoDifferentRuns(t *testing.T) {
 
 func TestAdmitRecordsCuratorVerdict(t *testing.T) {
 	root := product(t)
+	withoutClaims(t, root)
 	used(t, root, "store-open | item-stored apple")
 	used(t, root, "store-open | item-stored pear")
 	before := time.Now().UTC().Add(-time.Second)
@@ -222,8 +245,7 @@ func TestAdmitRecordsCuratorVerdict(t *testing.T) {
 	equal(t, admission.Curator, "curator-model-1")
 	equal(t, admission.Packet, packet.ID)
 	equal(t, admission.Runs, []string{packet.Uses[0].Run, packet.Uses[1].Run})
-	equal(t, admission.Claim, pinOf(t, root, "item-added"))
-	equal(t, admission.Sections, map[string]string(nil))
+	equal(t, admission.Sections, map[string]string{itemAdd: packet.Sections[0].Hash})
 	equal(t, status(t, root, "item-stored"), "admitted")
 	equal(t, status(t, root, "store-open"), "provisional")
 	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (1 admitted)\n")
@@ -235,6 +257,7 @@ func TestAdmitRecordsCuratorVerdict(t *testing.T) {
 
 func TestRejectVerdictLeavesWordProvisional(t *testing.T) {
 	root := product(t)
+	withoutClaims(t, root)
 	used(t, root, "store-open | item-stored apple")
 	used(t, root, "store-open | item-stored pear")
 	packet := propose(t, root, "item-stored")
@@ -251,6 +274,7 @@ func TestRejectVerdictLeavesWordProvisional(t *testing.T) {
 
 func TestAdmitRefusesVerdictThatDoesNotMatchItsPacket(t *testing.T) {
 	root := product(t)
+	withoutClaims(t, root)
 	used(t, root, "store-open | item-stored apple")
 	used(t, root, "store-open | item-stored pear")
 	packet := propose(t, root, "item-stored")
@@ -270,20 +294,12 @@ func TestAdmitRefusesVerdictThatDoesNotMatchItsPacket(t *testing.T) {
 		t.Fatalf("a refused verdict admitted the word: %v", err)
 	}
 
-	// The claim's sources are not its identity, but the curator judged the word against them.
-	claim := claimFile(root, "item-added")
-	original := read(t, claim)
-	write(t, claim, original+"  - ref: verify-tally/features/items.md#item-list\n    prose: 144f2a75a892\n    requirements: [Expect NAME on its own line.]\n", 0644)
+	items := feature(root, "items.md")
+	write(t, items, read(t, items)+"- Adding an item twice keeps one entry.\n", 0644)
 	file := verdict(t, root, `{"word": "item-stored", "packet": "`+packet.ID+`", "verdict": "admit", "curator": "m"}`)
 	done := verilex(t, root, nil, "admit", "item-stored", "--verdict", file)
 	equal(t, done.code, 2)
 	equal(t, done.stderr, "verilex: refused: item-stored changed since packet "+packet.ID+"; propose it again\n")
-	write(t, claim, original, 0644)
-
-	changeAddRequirement(t, root)
-	done = verilex(t, root, nil, "admit", "item-stored", "--verdict", file)
-	equal(t, done.code, 2)
-	equal(t, done.stderr, "verilex: refused: "+reviewAdd+"; bring its sources in line with the verify skill first; item-stored changed since packet "+packet.ID+"; propose it again\n")
 	equal(t, status(t, root, "item-stored"), "provisional")
 }
 
@@ -291,8 +307,8 @@ func TestEditingFeatureMapSectionMarksWordDriftSuspect(t *testing.T) {
 	root := product(t)
 	used(t, root, "store-open | item-stored apple")
 	used(t, root, "store-open | item-stored pear")
-	admit(t, root, "item-stored")
-	admit(t, root, "store-open")
+	onboard(t, root, "item-stored")
+	onboard(t, root, "store-open")
 	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (2 admitted)\n")
 
 	items := feature(root, "items.md")
@@ -312,10 +328,10 @@ func TestEditingFeatureMapSectionMarksWordDriftSuspect(t *testing.T) {
 
 	run := filepath.Join(root, ".verilex", "words", "store-open", "run")
 	write(t, run, read(t, run)+"\n", 0755)
-	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 2 admitted drift-suspect; they always run\n  store-open: the word's files changed since admission\n")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 2 admitted drift-suspect; they always run\n  store-open: the word's files changed since onboarding\n")
 
-	packet := propose(t, root, "store-open")
-	equal(t, packet.Status, lifecycle.DriftSuspect)
+	contains(t, onboard(t, root, "store-open").stdout, "onboarded store-open: claim "+pinOf(t, root, "store-opened")+" joins the vocabulary; caught dirty-open\n")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (2 admitted)\n")
 }
 
 // A word without a claim keeps the older anchor: its whole feature-map section, or the whole
@@ -326,7 +342,6 @@ func TestWordWithoutClaimDriftsWithItsWholeSection(t *testing.T) {
 	used(t, root, "store-open | store-glanced")
 	used(t, root, "store-open | store-glanced")
 	packet := admit(t, root, "store-glanced")
-	equal(t, packet.Claim, (*curation.ClaimPacket)(nil))
 	equal(t, len(packet.Sections), 1)
 	contains(t, packet.Sections[0].Text, "`store-open` opens an empty store.")
 	equal(t, status(t, root, "store-glanced"), "admitted")
@@ -357,8 +372,8 @@ func TestGapRecordsNoteWithoutTouchingVerifySkill(t *testing.T) {
 	contains(t, done.stderr, "describe the product moment")
 }
 
-// curated copies tally with every word admitted, standing in for the propose and admit flow
-// tested above, so tests about skipping start from words that are allowed to skip.
+// curated copies tally with every word admitted, standing in for the onboarding and curator flows
+// tested elsewhere, so tests about skipping start from words that are allowed to skip.
 func curated(t *testing.T) string {
 	t.Helper()
 	root := product(t)
@@ -366,9 +381,16 @@ func curated(t *testing.T) string {
 	return root
 }
 
-// admitted writes an admission record for each named word (every word when none is named)
-// that matches the word's files and claim version (or feature-map sections) as they are now.
+// admitted records each named word (every word when none is named) as admitted, matching its files
+// and claim version as they are now: a sealed onboarding decision for a word that proves a claim,
+// an admission record for one that names feature-map sections.
 func admitted(t *testing.T, root string, names ...string) {
+	t.Helper()
+	admittedFor(t, root, "tally", names...)
+}
+
+// admittedFor records words as admitted with their uses in another product.
+func admittedFor(t *testing.T, root, product string, names ...string) {
 	t.Helper()
 	project, err := dictionary.FindProject(root)
 	if err != nil {
@@ -386,11 +408,22 @@ func admitted(t *testing.T, root string, names ...string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		admission := lifecycle.Admission{Word: word.Name, Date: time.Now().UTC().Format(time.RFC3339), Curator: "test-curator", Packet: "0123456789abcdef", Runs: []string{"1-a", "2-b"}, WordDigest: digest}
 		if word.Claim != nil {
-			admission.Claim, admission.ClaimSources = word.Claim.Pin(), word.Claim.SourcesDigest()
+			g, err := grouping.Load(project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := grouping.Decision{Claim: word.Claim.Pin(), Entry: word.Entry, Digest: digest, Match: grouping.Same, Defects: map[string]string{},
+				Uses: map[string][]string{product: {"1-a", "2-b"}}, ClaimSources: word.Claim.SourcesDigest(), Date: time.Now().UTC().Format(time.RFC3339), Record: "test"}
+			for name, defect := range word.Claim.Defects {
+				d.Defects[name] = defect.Digest()
+			}
+			g.Set(word.Name, d)
+			if err = grouping.Save(project, g); err != nil {
+				t.Fatal(err)
+			}
 		} else {
-			admission.Sections = map[string]string{}
+			admission := lifecycle.Admission{Word: word.Name, Date: time.Now().UTC().Format(time.RFC3339), Curator: "test-curator", Packet: "0123456789abcdef", Runs: []string{"1-a", "2-b"}, WordDigest: digest, Sections: map[string]string{}}
 			for _, ref := range word.Implements {
 				section, err := featuremap.Resolve(project.Root, project.SkillDirs, ref)
 				if err != nil {
@@ -398,15 +431,32 @@ func admitted(t *testing.T, root string, names ...string) {
 				}
 				admission.Sections[ref] = section.Hash
 			}
+			data, err := json.Marshal(admission)
+			if err != nil {
+				t.Fatal(err)
+			}
+			write(t, lifecycle.AdmissionPath(word), string(data), 0644)
 		}
-		data, err := json.Marshal(admission)
-		if err != nil {
-			t.Fatal(err)
-		}
-		write(t, lifecycle.AdmissionPath(word), string(data), 0644)
 		if s := status(t, root, word.Name); s != "admitted" {
 			t.Fatalf("%s is %s after admission", word.Name, s)
 		}
+	}
+}
+
+// unadmitted drops a word's onboarding decision, standing in for a word that was never onboarded.
+func unadmitted(t *testing.T, root, word string) {
+	t.Helper()
+	project, err := dictionary.FindProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := grouping.Load(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(g.Words, word)
+	if err = grouping.Save(project, g); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -432,7 +482,7 @@ func TestChainWithProvisionalWordIsNeverSkipped(t *testing.T) {
 
 	admitted(t, root, "item-listed")
 	proof := green(t, root, nil, chain)
-	equal(t, proof.Rerun, "item-listed apple: word changed")
+	equal(t, proof.Rerun, "item-listed apple: word admission changed")
 	ranLive(t, proof)
 	record = green(t, root, nil, chain)
 	equal(t, record.Skipped, true)
@@ -457,34 +507,35 @@ func TestChainWithDriftSuspectWordIsNeverSkipped(t *testing.T) {
 	}
 	write(t, items, strings.ReplaceAll(original, "`item-add`", "`item-put`"), 0644)
 	record := green(t, root, nil, chain)
-	renamed := record
 	equal(t, record.Rerun, "item-stored apple: drift-suspect: claim item-added needs review: "+itemAdd+": sub-feature item-add is gone")
 	ranLive(t, record)
 
-	// An admission record that cannot be read holds the word too.
+	// A grouping file that cannot be read leaves every word that proves a claim without a stamp.
 	write(t, items, original, 0644)
-	equal(t, green(t, root, nil, chain).Skipped, true)
-	admission := filepath.Join(root, ".verilex", "words", "item-listed", "admission.json")
-	saved := read(t, admission)
-	write(t, admission, "{not json", 0644)
-	green(t, root, nil, chain)
-	record = green(t, root, nil, chain)
-	contains(t, record.Rerun, "item-listed apple: lifecycle status unreadable: ")
-	ranLive(t, record)
+	skipped := green(t, root, nil, chain)
+	equal(t, skipped.Skipped, true)
+	groupingFile := filepath.Join(root, ".verilex", "grouping.yaml")
+	saved := read(t, groupingFile)
+	write(t, groupingFile, "words: [not, a, mapping\n", 0644)
+	for i := 0; i < 2; i++ {
+		record = green(t, root, nil, chain)
+		contains(t, record.Rerun, "store-open: grouping: "+groupingFile+": malformed grouping file: ")
+		ranLive(t, record)
+	}
 
-	// Restoring the record lifts the hold. The record is part of the word's stamp, so the stamps
-	// are again those of the passes recorded before it became unreadable, and those still stand.
-	write(t, admission, saved, 0644)
+	// Restoring the file lifts the hold. The file is part of the word's stamp, so the stamps are
+	// again those of the passes recorded before it became unreadable, and those still stand.
+	write(t, groupingFile, saved, 0644)
 	record = green(t, root, nil, chain)
 	equal(t, record.Skipped, true)
-	equal(t, record.Words[2].ReliesOn, renamed.Run)
+	equal(t, record.Words[2].ReliesOn, skipped.Words[2].ReliesOn)
 }
 
 // Rule: a use is a green or red step in a live run that was itself green or red. Inconclusive
 // steps, inconclusive runs and skipped runs never drove the product to a verdict.
 func TestOnlyJudgedLiveRunsCountAsUses(t *testing.T) {
 	root := curated(t)
-	green(t, root, nil, chain)
+	first := green(t, root, nil, chain)
 	equal(t, green(t, root, nil, chain).Skipped, true)
 	runJSON(t, root, map[string]string{"TALLY_SIMULATE_LOCK": "1"}, chain)
 	cleanup := filepath.Join(root, ".verilex", "frame", "cleanup")
@@ -495,14 +546,12 @@ func TestOnlyJudgedLiveRunsCountAsUses(t *testing.T) {
 
 	write(t, filepath.Join(root, ".verilex", "words", "item-stored", "word.md"), read(t, filepath.Join(root, ".verilex", "words", "item-stored", "word.md"))+"More words.\n", 0644)
 	equal(t, status(t, root, "item-stored"), "drift-suspect")
-	done = verilex(t, root, nil, "propose", "item-stored")
+	done = verilex(t, root, nil, "onboard", "item-stored")
 	equal(t, done.code, 2)
-	contains(t, done.stderr, "item-stored has counted uses in 1 run(s)")
+	contains(t, done.stderr, "item-stored has counted uses in 1 run(s) of tally")
 
-	done = verilex(t, root, map[string]string{"TALLY_DEFECT": "drop-adds"}, "run", chain)
-	equal(t, done.code, 1)
-	packet := propose(t, root, "item-stored")
-	equal(t, len(packet.Uses), 2)
-	equal(t, string(packet.Uses[0].Verdict), "green")
-	equal(t, string(packet.Uses[1].Verdict), "red")
+	_, red := runJSON(t, root, map[string]string{"TALLY_DEFECT": "drop-adds"}, chain)
+	equal(t, verdicts(red), []string{"green", "red"})
+	onboard(t, root, "item-stored")
+	equal(t, decision(t, root, "item-stored").Uses["tally"], []string{first.Run, red.Run})
 }

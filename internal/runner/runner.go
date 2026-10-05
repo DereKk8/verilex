@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -33,16 +35,49 @@ type Run struct {
 	keep bool
 	// release lets go of the lock the run holds for as long as it lives (see Claim).
 	release func()
+	// env changes the environment of every frame step and word; trial keeps the run out of the
+	// ledger. Only Trial sets them.
+	env   Env
+	trial bool
+}
+
+// Env changes the environment a run's frame steps and words see: Set adds or overrides
+// variables and Unset removes them. Onboarding plants defects through it.
+type Env struct {
+	Set   map[string]string
+	Unset []string
 }
 
 // New records a run under an id no other run of the project holds and keeps hold of it until
 // Execute returns: while it lives, no other verilex process may tear down or take over its instance.
 func New(project dictionary.Project, chain string, steps []dictionary.Step) (*Run, error) {
+	return newRun(project, chain, steps, "")
+}
+
+// Trial runs a chain live on a fresh instance outside the product's run history: its record and
+// evidence go to dir, env applies to every frame step and word, and nothing it proves enters the
+// ledger or counts as a use. Onboarding drives its trials through it.
+func Trial(project dictionary.Project, chain string, steps []dictionary.Step, dir string, env Env) (Record, error) {
+	r, err := newRun(project, chain, steps, dir)
+	if err != nil {
+		return Record{}, err
+	}
+	r.env, r.trial = env, true
+	return r.Execute(Plan{Rerun: "onboarding trial", stamps: make([]stamp.Stamp, len(steps))}, Options{})
+}
+
+// newRun records a run under a fresh id, in the project's run history, or in dir when one is given.
+func newRun(project dictionary.Project, chain string, steps []dictionary.Step, dir string) (*Run, error) {
 	patterns, err := patterns(project)
 	if err != nil {
 		return nil, err
 	}
-	id, dir, err := reserve(RunsDir(project))
+	var id string
+	if dir == "" {
+		id, dir, err = reserve(RunsDir(project))
+	} else {
+		id, err = trialID(dir)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +115,15 @@ func reserve(runs string) (id, dir string, err error) {
 	}
 }
 
+// trialID creates a trial's own directory and names the trial with a fresh id.
+func trialID(dir string) (string, error) {
+	var suffix [6]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d-%s", time.Now().Unix(), hex.EncodeToString(suffix[:])), os.MkdirAll(dir, 0700)
+}
+
 // Refused stops a run before it starts anything: the run leaves no record behind.
 type Refused struct{ Err error }
 
@@ -111,7 +155,7 @@ func (r *Run) Execute(p Plan, opts Options) (Record, error) {
 	if opts.Keep {
 		r.record.Cleanup = "kept"
 	} else if r.record.Instance != nil || p.kept == nil {
-		if cleanErr := Cleanup(r.project, &r.record, r.record.Dir); cleanErr != nil {
+		if cleanErr := cleanup(r.project, &r.record, r.record.Dir, r.env); cleanErr != nil {
 			r.record.Verdict = ptr(verdict.Inconclusive)
 			r.record.Reason = ptr(cleanErr.Error())
 			err = cleanErr
@@ -121,7 +165,9 @@ func (r *Run) Execute(p Plan, opts Options) (Record, error) {
 		return r.record, saveErr
 	}
 	// A ledger that misses a result only costs a later re-run, so a failed write never changes the verdict.
-	_ = ledger.At(LedgerDir(r.project)).Record(r.proven(p.stamps))
+	if !r.trial {
+		_ = ledger.At(LedgerDir(r.project)).Record(r.proven(p.stamps))
+	}
 	return r.record, err
 }
 
@@ -336,7 +382,7 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 		return WordRecord{}, err
 	}
 	started := time.Now()
-	code, err := execute(append([]string{step.Word.Run()}, step.Argv...), evidence, environment(r.project, &r.record, evidence), step.Word.Timeout, string(stdin))
+	code, err := execute(append([]string{step.Word.Run()}, step.Argv...), evidence, environment(r.project, &r.record, evidence, r.env), step.Word.Timeout, string(stdin))
 	if err != nil {
 		return WordRecord{}, err
 	}
@@ -360,7 +406,7 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 
 func (r *Run) frame(step, label string) (Frame, error) {
 	evidence := filepath.Join(r.record.Dir, "frame-"+label)
-	code, err := execute([]string{r.project.Frame(step)}, evidence, environment(r.project, &r.record, evidence), frameTimeout, "")
+	code, err := execute([]string{r.project.Frame(step)}, evidence, environment(r.project, &r.record, evidence, r.env), frameTimeout, "")
 	if err != nil {
 		return Frame{}, err
 	}
@@ -398,8 +444,12 @@ func (r *Run) stop(v verdict.Verdict, reason string) {
 func (r *Run) save() error { return Save(r.record.Dir, &r.record) }
 
 func Cleanup(project dictionary.Project, record *Record, dir string) error {
+	return cleanup(project, record, dir, Env{})
+}
+
+func cleanup(project dictionary.Project, record *Record, dir string, env Env) error {
 	evidence := filepath.Join(dir, "frame-cleanup")
-	code, err := execute([]string{project.Frame("cleanup")}, evidence, environment(project, record, evidence), frameTimeout, "")
+	code, err := execute([]string{project.Frame("cleanup")}, evidence, environment(project, record, evidence, env), frameTimeout, "")
 	if err != nil {
 		return err
 	}
@@ -444,15 +494,20 @@ func Cleanup(project dictionary.Project, record *Record, dir string) error {
 	return Save(dir, record)
 }
 
-func environment(project dictionary.Project, record *Record, evidence string) []string {
+func environment(project dictionary.Project, record *Record, evidence string, change Env) []string {
 	instance, _ := json.Marshal(record.Instance)
 	values := map[string]string{"VERILEX_RUN": record.owner(), "VERILEX_PROJECT_ROOT": project.Root, "VERILEX_INSTANCE": string(instance), "VERILEX_EVIDENCE": evidence}
 	env := []string{}
 	for _, v := range os.Environ() {
 		key, _, _ := strings.Cut(v, "=")
-		if _, ok := values[key]; !ok {
-			env = append(env, v)
+		if _, ok := values[key]; !ok && !slices.Contains(change.Unset, key) {
+			if _, ok = change.Set[key]; !ok {
+				env = append(env, v)
+			}
 		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(change.Set)) {
+		env = append(env, key+"="+change.Set[key])
 	}
 	for _, key := range []string{"VERILEX_RUN", "VERILEX_PROJECT_ROOT", "VERILEX_INSTANCE", "VERILEX_EVIDENCE"} {
 		env = append(env, key+"="+values[key])

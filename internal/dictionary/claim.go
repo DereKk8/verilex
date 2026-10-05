@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -47,6 +48,10 @@ type Claim struct {
 	Requires, Provides []string
 	Evidence           Evidence
 	Sources            []ClaimSource
+	// Defects are the planted defects onboarding proves its words against: named product states,
+	// each set up through environment variables, in which the claim is false. Like sources, they
+	// are not identity.
+	Defects map[string]Defect
 	// Fingerprint covers Sentence, Args, Entry, Preconditions, Requires, Provides and Evidence.
 	Fingerprint string
 }
@@ -63,15 +68,34 @@ type Evidence struct {
 
 // ClaimSource anchors a claim in the verify skill: a sub-feature reference, the requirement
 // sentences there that the claim maps to, and the fingerprint of the sub-feature's other prose
-// as the claim's reviewer accepted it.
+// as the claim's reviewer accepted it. Repo names a checkout of another repository, relative to
+// the project root, when the verify skill lives there instead of in the product.
 type ClaimSource struct {
 	Ref          string   `yaml:"ref" json:"ref"`
+	Repo         string   `yaml:"repo,omitempty" json:"repo,omitempty"`
 	Prose        string   `yaml:"prose" json:"prose"`
 	Requirements []string `yaml:"requirements" json:"requirements"`
 	// Covered lists what other claims map in the same sub-feature, counted only for a claim
 	// whose word a curator admitted for the claim's current version and sources. A requirement
 	// sentence of the sub-feature outside it is one no curated word proves. lifecycle.Load fills it.
 	Covered []string `yaml:"-" json:"-"`
+}
+
+// Defect is a planted defect: the environment that puts the product in a state where the claim
+// is false. Every frame step and word of an onboarding trial sees it.
+type Defect struct {
+	Env map[string]string
+}
+
+// Digest fingerprints a defect's definition, so a word gated against it can tell when it changed.
+func (d Defect) Digest() string {
+	keys := slices.Sorted(maps.Keys(d.Env))
+	var b strings.Builder
+	for _, key := range keys {
+		fmt.Fprintf(&b, "%q=%q\n", key, d.Env[key])
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])[:versionLength]
 }
 
 // Version names the claim's current version: the first hex digits of its fingerprint.
@@ -90,7 +114,7 @@ func (c Claim) SourcesDigest() string {
 			requirements = append(requirements, featuremap.Normalize(sentence))
 		}
 		slices.Sort(requirements)
-		anchors = append(anchors, source.Ref+"\n"+source.Prose+"\n"+strings.Join(requirements, "\n"))
+		anchors = append(anchors, source.Repo+"\n"+source.Ref+"\n"+source.Prose+"\n"+strings.Join(requirements, "\n"))
 	}
 	slices.Sort(anchors)
 	sum := sha256.Sum256([]byte(strings.Join(anchors, "\n\n")))
@@ -132,6 +156,16 @@ func SubFeature(ref string) string {
 	return path.Clean(filepath.ToSlash(file)) + "#" + id
 }
 
+// SourceKey names the sub-feature a source anchors on, in the repository that holds it, so a
+// source in another repository never stands for a local sub-feature with the same reference.
+func SourceKey(source ClaimSource) string {
+	repo := ""
+	if source.Repo != "" {
+		repo = filepath.Clean(source.Repo)
+	}
+	return repo + "\x00" + SubFeature(source.Ref)
+}
+
 type claimFile struct {
 	Claim         string        `yaml:"claim"`
 	Sentence      string        `yaml:"sentence"`
@@ -142,7 +176,11 @@ type claimFile struct {
 	Provides      []string      `yaml:"provides"`
 	Evidence      Evidence      `yaml:"evidence"`
 	Sources       []ClaimSource `yaml:"sources"`
+	Defects       defectsFile   `yaml:"defects"`
 }
+
+// defectsFile maps each planted defect's name to the environment that plants it.
+type defectsFile map[string]map[string]string
 
 var (
 	claimPin = regexp.MustCompile(`^([\pL\pN][\pL\pN._-]*)@(\S+)$`)
@@ -168,7 +206,7 @@ func ReadClaim(path string) (Claim, error) {
 		Name: f.Claim, Path: path, Sentence: collapse(f.Sentence),
 		Args: set(f.Args), Entry: set(f.Entry), Preconditions: set(f.Preconditions), Requires: set(f.Requires), Provides: set(f.Provides),
 		Evidence: Evidence{collapse(f.Evidence.Action), collapse(f.Evidence.Observation), set(f.Evidence.NonProofs)},
-		Sources:  f.Sources,
+		Sources:  f.Sources, Defects: map[string]Defect{},
 	}
 	switch {
 	case c.Name != name || !WordName.MatchString(name):
@@ -206,6 +244,17 @@ func ReadClaim(path string) (Claim, error) {
 				return c, fmt.Errorf("%s: %s is not one requirement sentence: it must say Expect, must, require, exits, returns or Success is outside code spans, and not be an action (Run ...)", path, quote(sentence))
 			}
 		}
+	}
+	for name, env := range f.Defects {
+		if !WordName.MatchString(name) || len(env) == 0 {
+			return c, fmt.Errorf("%s: defect %s must be a plain name that sets at least one environment variable", path, quote(name))
+		}
+		for key := range env {
+			if !envName.MatchString(key) {
+				return c, fmt.Errorf("%s: defect %s sets %s, which is not a variable name", path, name, quote(key))
+			}
+		}
+		c.Defects[name] = Defect{Env: env}
 	}
 	if err = undeclared(path, append(slices.Clone(c.Requires), c.Provides...), c.Args); err != nil {
 		return c, err

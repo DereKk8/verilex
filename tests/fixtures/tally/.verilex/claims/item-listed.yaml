@@ -6,6 +6,8 @@ requires: ["item:{name}"]
 evidence:
   action: "`tally list` prints NAME on its own line."
   observation: The listing matches store.json.
+defects:
+  hidden-list: {TALLY_DEFECT: hide-lists}
 sources:
   - ref: verify-tally/features/items.md#item-list
     prose: 144f2a75a892

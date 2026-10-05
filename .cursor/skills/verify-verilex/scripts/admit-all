@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# verify-verilex Helper: admit the scratch product's three words through the CLI (two uses, propose, admit).
+# verify-verilex Helper: admit the scratch product's three words through the CLI (two uses, then onboard).
 # usage: admit-all SESSION   (once per session; skip, plan and --continue need admitted words)
 set -uo pipefail
 S="${1:?usage: admit-all SESSION}"
@@ -8,13 +8,8 @@ step() { out="$("$S/vx" "$@")" || { printf '%s\n' "$out"; echo "admit-all: FAIL 
 chain='store-open | item-stored apple | item-listed apple'
 step admit-all-use-1 verilex run "$chain"
 step admit-all-use-2 verilex run "$chain"
-mkdir -p "$S/verdicts"
 for word in store-open item-stored item-listed; do
-  step "admit-all-propose-$word" verilex propose "$word"
-  packet="$(printf '%s\n' "$out" | sed -n 's/^proposed [^:]*: packet \([0-9a-f]*\) .*/\1/p')"
-  printf '{"word": "%s", "packet": "%s", "verdict": "admit", "curator": "verify-verilex", "reason": "scratch product baseline"}\n' \
-    "$word" "$packet" > "$S/verdicts/$word-admit.json"
-  step "admit-all-admit-$word" verilex admit "$word" --verdict "$S/verdicts/$word-admit.json"
+  step "admit-all-onboard-$word" verilex onboard "$word"
   printf '%s\n' "$out" | sed -n 2p
 done
 step admit-all-words verilex words

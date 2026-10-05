@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "summary": "Adds the verify-verilex skill, which drives the verilex CLI on a disposable copy of the tally fixture with an isolated VERILEX_HOME.",
+  "files": [
+    {
+      "path": ".cursor/skills/verify-verilex/scripts/launch",
+      "summary": "Creates a session: pins the binary under test and copies the tally fixture into a temp dir.",
+      "annotations": [
+        {
+          "newRange": [
+            20,
+            30
+          ],
+          "summary": "launch copies the binary into the session, whether --bin gave it or go build made it, and copies tests/fixtures/tally as the scratch product.",
+          "rationale": "The binary is copied rather than symlinked, so a later rebuild cannot change a running session, and doctor can compare the sha256 recorded at launch. The fixture is reused rather than duplicated because it is already the maintained example product. The risk is that a test change to the fixture changes the skill's expected outputs. Verified: launch --bin with a separately built frozen binary, cmp against the session copy, and a green run.",
+          "author": "fm/verilex-verify-skill"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/scripts/doctor",
+      "summary": "Runs the read-only check that a session is ours and worth driving.",
+      "annotations": [
+        {
+          "newRange": [
+            13,
+            22
+          ],
+          "summary": "doctor captures --help output before matching it, and fails when files under ~/.local/state/verilex/tally are newer than the session.",
+          "rationale": "An earlier `--help | head | grep -q` pipeline under pipefail failed intermittently from SIGPIPE, so the output is now captured first; 8 repeated doctor calls printed ok. The state-dir check catches any write that escaped VERILEX_HOME. If another real tally project writes there during a session, doctor reports a false FAIL.",
+          "author": "fm/verilex-verify-skill"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/features/verdicts.md",
+      "summary": "Holds the verdict, exit code and honesty-rule recipes.",
+      "annotations": [
+        {
+          "newRange": [
+            1,
+            54
+          ],
+          "summary": "The secret probe builds its fake GitHub token at runtime with printf, so no token-shaped literal is ever committed.",
+          "rationale": "A literal token pattern in the repo could trip push protection or secret scanners. Every honesty row was driven and printed the listed cause with exit 2. The 7-day expiry in run.md is the one sub-feature that was not driven, because the CLI cannot reach it without waiting. The project secret_patterns probe writes PROBE-1234, a made-up pattern, and restores config.yaml because config changes every stamp.",
+          "author": "fm/verilex-verify-skill"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/features/plan.md",
+      "summary": "Holds the plan recipes, now ordered by the reason verilex checks first.",
+      "annotations": [
+        {
+          "newRange": [
+            24,
+            25
+          ],
+          "summary": "The pristine plan step expects 'no green result on record'; the provisional reason is expected only after one green run.",
+          "rationale": "The independent check at 817e3dc found that verilex checks 'no green result' before 'provisional', so the old expectation failed in a fresh session. Verified in a fresh session: plan-pristine, plan-first-run, plan-provisional printed the recipe text.",
+          "author": "fm/verilex-verify-skill"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/features/continue.md",
+      "summary": "Holds the --continue recipes, now including unknown runs, --json and refresh failure.",
+      "annotations": [
+        {
+          "newRange": [
+            40,
+            41
+          ],
+          "summary": "The refresh-failure recipe corrupts the kept store's owner file so the tally refresh frame refuses it.",
+          "rationale": "This reaches the README rule that a failing refresh makes the run inconclusive without editing verilex state. Because the tally cleanup frame also refuses a store it does not own, the store outlives the run, so the session cleanup helper removes it. Verified end to end in a fresh session, including the helper's '1 store(s) were still alive' line.",
+          "author": "fm/verilex-verify-skill"
+        }
+      ]
+    }
+  ]
+}

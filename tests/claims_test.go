@@ -193,20 +193,30 @@ func TestChangedSourceRequirementFlagsClaimForReview(t *testing.T) {
 	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; "+headline("item-stored apple: drift-suspect: claim item-added needs review: "+review)+"\n")
 
 	// The reviewer judges that the claim still says the same and maps it to the new sentence.
-	// The version and the passes recorded for it stand, but no pass was judged against the new
-	// mapping, so every word that proves the claim runs live once before it may skip again.
+	// The version and the uses recorded for it stand, but the curator judged item-stored against
+	// the old sources, so it is drift-suspect and runs live until a curator admits it again.
 	edit(t, claimFile(root, "item-added"), addRequirement, reworded)
 	equal(t, pinOf(t, root, "item-added"), v1)
-	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
-	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; item-stored apple: claim sources changed\n")
-	remapped := green(t, root, nil, chain)
-	equal(t, remapped.Rerun, "item-stored apple: claim sources changed")
-	ranLive(t, remapped)
-	equal(t, remapped.Words[1].Proves, v1)
-	equal(t, plan(t, root, chain).stdout, "plan: skip 3, run 0\n"+skips(remapped.Run, labels...))
+	remapped := "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: admitted before claim item-added's sources changed; propose it again\n"
+	equal(t, verilex(t, root, nil, "check").stdout, remapped)
+	record := green(t, root, nil, chain)
+	ranLive(t, record)
+	equal(t, record.Words[1].Proves, v1)
+	record = green(t, root, nil, chain)
+	equal(t, record.Rerun, "item-stored apple: drift-suspect: admitted before claim item-added's sources changed; propose it again")
+	ranLive(t, record)
+	readmit := func() {
+		t.Helper()
+		admit(t, root, "item-stored")
+		equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
+		ranLive(t, green(t, root, nil, chain))
+		again := green(t, root, nil, chain)
+		equal(t, again.Skipped, true)
+	}
+	readmit()
 
 	// A requirement added to the sub-feature that no claim maps asks for review and is named;
-	// mapping it there clears the review and, again, the next run goes live.
+	// mapping it in the claim clears the review, and the word waits for a curator again.
 	write(t, items, strings.Replace(read(t, items), reworded, reworded+" Expect exit 2 and `exists NAME` when NAME is already stored.", 1), 0644)
 	unmapped := itemAdd + ": requirement no claim maps: Expect exit 2 and `exists NAME` when NAME is already stored."
 	contains(t, verilex(t, root, nil, "claims").stdout, "  entry: cli  words: item-stored\n  review: "+unmapped+"\n")
@@ -214,11 +224,11 @@ func TestChangedSourceRequirementFlagsClaimForReview(t *testing.T) {
 	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; item-stored apple: drift-suspect: claim item-added needs review: "+unmapped+"\n")
 	edit(t, claimFile(root, "item-added"), "      - "+strconv.Quote(reworded), "      - "+strconv.Quote(reworded)+"\n      - \"Expect exit 2 and `exists NAME` when NAME is already stored.\"")
 	equal(t, pinOf(t, root, "item-added"), v1)
-	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
-	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; item-stored apple: claim sources changed\n")
+	equal(t, verilex(t, root, nil, "check").stdout, remapped)
 	write(t, items, original, 0644)
 	write(t, claimFile(root, "item-added"), claim, 0644)
-	equal(t, green(t, root, nil, chain).Rerun, "item-stored apple: claim sources changed")
+	ranLive(t, green(t, root, nil, chain))
+	readmit()
 
 	write(t, items, strings.ReplaceAll(original, "`item-add`", "`item-put`"), 0644)
 	contains(t, verilex(t, root, nil, "claims").stdout, "  review: "+itemAdd+": sub-feature item-add is gone\n")
@@ -257,7 +267,7 @@ func TestClaimRequirementsStayInsideTheirSubFeature(t *testing.T) {
 	write(t, items, original, 0644)
 	edit(t, claimFile(root, "item-added"), "      - \""+addRequirement+"\"", "      - Expect NAME on its own line.")
 	review := itemAdd + ": requirement is outside sub-feature item-add: Expect NAME on its own line.; " + itemAdd + ": requirement no claim maps: " + addRequirement
-	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: claim item-added needs review: "+review+"\n")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: admitted before claim item-added's sources changed; propose it again; claim item-added needs review: "+review+"\n")
 	done := verilex(t, root, nil, "propose", "item-stored")
 	equal(t, done.code, 2)
 	contains(t, done.stderr, "verilex: refused: ")
@@ -292,53 +302,93 @@ func TestProseChangeInSubFeatureFlagsClaimForReview(t *testing.T) {
 	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: claim item-added needs review: "+review+"\n")
 	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; item-stored apple: drift-suspect: claim item-added needs review: "+review+"\n")
 
-	// The reviewer judges that the claim still holds and pins the new prose.
-	edit(t, claimFile(root, "item-added"), "prose: 2948a95bd310", "prose: "+prose)
-	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
-	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; item-stored apple: claim sources changed\n")
-	ranLive(t, green(t, root, nil, chain))
-	equal(t, plan(t, root, chain).code, 0)
-	contains(t, plan(t, root, chain).stdout, "plan: skip 3, run 0\n")
+	// Prose of another sub-feature flags the claims anchored there too.
+	write(t, items, strings.Replace(read(t, items), "lists every stored item, one per line.", "lists every stored item, one per line, sorted.", 1), 0644)
+	contains(t, verilex(t, root, nil, "check").stdout, "check: 2 of 3 admitted drift-suspect; they always run\n  item-listed: claim item-listed needs review: verify-tally/features/items.md#item-list: prose changed")
+	write(t, items, strings.Replace(original, "add NAME`. Expect", "add NAME`, which must exit 2 when NAME is stored. Expect", 1), 0644)
 
-	// Prose of another sub-feature flags only the claims anchored there.
-	write(t, items, strings.Replace(original, "lists every stored item, one per line.", "lists every stored item, one per line, sorted.", 1), 0644)
-	edit(t, claimFile(root, "item-added"), "prose: "+prose, "prose: 2948a95bd310")
-	check := verilex(t, root, nil, "check").stdout
-	contains(t, check, "check: 1 of 3 admitted drift-suspect; they always run\n  item-listed: claim item-listed needs review: verify-tally/features/items.md#item-list: prose changed")
+	// The reviewer judges that the claim still holds and pins the new prose. The curator judged
+	// item-stored against the old prose, so it runs live until a curator admits it again.
+	edit(t, claimFile(root, "item-added"), "prose: 2948a95bd310", "prose: "+prose)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: admitted before claim item-added's sources changed; propose it again\n")
+	ranLive(t, green(t, root, nil, chain))
+	ranLive(t, green(t, root, nil, chain, "--fresh"))
+	admit(t, root, "item-stored")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
+	ranLive(t, green(t, root, nil, chain))
+	contains(t, plan(t, root, chain).stdout, "plan: skip 3, run 0\n")
 }
 
-// Rule: a requirement sentence counts as mapped only when a claim that a word proves maps it. A
-// claim no word proves (or only a word pinned to an older version) covers nothing, so it can
-// never clear another claim's review.
-func TestClaimWithoutWordCoversNothing(t *testing.T) {
+// Rule: another claim's mapping covers a requirement sentence only when a curator admitted one
+// of its words for the claim as it is now. A claim without a word, a stub or never-run word, a
+// word with judged live uses but no admission, or a word pinned to an older version covers
+// nothing, so it can never clear another claim's review.
+func TestOnlyCuratedClaimsCoverRequirements(t *testing.T) {
 	root := curated(t)
 	green(t, root, nil, chain)
 	items := feature(root, "items.md")
 	twice := "Expect exit 2 and `exists NAME` when NAME is already stored."
 	edit(t, items, "`store.json` lists NAME.\n", "`store.json` lists NAME. "+twice+"\n")
 	review := "claim item-added needs review: " + itemAdd + ": requirement no claim maps: " + twice
-	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: "+review+"\n")
+	flagged := "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: " + review + "\n"
+	equal(t, verilex(t, root, nil, "check").stdout, flagged)
 
-	ghost := "claim: item-kept-once\nsentence: A name is stored at most once.\nentry: [cli]\nevidence:\n  action: \"`tally add NAME` twice exits 2 the second time.\"\n  observation: store.json lists NAME once.\n" +
-		"sources:\n  - ref: " + itemAdd + "\n    prose: 2948a95bd310\n    requirements: [\"" + twice + "\"]\n"
-	write(t, claimFile(root, "item-kept-once"), ghost, 0644)
+	write(t, claimFile(root, "item-kept-once"), "claim: item-kept-once\nsentence: A name is stored at most once.\nargs: [name]\nentry: [cli]\nrequires: [store]\n"+
+		"evidence:\n  action: \"`tally add NAME` twice exits 2 the second time.\"\n  observation: store.json lists NAME once.\n"+
+		"sources:\n  - ref: "+itemAdd+"\n    prose: 2948a95bd310\n    requirements: [\""+twice+"\"]\n", 0644)
 	pin := pinOf(t, root, "item-kept-once")
 	contains(t, verilex(t, root, nil, "claims").stdout, pin+"  A name is stored at most once.\n  entry: cli  words: -\n")
-	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: "+review+"\n")
+	equal(t, verilex(t, root, nil, "check").stdout, flagged)
 	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; item-stored apple: drift-suspect: "+review+"\n")
 
-	// Once a word proves the claim, the sentence is covered.
+	// A word that never ran covers nothing.
 	dir := filepath.Join(root, ".verilex", "words", "item-added-twice")
 	if err := os.Mkdir(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	write(t, filepath.Join(dir, "word.md"), "---\nword: item-added-twice\npromise: A name added twice is stored once.\nclaim: "+pin+"\nentry: cli\ninputs: [bin/tally]\n---\n", 0644)
+	write(t, filepath.Join(dir, "word.md"), "---\nword: item-added-twice\npromise: A name added twice is stored once.\nargs: [name]\nclaim: "+pin+"\nentry: cli\ninputs: [bin/tally]\n---\n", 0644)
 	write(t, filepath.Join(dir, "run"), read(t, filepath.Join(root, ".verilex", "words", "item-stored", "run")), 0755)
-	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
+	equal(t, verilex(t, root, nil, "check").stdout, flagged)
 
-	// A word pinned to an older version proves nothing now.
+	// Judged live uses show that the word runs, not that it exercises the sentence: still nothing.
+	used(t, root, "store-open | item-added-twice apple")
+	used(t, root, "store-open | item-added-twice apple")
+	equal(t, verilex(t, root, nil, "check").stdout, flagged)
+
+	// A curator admits the word over a packet that shows the item-add anchor: now it covers.
+	admit(t, root, "item-added-twice")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (4 admitted)\n")
+
+	// A word pinned to an older version covers nothing.
 	edit(t, claimFile(root, "item-kept-once"), "A name is stored at most once.", "A name is stored once at most.")
-	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: "+review+"\n")
+	contains(t, verilex(t, root, nil, "check").stdout, "  item-stored: "+review+"\n")
+}
+
+// Rule: a claim covers a sentence of sub-feature S only when its word was admitted while the
+// claim already mapped that sentence in S. A source added to an admitted claim afterwards, even
+// after a green live run, does not show that the claim's words exercise S, so it silences no
+// other claim's review until a curator admits the word again over the new sources.
+func TestClaimCoversOnlySubFeaturesItsWordWasCuratedFor(t *testing.T) {
+	root := curated(t)
+	green(t, root, nil, chain)
+	items := feature(root, "items.md")
+	twice := "Expect exit 2 and `exists NAME` when NAME is already stored."
+	edit(t, items, "`store.json` lists NAME.\n", "`store.json` lists NAME. "+twice+"\n")
+	stored := "  item-stored: claim item-added needs review: " + itemAdd + ": requirement no claim maps: " + twice + "\n"
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n"+stored)
+
+	// item-listed maps the sentence too, but its word was admitted before the claim did.
+	edit(t, claimFile(root, "item-listed"), "sources:\n", "sources:\n  - ref: "+itemAdd+"\n    prose: 2948a95bd310\n    requirements: [\""+twice+"\"]\n")
+	both := "check: 2 of 3 admitted drift-suspect; they always run\n  item-listed: admitted before claim item-listed's sources changed; propose it again\n" + stored
+	equal(t, verilex(t, root, nil, "check").stdout, both)
+	ranLive(t, green(t, root, nil, chain))
+	equal(t, verilex(t, root, nil, "check").stdout, both)
+	equal(t, plan(t, root, "store-open | item-stored apple").stdout, "plan: skip 0, run 2; item-stored apple: drift-suspect: claim item-added needs review: "+itemAdd+": requirement no claim maps: "+twice+"\n")
+
+	// The curator judges the item-listed word against its new sources and admits it again.
+	green(t, root, nil, chain, "--fresh")
+	admit(t, root, "item-listed")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
 }
 
 // Rule: a claim pins the order of reality for every word that proves it. A variant word that

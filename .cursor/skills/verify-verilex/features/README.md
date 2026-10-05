@@ -47,4 +47,4 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Admit](admit.md) - `verilex admit`: record a curator's admit or reject verdict.
 - [Gap](gap.md) - `verilex gap`: note a product moment the feature map lacks.
 - [Check](check.md) - `verilex check`: report drift-suspect admitted words.
-- [Claims](claims.md) - `verilex claims`: claim versions, stale pins, review of changed, moved and unmapped requirements and of changed prose, the live run after a remap, and pinned rules.
+- [Claims](claims.md) - `verilex claims`: claim versions, stale pins, review of changed, moved and unmapped requirements and of changed prose, drift after a remap, coverage only through admitted words, and pinned rules.

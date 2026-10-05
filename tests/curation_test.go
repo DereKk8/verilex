@@ -374,7 +374,7 @@ func admitted(t *testing.T, root string, names ...string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	words, err := dictionary.LoadWords(project)
+	words, err := lifecycle.LoadWords(project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +388,7 @@ func admitted(t *testing.T, root string, names ...string) {
 		}
 		admission := lifecycle.Admission{Word: word.Name, Date: time.Now().UTC().Format(time.RFC3339), Curator: "test-curator", Packet: "0123456789abcdef", Runs: []string{"1-a", "2-b"}, WordDigest: digest}
 		if word.Claim != nil {
-			admission.Claim = word.Claim.Pin()
+			admission.Claim, admission.ClaimSources = word.Claim.Pin(), word.Claim.SourcesDigest()
 		} else {
 			admission.Sections = map[string]string{}
 			for _, ref := range word.Implements {

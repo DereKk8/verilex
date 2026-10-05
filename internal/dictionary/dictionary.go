@@ -133,13 +133,8 @@ func CompilePattern(pattern string) (*regexp2.Regexp, error) {
 	return regexp2.Compile(pattern, 0)
 }
 
-func LoadWords(p Project) ([]Word, error) {
-	_, words, err := Load(p)
-	return words, err
-}
-
-// Load reads a project's claims and its words, binds each word to the claim it pins, and fills
-// each claim source's Covered from the claims that words prove.
+// Load reads a project's claims and its words and binds each word to the claim it pins. Claim
+// sources come back without Covered, which depends on admissions: lifecycle.Load fills it.
 func Load(p Project) (map[string]Claim, []Word, error) {
 	paths, err := filepath.Glob(filepath.Join(p.Dir(), "words", "*", "word.md"))
 	if err != nil {
@@ -157,7 +152,6 @@ func Load(p Project) (map[string]Claim, []Word, error) {
 		}
 		words = append(words, word)
 	}
-	cover(claims, words)
 	return claims, words, nil
 }
 

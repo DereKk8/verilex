@@ -35,7 +35,7 @@ type claimView struct {
 // claims prints every claim with its current version, the words that prove it and, only when
 // the verify skill no longer holds it, why it needs review.
 func claims(project dictionary.Project, asJSON bool, out io.Writer, refuse func(error) int) int {
-	all, words, err := dictionary.Load(project)
+	all, words, err := lifecycle.Load(project)
 	if err != nil {
 		return refuse(err)
 	}

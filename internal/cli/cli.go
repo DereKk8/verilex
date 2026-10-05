@@ -76,7 +76,7 @@ func Main(argv []string, out, stderr io.Writer) int {
 	case "claims":
 		return claims(project, args.json, out, refuse)
 	}
-	words, err := dictionary.LoadWords(project)
+	words, err := lifecycle.LoadWords(project)
 	if err != nil {
 		return refuse(err)
 	}

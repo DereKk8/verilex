@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
-	"github.com/DereKk8/verilex/internal/featuremap"
 	"github.com/DereKk8/verilex/internal/lifecycle"
 )
 
@@ -147,7 +146,7 @@ func (h hasher) word(word dictionary.Word, root string, components map[string]st
 		components["claim"] = c.Fingerprint
 		// Sources are not identity, yet a pass recorded before they were re-mapped was judged
 		// against other requirement sentences, so the first run after a re-map goes live.
-		components["claim sources"] = sources(c)
+		components["claim sources"] = c.SourcesDigest()
 	}
 	for _, input := range word.Inputs {
 		path := input
@@ -277,22 +276,6 @@ func lines(components map[string]string) string {
 		fmt.Fprintf(&b, "%q=%s\n", key, components[key])
 	}
 	return b.String()
-}
-
-// sources fingerprints where a claim is anchored: each reference with its accepted prose
-// fingerprint and its normalized requirement sentences, in any order.
-func sources(c dictionary.Claim) string {
-	anchors := make([]string, 0, len(c.Sources))
-	for _, source := range c.Sources {
-		requirements := make([]string, 0, len(source.Requirements))
-		for _, sentence := range source.Requirements {
-			requirements = append(requirements, featuremap.Normalize(sentence))
-		}
-		sort.Strings(requirements)
-		anchors = append(anchors, source.Ref+"\n"+source.Prose+"\n"+strings.Join(requirements, "\n"))
-	}
-	sort.Strings(anchors)
-	return digestOf(strings.Join(anchors, "\n\n"))
 }
 
 func digestOf(text string) string {

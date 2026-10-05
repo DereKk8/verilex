@@ -4,7 +4,7 @@
 
 ## Sub-features
 
-- `admit-admit` writes `admission.json` with date, curator, packet, counted runs, word digest and the claim version the word proves (section hashes for a word without a claim).
+- `admit-admit` writes `admission.json` with date, curator, packet, counted runs, word digest, the claim version the word proves and a `claim_sources` digest of the claim's sources (section hashes for a word without a claim).
 - `admit-reject` keeps the word provisional and stores the verdict beside the packet.
 - `admit-refused-packet` refuses a verdict naming a packet that was never proposed for the word.
 - `admit-refused-stale` refuses a verdict when the word's files changed after the packet was built.
@@ -27,7 +27,7 @@ Preconditions:
 - **Stale.** Run `echo "probe" >> "$S/tally/.verilex/words/item-stored/word.md"`, write an `admit` verdict for `item-stored` with its `<PACKET>`, and run `"$S/vx" adm-stale verilex admit item-stored --verdict "$S/verdicts/item-stored-admit.json"`. Stderr `verilex: refused: item-stored changed since packet <PACKET>; propose it again`, exit `2`. Restore with `sed -i '$d' "$S/tally/.verilex/words/item-stored/word.md"`; after that the same verdict file admits.
 - **Claim needs review.** Run ``sed -i 's/`store.json` lists NAME\./`store.json` must list NAME./' "$S/tally/.cursor/skills/verify-tally/features/items.md"``, then run the `item-stored` admit again as `"$S/vx" adm-review ...`. Stderr ``verilex: refused: claim item-added needs review: verify-tally/features/items.md#item-add: requirement changed or gone: Expect exit 0 and `added NAME`; `store.json` lists NAME.; verify-tally/features/items.md#item-add: requirement no claim maps: Expect exit 0 and `added NAME`; `store.json` must list NAME.; bring its sources in line with the verify skill first; item-stored changed since packet <PACKET>; propose it again``, exit `2`. Restore with ``sed -i 's/`store.json` must list NAME\./`store.json` lists NAME./' "$S/tally/.cursor/skills/verify-tally/features/items.md"``.
 - **Admit.** Write `admit` verdicts for all three words with their `<PACKET>` ids (the rejected `item-listed` packet can still be admitted). Run `"$S/vx" adm-<word> verilex admit <word> --verdict "$S/verdicts/<word>-admit.json"` for each. Stdout `admitted <word> (curator verify-verilex, N runs)`.
-- **Admit, second view.** Run `"$S/vx" adm-record cat "$S/tally/.verilex/words/store-open/admission.json"` and `"$S/vx" adm-words verilex words`. The record names the curator, packet, runs, `word_digest` and `"claim": "store-opened@<version>"` (no `sections`), and all three words show `status:   admitted`.
+- **Admit, second view.** Run `"$S/vx" adm-record cat "$S/tally/.verilex/words/store-open/admission.json"` and `"$S/vx" adm-words verilex words`. The record names the curator, packet, runs, `word_digest`, `"claim": "store-opened@<version>"` and `claim_sources` (no `sections`), and all three words show `status:   admitted`.
 - **Stamp.** Run `"$S/vx" adm-plan verilex plan 'store-open | item-stored apple | item-listed apple'`. It prints `plan: skip 0, run 3; store-open: word changed`.
 
 ## Gotchas

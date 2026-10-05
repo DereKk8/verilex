@@ -63,7 +63,7 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 	if err = json.Unmarshal(data, &packet); err != nil || packet.Word != name || packet.ID != v.Packet {
 		return v, nil, fmt.Errorf("%s: not a packet for %s", packetPath, name)
 	}
-	words, err := dictionary.LoadWords(p)
+	words, err := lifecycle.LoadWords(p)
 	if err != nil {
 		return v, nil, err
 	}
@@ -109,7 +109,7 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 	}
 	a := &lifecycle.Admission{Word: name, Date: now(), Curator: v.Curator, Reason: v.Reason, Packet: v.Packet, Runs: runs, WordDigest: digest, Sections: hashes}
 	if proves != nil {
-		a.Claim, a.Sections = proves.Pin, nil
+		a.Claim, a.ClaimSources, a.Sections = proves.Pin, w.Claim.SourcesDigest(), nil
 	}
 	return v, a, writeJSON(lifecycle.AdmissionPath(w), a)
 }

@@ -68,8 +68,9 @@ type ClaimSource struct {
 	Ref          string   `yaml:"ref" json:"ref"`
 	Prose        string   `yaml:"prose" json:"prose"`
 	Requirements []string `yaml:"requirements" json:"requirements"`
-	// Covered lists what the claims that words prove map in the same sub-feature. A requirement
-	// sentence of the sub-feature outside it is one no word proves. Load fills it.
+	// Covered lists what other claims map in the same sub-feature, counted only for a claim
+	// whose word a curator admitted for the claim's current version and sources. A requirement
+	// sentence of the sub-feature outside it is one no curated word proves. lifecycle.Load fills it.
 	Covered []string `yaml:"-" json:"-"`
 }
 
@@ -78,6 +79,23 @@ func (c Claim) Version() string { return c.Fingerprint[:versionLength] }
 
 // Pin is how a word binds the claim's current version: <claim>@<version>.
 func (c Claim) Pin() string { return c.Name + "@" + c.Version() }
+
+// SourcesDigest fingerprints where the claim is anchored: each reference with its accepted
+// prose fingerprint and its normalized requirement sentences, in any order.
+func (c Claim) SourcesDigest() string {
+	anchors := make([]string, 0, len(c.Sources))
+	for _, source := range c.Sources {
+		requirements := make([]string, 0, len(source.Requirements))
+		for _, sentence := range source.Requirements {
+			requirements = append(requirements, featuremap.Normalize(sentence))
+		}
+		slices.Sort(requirements)
+		anchors = append(anchors, source.Ref+"\n"+source.Prose+"\n"+strings.Join(requirements, "\n"))
+	}
+	slices.Sort(anchors)
+	sum := sha256.Sum256([]byte(strings.Join(anchors, "\n\n")))
+	return hex.EncodeToString(sum[:])
+}
 
 // Refs lists the verify-skill references the claim's sources point at.
 func (c Claim) Refs() []string {
@@ -108,36 +126,8 @@ func LoadClaims(p Project) (map[string]Claim, error) {
 	return claims, nil
 }
 
-// cover fills each claim source's Covered from the claims that a word proves at their current
-// version. A claim that no word proves covers nothing: it can never clear another claim's review.
-func cover(claims map[string]Claim, words []Word) {
-	covered := map[string][]string{}
-	proven := map[string]bool{}
-	for _, w := range words {
-		if w.Claim != nil && w.Stale == "" && !proven[w.Claim.Name] {
-			proven[w.Claim.Name] = true
-			for _, source := range claims[w.Claim.Name].Sources {
-				covered[subFeature(source.Ref)] = append(covered[subFeature(source.Ref)], source.Requirements...)
-			}
-		}
-	}
-	for name, c := range claims {
-		c.Sources = slices.Clone(c.Sources)
-		for i := range c.Sources {
-			c.Sources[i].Covered = covered[subFeature(c.Sources[i].Ref)]
-		}
-		claims[name] = c
-	}
-	for i := range words {
-		if words[i].Claim != nil {
-			c := claims[words[i].Claim.Name]
-			words[i].Claim = &c
-		}
-	}
-}
-
-// subFeature names the sub-feature a source reference points at, however its path is spelled.
-func subFeature(ref string) string {
+// SubFeature names the sub-feature a source reference points at, however its path is spelled.
+func SubFeature(ref string) string {
 	file, id, _ := strings.Cut(ref, "#")
 	return path.Clean(filepath.ToSlash(file)) + "#" + id
 }

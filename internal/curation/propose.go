@@ -106,9 +106,9 @@ const instructions = `Judge whether this word belongs in the shared dictionary. 
 
 // Propose builds the curator packet for a word and stores it in the project's state
 // directory. It refuses a word with fewer than MinRuns counted uses and an admitted word
-// whose sections and files are unchanged.
+// whose sections (or claim version and sources) and files are unchanged.
 func Propose(p dictionary.Project, name string) (Packet, string, error) {
-	words, err := dictionary.LoadWords(p)
+	words, err := lifecycle.LoadWords(p)
 	if err != nil {
 		return Packet{}, "", err
 	}

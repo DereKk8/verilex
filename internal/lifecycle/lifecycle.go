@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -47,10 +48,12 @@ type Admission struct {
 	Packet     string   `json:"packet"`
 	Runs       []string `json:"runs"`
 	WordDigest string   `json:"word_digest"`
-	// Claim is the claim version the word was admitted to prove; Sections, for a word without
-	// a claim, hold the hash of each feature-map section it implements.
-	Claim    string            `json:"claim,omitempty"`
-	Sections map[string]string `json:"sections,omitempty"`
+	// Claim is the claim version the word was admitted to prove, and ClaimSources the claim's
+	// sources as the curator saw them (dictionary.Claim.SourcesDigest); Sections, for a word
+	// without a claim, hold the hash of each feature-map section it implements.
+	Claim        string            `json:"claim,omitempty"`
+	ClaimSources string            `json:"claim_sources,omitempty"`
+	Sections     map[string]string `json:"sections,omitempty"`
 }
 
 const admissionFile = "admission.json"
@@ -71,6 +74,69 @@ func readAdmission(w dictionary.Word) (*Admission, error) {
 		return nil, fmt.Errorf("%s: not an admission record written by `verilex admit`", AdmissionPath(w))
 	}
 	return &a, nil
+}
+
+// Load reads a project's claims and words, then fills each claim source's Covered: what the
+// other claims map in the same sub-feature. A claim covers a sentence only when one of its words
+// is curated for the claim as it is now (see Curated). A stub, a never-run or merely used word,
+// or a claim that only lists a sub-feature its words were never judged against, covers nothing,
+// so it can never clear another claim's review.
+func Load(p dictionary.Project) (map[string]dictionary.Claim, []dictionary.Word, error) {
+	claims, words, err := dictionary.Load(p)
+	if err != nil {
+		return nil, nil, err
+	}
+	covered := map[string][]string{}
+	counted := map[string]bool{}
+	for _, w := range words {
+		if w.Claim == nil || counted[w.Claim.Name] {
+			continue
+		}
+		if Curated(w) {
+			counted[w.Claim.Name] = true
+			for _, source := range w.Claim.Sources {
+				key := dictionary.SubFeature(source.Ref)
+				covered[key] = append(covered[key], source.Requirements...)
+			}
+		}
+	}
+	for name, c := range claims {
+		c.Sources = slices.Clone(c.Sources)
+		for i := range c.Sources {
+			c.Sources[i].Covered = covered[dictionary.SubFeature(c.Sources[i].Ref)]
+		}
+		claims[name] = c
+	}
+	for i := range words {
+		if words[i].Claim != nil {
+			c := claims[words[i].Claim.Name]
+			words[i].Claim = &c
+		}
+	}
+	return claims, words, nil
+}
+
+// LoadWords is Load without the claims.
+func LoadWords(p dictionary.Project) ([]dictionary.Word, error) {
+	_, words, err := Load(p)
+	return words, err
+}
+
+// Curated reports whether a curator admitted w for its claim as it is now: the admission names
+// the claim version w pins, records the claim's current sources, and w's files are unchanged.
+// Only such a word shows that its claim's sentences are exercised: a judged live use shows that
+// the word runs, not that it exercises a sub-feature its claim was mapped to afterwards. An
+// admission record or word file that cannot be read makes w uncurated; StatusOf reports why.
+func Curated(w dictionary.Word) bool {
+	if w.Claim == nil || w.Stale != "" {
+		return false
+	}
+	a, err := readAdmission(w)
+	if err != nil || a == nil || a.Claim != w.Claim.Pin() || a.ClaimSources != w.Claim.SourcesDigest() {
+		return false
+	}
+	digest, err := WordDigest(w)
+	return err == nil && digest == a.WordDigest
 }
 
 // StatusOf reports a word's lifecycle state, comparing an admitted word's file digest, claim
@@ -110,6 +176,10 @@ func (s *Status) claimDrift(p dictionary.Project, w dictionary.Word, a *Admissio
 			admitted = "its feature-map sections"
 		}
 		s.Drift = append(s.Drift, "admitted for "+admitted+", not claim "+w.Claim.Pin())
+	case a.ClaimSources != w.Claim.SourcesDigest():
+		// A re-map keeps the claim version, but the curator judged the word against the old
+		// sources: nothing yet says the word exercises what the claim now maps.
+		s.Drift = append(s.Drift, "admitted before claim "+w.Claim.Name+"'s sources changed; propose it again")
 	}
 	_, review, err := Review(p, *w.Claim)
 	if len(review) > 0 {

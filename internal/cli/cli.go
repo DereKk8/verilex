@@ -17,12 +17,12 @@ import (
 	"github.com/DereKk8/verilex/internal/verdict"
 )
 
-const usage = "usage: verilex [-h] [--project PROJECT] {run,words,runs,cleanup,new,propose,admit,gap,check} ...\n"
+const usage = "usage: verilex [-h] [--project PROJECT] {run,plan,words,runs,cleanup,new,propose,admit,gap,check} ...\n"
 
 type options struct {
-	project, command, operand, verdict string
-	implements                         []string
-	keep, fresh, json                  bool
+	project, command, operand, verdict, from string
+	implements                               []string
+	keep, fresh, json                        bool
 }
 
 func Main(argv []string, out, stderr io.Writer) int {
@@ -97,16 +97,28 @@ func Main(argv []string, out, stderr io.Writer) int {
 	if err = dictionary.CheckOrder(steps); err != nil {
 		return refuse(err)
 	}
+	opts := runner.Options{Keep: args.keep, Fresh: args.fresh, Continue: args.from}
+	plan, err := runner.Decide(project, steps, opts)
+	if err != nil {
+		return refuse(err)
+	}
+	if args.command == "plan" {
+		if args.json {
+			if err = encode(out, plan); err != nil {
+				return refuse(err)
+			}
+		} else {
+			report.Plan(plan, out)
+		}
+		return 0
+	}
 	run, err := runner.New(project, args.operand, steps)
 	if err != nil {
 		return refuse(err)
 	}
-	record, runErr := run.Execute(runner.Options{Keep: args.keep, Fresh: args.fresh})
+	record, runErr := run.Execute(plan, opts)
 	if args.json {
-		encoder := json.NewEncoder(out)
-		encoder.SetIndent("", "  ")
-		encoder.SetEscapeHTML(false)
-		if err = encoder.Encode(record); err != nil {
+		if err = encode(out, record); err != nil {
 			return refuse(err)
 		}
 	} else {
@@ -122,6 +134,13 @@ func Main(argv []string, out, stderr io.Writer) int {
 	return record.Verdict.ExitCode()
 }
 
+func encode(out io.Writer, value any) error {
+	encoder := json.NewEncoder(out)
+	encoder.SetIndent("", "  ")
+	encoder.SetEscapeHTML(false)
+	return encoder.Encode(value)
+}
+
 // command describes one subcommand's operand and flags.
 type command struct {
 	operand, usage, help string
@@ -130,7 +149,8 @@ type command struct {
 }
 
 var commands = map[string]command{
-	"run":     {"chain", "[--keep] [--fresh] [--json] chain", "run a chain of words, e.g. 'a | b X | c'", []string{"--keep", "--fresh", "--json"}, nil},
+	"run":     {"chain", "[--keep] [--fresh] [--continue RUN] [--json] chain", "run a chain of words, e.g. 'a | b X | c'", []string{"--keep", "--fresh", "--json"}, []string{"--continue"}},
+	"plan":    {"chain", "[--continue RUN] [--json] chain", "show whether a chain would be skipped or run live, running nothing", []string{"--json"}, []string{"--continue"}},
 	"words":   {"", "", "list the dictionary and each word's lifecycle status", nil, nil},
 	"runs":    {"", "", "list this project's runs and any instance still alive", nil, nil},
 	"cleanup": {"run", "run", "tear down a kept run's instance", nil, nil},
@@ -141,7 +161,7 @@ var commands = map[string]command{
 	"check":   {"", "", "report admitted words whose feature-map sections or files changed (drift-suspect)", nil, nil},
 }
 
-var order = []string{"run", "words", "runs", "cleanup", "new", "propose", "admit", "gap", "check"}
+var order = []string{"run", "plan", "words", "runs", "cleanup", "new", "propose", "admit", "gap", "check"}
 
 func parse(argv []string) (options, bool, error) {
 	cwd, err := os.Getwd()
@@ -205,9 +225,12 @@ func parse(argv []string) (options, bool, error) {
 				i++
 				value = argv[i]
 			}
-			if name == "--implements" {
+			switch name {
+			case "--implements":
 				o.implements = append(o.implements, value)
-			} else {
+			case "--continue":
+				o.from = value
+			default:
 				o.verdict = value
 			}
 			continue
@@ -268,7 +291,8 @@ func printHelp(name string, out io.Writer) {
 var flagHelp = map[string]string{
 	"--keep":       "--keep      skip cleanup; tear down later with `verilex cleanup`",
 	"--fresh":      "--fresh     run live even when every proof stamp matches",
-	"--json":       "--json      print the complete run record as JSON",
+	"--json":       "--json      print the complete record as JSON",
+	"--continue":   "--continue RUN    use the instance RUN kept: run refreshes it, asks the doctor, then runs only the words it does not already prove",
 	"--implements": "--implements REF  the feature-map section the word implements, <skill>/<file>#<section>; repeatable",
 	"--verdict":    "--verdict FILE    the curator's verdict JSON for the proposed packet",
 }
@@ -287,6 +311,9 @@ func cleanup(project dictionary.Project, id string, out io.Writer, refuse func(e
 	if record.Cleanup == "done" {
 		fmt.Fprintf(out, "verilex: %s was already cleaned up\n", id)
 		return 0
+	}
+	if record.Cleanup == "continued" {
+		return refuse(fmt.Errorf("%s was continued by %s; clean up that run instead", id, record.ContinuedBy))
 	}
 	if record.Cleanup == "none" {
 		fmt.Fprintf(out, "verilex: %s launched nothing; it relied on stamps\n", id)

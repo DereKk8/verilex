@@ -70,3 +70,16 @@ func execute(argv []string, evidence string, env []string, timeout int, stdin st
 	}
 	return code, nil
 }
+
+// lock holds an exclusive advisory lock on path until the returned function runs.
+func lock(path string) (func(), error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return func() { f.Close() }, nil
+}

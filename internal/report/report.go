@@ -23,6 +23,11 @@ func Human(record runner.Record, out io.Writer) {
 	fmt.Fprintf(out, "%s: %s", v, counts(record))
 	if record.Skipped {
 		fmt.Fprintf(out, ", skipped: stamps match %s", reliedOn(record))
+	} else if record.Continues != "" {
+		fmt.Fprintf(out, ", continued %s", record.Continues)
+		if n := len(record.Words) - live(record); n > 0 {
+			fmt.Fprintf(out, ", %d skipped: proven on its instance by %s", n, reliedOn(record))
+		}
 	}
 	fmt.Fprintf(out, "; run %s\n", record.Run)
 	labels := []string{}
@@ -45,6 +50,7 @@ func Human(record runner.Record, out io.Writer) {
 		}
 	}
 	frame("launch")
+	frame("refresh")
 	frame("doctor")
 	for _, word := range record.Words {
 		if word.Verdict == verdict.Green {
@@ -65,6 +71,40 @@ func Human(record runner.Record, out io.Writer) {
 	if record.Cleanup == "kept" {
 		fmt.Fprintf(out, "kept: tear down with `verilex cleanup %s`\n", record.Run)
 	}
+}
+
+// Plan prints a skip decision: how many steps are skipped and run, the first reason a step runs
+// live, and the run each skipped step relies on.
+func Plan(p runner.Plan, out io.Writer) {
+	skipped := 0
+	for _, s := range p.Skip {
+		if s.Skipped {
+			skipped++
+		}
+	}
+	fmt.Fprintf(out, "plan: skip %d, run %d", skipped, len(p.Skip)-skipped)
+	if p.Continues != "" {
+		fmt.Fprintf(out, " on the instance kept by %s", p.Continues)
+	}
+	if p.Rerun != "" {
+		fmt.Fprintf(out, "; %s", oneLine(p.Rerun))
+	}
+	fmt.Fprintln(out)
+	for _, s := range p.Skip {
+		if s.Skipped {
+			fmt.Fprintf(out, "  skip  %s  relies on run %s\n", s.Step, s.ReliesOn)
+		}
+	}
+}
+
+func live(record runner.Record) int {
+	n := 0
+	for _, word := range record.Words {
+		if word.ReliesOn == "" {
+			n++
+		}
+	}
+	return n
 }
 
 func counts(record runner.Record) string {

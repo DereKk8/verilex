@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "summary": "Adds versioned claims: each word pins one claim version, a pass counts only for that version, and a changed requirement sentence in the verify skill flags the claim for review.",
+  "files": [
+    {
+      "path": "internal/featuremap/anchor.go",
+      "summary": "Owns the claim anchor: a sub-feature id plus the normalized requirement sentences a claim maps to.",
+      "annotations": [
+        {
+          "newRange": [31, 70],
+          "summary": "Pin reports a missing sub-feature id or a missing requirement sentence as a review reason, and only an unreadable file as an error.",
+          "rationale": "A review reason is product drift, not an environment failure, so it must not abort check or plan. The anchor hash covers the id and the sorted sentences so a reordering of sources does not change it. Verified by TestPinFlagsOnlyChangedIdsAndRequirements and the verify-verilex claims.md drive (cl-review, cl-gone).",
+          "author": "fm/verilex-claim-model"
+        },
+        {
+          "newRange": [72, 102],
+          "summary": "Requirements keeps only sentences with a requirement word, masking code spans, and drops `Run ` actions and dated run history.",
+          "rationale": "Commands, prose and run history change often without changing what is required, so they must not ask for review. Literal values inside code spans stay because they are the required output. Verified by TestRequirementsKeepOnlyNormalizedRequirementSentences and the cl-noise step. Requirement words outside the listed set (for example `should`) are not detected; that is the study rule, not an oversight.",
+          "author": "fm/verilex-claim-model"
+        }
+      ]
+    },
+    {
+      "path": "internal/dictionary/claim.go",
+      "summary": "Owns the claim file contract, its fingerprint and the binding of a word to a claim version.",
+      "annotations": [
+        {
+          "newRange": [170, 183],
+          "summary": "ReadClaim fingerprints the normalized identity: sentence, args, entry, preconditions, requires, provides and the evidence contract, never the sources.",
+          "rationale": "Sources only say where the claim is anchored, so re-mapping a requirement keeps the version and its recorded passes. Lists are sets and strings have whitespace collapsed, so layout edits keep the version. The `verilex-claim-1` prefix lets a later format change every fingerprint on purpose. Verified by TestClaimFingerprintIsStableAndFollowsItsIdentity and cl-stable / cl-version.",
+          "author": "fm/verilex-claim-model"
+        },
+        {
+          "newRange": [187, 220],
+          "summary": "bindClaim unions the claim's requires and provides into the word, and records a stale pin instead of failing the load.",
+          "rationale": "A stale pin must refuse only chains that hold the word, so `verilex claims`, `words` and `check` can still show it. ParseChain turns Stale into the refusal before launch. Verified by TestPassOnOneClaimVersionIsNotReusedForTheNext and cl-stale / cl-stale-other.",
+          "author": "fm/verilex-claim-model"
+        }
+      ]
+    },
+    {
+      "path": "internal/dictionary/dictionary.go",
+      "summary": "Loads claims before words and refuses chains that hold a stale word or break a pinned rule.",
+      "annotations": [
+        {
+          "newRange": [281, 283],
+          "summary": "ParseChain refuses a chain that holds a word pinned to an older claim version, before any word runs.",
+          "rationale": "A pass on the old version is no evidence for the new one, so running the word under a stale pin could record a false green. Verified by cl-stale (run and plan both exit 2, no run added).",
+          "author": "fm/verilex-claim-model"
+        },
+        {
+          "newRange": [309, 313],
+          "summary": "CheckOrder names the claim when the missing state comes from the claim rather than the word.",
+          "rationale": "The word file no longer declares the state, so without the claim name the refusal would point at a rule the reader cannot find in the word. Verified by TestChainBreakingAPinnedRuleIsRefusedBeforeLaunch and cl-pinned.",
+          "author": "fm/verilex-claim-model"
+        }
+      ]
+    },
+    {
+      "path": "internal/stamp/stamp.go",
+      "summary": "Adds the claim fingerprint to every claim-bound word's proof stamp.",
+      "annotations": [
+        {
+          "newRange": [138, 146],
+          "summary": "hasher.word re-reads the claim file and stamps its fingerprint, so a new claim version never matches an old green stamp.",
+          "rationale": "Re-reading instead of using the loaded claim means a claim edited during a run changes the stamp taken after it. An unreadable claim makes the stamp unclear, so the word runs instead of skipping. Verified by cl-repin-plan (`claim changed`) and cl-repin-record (live run, proves the new version).",
+          "author": "fm/verilex-claim-model"
+        }
+      ]
+    },
+    {
+      "path": "internal/lifecycle/lifecycle.go",
+      "summary": "Splits drift into claim drift for claim-bound words and the old section drift for the rest.",
+      "annotations": [
+        {
+          "newRange": [92, 121],
+          "summary": "claimDrift marks an admitted word drift-suspect when its pin is stale, its admission names another claim version, or the claim needs review.",
+          "rationale": "A drift-suspect word never skips, so a claim the verify skill no longer holds is re-run rather than trusted. Words without a claim keep whole-section drift unchanged (TestWordWithoutClaimDriftsWithItsWholeSection, check.md legacy step).",
+          "author": "fm/verilex-claim-model"
+        }
+      ]
+    },
+    {
+      "path": "internal/curation/propose.go",
+      "summary": "Counts only uses of the claim version the word pins now.",
+      "annotations": [
+        {
+          "newRange": [53, 53],
+          "summary": "Uses counts a run entry only when it proved the same claim version the word pins now.",
+          "rationale": "Passes on an older version must not make a re-pinned word eligible for admission. Verified by cl-repin-propose (0 counted runs after re-pin).",
+          "author": "fm/verilex-claim-model"
+        }
+      ]
+    },
+    {
+      "path": "internal/curation/admit.go",
+      "summary": "Refuses an admission when the claim version or its anchors changed since the packet.",
+      "annotations": [
+        {
+          "newRange": [116, 132],
+          "summary": "sameClaim compares the pin, entry and every anchor hash between the packet and the word as it is now.",
+          "rationale": "The curator judged the packet, so an admission against a changed claim or requirement would admit something nobody reviewed. Verified by the admit.md drive (adm-review, adm-stale).",
+          "author": "fm/verilex-claim-model"
+        }
+      ]
+    },
+    {
+      "path": "internal/runner/record.go",
+      "summary": "Records the proved claim version and entry point per word, and stores run start times with sub-second precision.",
+      "annotations": [
+        {
+          "newRange": [22, 29],
+          "summary": "WordRecord gains `proves` and `entry`; the word's own verdict claim is renamed to `reported`.",
+          "rationale": "`claim` now names the claim model, so the old field name would mean two things. Old run.json files with `claim` still load; the reported text is only shown, never used for a skip. This is a JSON field rename that the PR calls out.",
+          "author": "fm/verilex-claim-model"
+        },
+        {
+          "newRange": [130, 131],
+          "summary": "now formats a fixed 9-digit fraction, so records started within one second sort in start order.",
+          "rationale": "Uses were sorted by a second-resolution timestamp, which made TestOnlyJudgedLiveRunsCountAsUses flaky. Fixed width keeps string order equal to time order. Verified by repeated `go test -count=20 ./tests -run TestOnlyJudgedLiveRunsCountAsUses`.",
+          "author": "fm/verilex-claim-model"
+        }
+      ]
+    }
+  ]
+}

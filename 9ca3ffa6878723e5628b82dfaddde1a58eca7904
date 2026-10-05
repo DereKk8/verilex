@@ -1,0 +1,150 @@
+{
+ "version": 1,
+ "summary": "Adds versioned claims: each word pins one claim version, a pass counts only for that version, any change outside code spans in the claim's sub-feature flags the claim, and only curator-admitted words let a claim cover another claim's sentence.",
+ "files": [
+  {
+   "path": "internal/featuremap/anchor.go",
+   "summary": "Owns the claim anchor: a sub-feature id, the requirement sentences a claim maps, and a fingerprint of the sub-feature's other prose, all checked inside the text the id names.",
+   "annotations": [
+    {
+     "newRange": [
+      51,
+      110
+     ],
+     "summary": "Pin reports a gone sub-feature, a mapped sentence gone or outside it, an unmapped requirement, and prose that differs from the source's pin.",
+     "rationale": "Two independent checks found false greens: a moved sentence (F1), a new requirement (F2), and a rule written inside a Run sentence (X1). Each now flags the claim. A review reason is product drift, so only an unreadable file is an error. Verified by the featuremap tests and the claims.md drive (cl-moved, cl-unmapped, cl-prose).",
+     "author": "fm/verilex-claim-model"
+    },
+    {
+     "newRange": [
+      112,
+      124
+     ],
+     "summary": "prose fingerprints every heading and non-requirement sentence of the sub-feature, in order, with code spans blanked and dated sentences dropped.",
+     "rationale": "The requirement-word heuristic cannot see every rule, so any prose change in the sub-feature asks for review (X1). Code spans are blanked so command edits stay quiet. Requirement sentences are left out because Pin checks each one by itself, so a requirement edit yields its own named lines rather than a vague prose line. Verified by TestPinFlagsProseChangesButNotCommands.",
+     "author": "fm/verilex-claim-model"
+    },
+    {
+     "newRange": [
+      138,
+      217
+     ],
+     "summary": "subFeature collects a heading named by the id plus every list item, paragraph or table row that opens with the id in code.",
+     "rationale": "Runbooks rarely state which step proves which sub-feature (R19), so the scope must be explicit: a step labelled with its id. A lazy continuation line that starts with the id is a mention, not a block. A list item keeps nested lines and fences.",
+     "author": "fm/verilex-claim-model"
+    }
+   ]
+  },
+  {
+   "path": "internal/dictionary/claim.go",
+   "summary": "Owns the claim file contract, its fingerprint, its sources digest and the binding of a word to a claim version.",
+   "annotations": [
+    {
+     "newRange": [
+      83,
+      99
+     ],
+     "summary": "SourcesDigest fingerprints each source's reference, prose pin and normalized requirement sentences; the stamp and the admission both use it.",
+     "rationale": "One owner for what 'the claim's sources' means keeps the stamp component and the admission's claim_sources in step.",
+     "author": "fm/verilex-claim-model"
+    },
+    {
+     "newRange": [
+      195,
+      207
+     ],
+     "summary": "ReadClaim refuses a malformed prose pin and a mapped sentence that is not exactly one requirement sentence.",
+     "rationale": "Such a sentence could never match a feature file, so the claim would need review forever. A missing prose pin is a review line that prints the value to pin.",
+     "author": "fm/verilex-claim-model"
+    }
+   ]
+  },
+  {
+   "path": "internal/dictionary/dictionary.go",
+   "summary": "Loads claims and words together and refuses chains that hold a stale word or break a pinned rule.",
+   "annotations": [
+    {
+     "newRange": [
+      137,
+      143
+     ],
+     "summary": "Load reads claims and words together so coverage can depend on which claims words prove.",
+     "rationale": "Coverage is a property of the whole dictionary, so it has one owner: `verilex claims`, check, plan and propose all see the same Covered.",
+     "author": "fm/verilex-claim-model"
+    },
+    {
+     "newRange": [
+      289,
+      291
+     ],
+     "summary": "ParseChain refuses a chain that holds a word pinned to an older claim version, before any word runs.",
+     "rationale": "A pass on the old version is no evidence for the new one. Verified by cl-stale (run and plan exit 2, no run added).",
+     "author": "fm/verilex-claim-model"
+    }
+   ]
+  },
+  {
+   "path": "internal/stamp/stamp.go",
+   "summary": "Adds the claim fingerprint and the claim's sources digest to every claim-bound word's proof stamp.",
+   "annotations": [
+    {
+     "newRange": [
+      140,
+      151
+     ],
+     "summary": "hasher.word re-reads the claim and stamps its fingerprint and SourcesDigest.",
+     "rationale": "A pass is evidence only for the version and sources it ran against, so any change to either makes the next run live.",
+     "author": "fm/verilex-claim-model"
+    }
+   ]
+  },
+  {
+   "path": "internal/lifecycle/lifecycle.go",
+   "summary": "Owns admissions, drift, review and claim coverage, which depends on admissions.",
+   "annotations": [
+    {
+     "newRange": [
+      79,
+      142
+     ],
+     "summary": "Load fills each claim source's Covered only from claims with a Curated word; Curated needs an admission for the current version and sources and unchanged word files.",
+     "rationale": "The third check found that a stub word (Y1) or a source added to an admitted claim (Y2) silenced another claim's review. A judged live use shows that a word runs, not that it exercises a sub-feature, so only the curator's admission counts. Curated never consults reviews, so coverage and review cannot recurse. An unreadable admission makes the word uncurated rather than failing the load, so StatusOf can still report it. Verified by TestOnlyCuratedClaimsCoverRequirements, TestClaimCoversOnlySubFeaturesItsWordWasCuratedFor and the claims.md drive.",
+     "author": "fm/verilex-claim-model"
+    },
+    {
+     "newRange": [
+      158,
+      191
+     ],
+     "summary": "claimDrift makes an admitted word drift-suspect for a stale pin, another claim version, claim sources changed since admission, or a claim in review.",
+     "rationale": "A re-map keeps the version, but the curator judged the word against the old sources. Under F3 the word ran live once and then skipped, so nobody ever judged that it exercises the newly mapped sentence. Now it runs live until it is admitted again, as main does for words whose implemented section changed.",
+     "author": "fm/verilex-claim-model"
+    }
+   ]
+  },
+  {
+   "path": "internal/runner/record.go",
+   "summary": "Records the proved claim version and entry point per word, and stores run times with sub-second precision.",
+   "annotations": [
+    {
+     "newRange": [
+      22,
+      29
+     ],
+     "summary": "WordRecord gains `proves` and `entry`; the word's reported result moves from `claim` to `reported`.",
+     "rationale": "`claim` now names the claim model. Old run.json files still load because json.Unmarshal ignores the old field.",
+     "author": "fm/verilex-claim-model"
+    },
+    {
+     "newRange": [
+      130,
+      131
+     ],
+     "summary": "now formats a fixed 9-digit fraction, so records started within one second sort in start order.",
+     "rationale": "Uses were sorted by a second-resolution string, which made TestOnlyJudgedLiveRunsCountAsUses flaky. The ledger parses the value with time.RFC3339, which accepts the fraction.",
+     "author": "fm/verilex-claim-model"
+    }
+   ]
+  }
+ ]
+}

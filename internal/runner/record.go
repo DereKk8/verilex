@@ -127,5 +127,6 @@ func LoadRuns(project dictionary.Project) ([]Record, error) {
 	return records, nil
 }
 
-func now() string       { return time.Now().UTC().Format("2006-01-02T15:04:05+00:00") }
+// now has a fixed-width fraction, so records started within one second still sort in time order.
+func now() string       { return time.Now().UTC().Format("2006-01-02T15:04:05.000000000+00:00") }
 func ptr[T any](v T) *T { return &v }

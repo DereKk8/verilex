@@ -79,7 +79,7 @@ Each feature file lists its own gotchas. These traps cross features:
 - `verilex plan` and `verilex check` exit `0` whatever they report. Read stdout.
 - `verilex runs` sorts by run id, so two runs in the same second are out of time order. Use the id a command printed.
 - Edits to `$S/tally` (words, claims, `config.yaml`, the tally feature map) change stamps, versions or cause drift. Restore them before the next recipe.
-- The tally words prove claims, so a feature-map edit causes drift only when it changes a requirement sentence or sub-feature id a claim maps to. Appending prose flags nothing (see [claims.md](features/claims.md)).
+- The tally words prove claims, so a feature-map edit causes drift only when it changes a sub-feature id, a requirement sentence a claim maps to, or adds a requirement sentence to a sub-feature's step that no claim maps. Appending prose flags nothing. Re-mapping a claim's sources makes the next run live (see [claims.md](features/claims.md)).
 
 ## Helpers
 

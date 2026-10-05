@@ -234,14 +234,14 @@ func TestDriftSuspectWordNeverSkips(t *testing.T) {
 	equal(t, status(t, root, "item-stored"), "drift-suspect")
 	held := "item-stored apple: drift-suspect: " + reviewAdd
 
-	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; "+held+"\n")
+	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; "+headline(held)+"\n")
 	done := plan(t, root, chain, "--continue", kept.Run)
 	equal(t, done.code, 2)
 	contains(t, done.stderr, "verilex: refused: "+held+"; the kept instance already holds the effects of item-stored apple")
 	record := green(t, root, nil, chain)
 	equal(t, record.Rerun, held)
 	ranLive(t, record)
-	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; "+held+"\n")
+	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; "+headline(held)+"\n")
 
 	// A read-only word that must run live (here provisional again) runs on the kept instance:
 	// it changes nothing there.
@@ -298,4 +298,12 @@ func TestReadOnlyWordProvidesNothing(t *testing.T) {
 	done := verilex(t, root, nil, "words")
 	equal(t, done.code, 2)
 	contains(t, done.stderr, "a 'read_only' word changes nothing, so it provides no states")
+}
+
+// headline is a reason as a one-line headline shows it: at most 300 characters.
+func headline(reason string) string {
+	if runes := []rune(reason); len(runes) > 300 {
+		return string(runes[:299]) + "…"
+	}
+	return reason
 }

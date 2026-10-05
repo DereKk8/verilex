@@ -68,6 +68,18 @@ func section(text, anchor string) (string, bool) {
 	if anchor == "" {
 		return text, true
 	}
+	if text, ok := headingSection(text, anchor); ok {
+		return text, true
+	}
+	if strings.Contains(text, "`"+anchor+"`") {
+		return text, true
+	}
+	return "", false
+}
+
+// headingSection is the section under the first heading whose slug equals anchor: that heading
+// through the next heading of the same or a higher level.
+func headingSection(text, anchor string) (string, bool) {
 	lines := strings.Split(text, "\n")
 	start, level := -1, 0
 	fenced := false
@@ -89,9 +101,6 @@ func section(text, anchor string) (string, bool) {
 	}
 	if start >= 0 {
 		return strings.Join(lines[start:], "\n"), true
-	}
-	if strings.Contains(text, "`"+anchor+"`") {
-		return text, true
 	}
 	return "", false
 }

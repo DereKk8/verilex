@@ -96,7 +96,7 @@ Every run goes through the project's frame, and no word can opt out of it:
 Every word result carries a proof stamp: a fingerprint of everything the result depended on.
 
 - the word's own directory (`word.md`, `run`, its `admission.json` and anything beside them, with permissions);
-- the fingerprint of the claim version the word proves, so a pass is evidence only for that version;
+- the fingerprint of the claim version the word proves, so a pass is evidence only for that version, and the claim's sources, so the first run after a re-map is live;
 - everything in `.verilex/words/` outside word directories (helpers words share), `.verilex/config.yaml` and `.verilex/frame/`;
 - the paths in the word's `inputs` and the values of the variables in its `env`;
 - the verilex executable;
@@ -198,16 +198,31 @@ verilex: refused: item-put apple requires store, pinned by claim item-added; not
 
 A word that proves a claim must also take every arg the claim uses, name one of its entry points, leave out `implements` (its sources come from the claim), and not be `read_only` when the claim provides states. Otherwise the dictionary refuses to load.
 
-**Sources and review.** A source anchors the claim on a stable sub-feature id and the requirement sentences the claim maps to, not on a whole file or section. A requirement sentence says `Expect`, `must`, `require`, `exits`, `returns` or `Success is` outside its code spans. A sentence that starts with `Run ` is an action, so its command never counts. A sentence with an ISO date (`2026-09-12`) is run history. Headings and fenced blocks are not sentences. Sentences are compared without list markers, emphasis or line breaks, and literal values in code spans count. When the sub-feature id or a mapped sentence is gone, the claim **needs review**: `verilex claims` says why, and every admitted word that proves it is drift-suspect, so no chain that holds one is skipped:
+**Sources and review.** A source anchors the claim on a stable sub-feature id and the requirement sentences the claim maps to, not on a whole file or section. A sub-feature is the text its id names in the feature file: every list item, paragraph or table row that opens with the id as inline code, with the lines nested under it, and the section under a heading whose anchor is the id. A mention of the id anywhere else names nothing. So a feature file labels each step with the sub-feature it drives:
+
+```markdown
+## Sub-features
+
+- `item-add` stores a named item.
+
+## Driving it with the tally CLI
+
+- `item-add`: Run `bin/tally --store "$STORE" add NAME`. Expect exit 0 and `added NAME`; `store.json` lists NAME.
+```
+
+A requirement sentence says `Expect`, `must`, `require`, `exits`, `returns` or `Success is` outside its code spans. A sentence that starts with `Run `, after an optional sub-feature label, is an action, so its command never counts. A sentence with an ISO date (`2026-09-12`) is run history. Headings and fenced blocks are not sentences. Sentences are compared without list markers, emphasis or line breaks, and literal values in code spans count.
+
+The claim **needs review** when its sub-feature is gone, when a sentence it maps is gone or now sits outside the sub-feature, or when the sub-feature states a requirement sentence that no claim maps. `verilex claims` and `verilex check` name the sentence, and every admitted word that proves the claim is drift-suspect, so no chain that holds one is skipped:
 
 ```
 $ verilex claims
 item-added@18e2db0cee8f  A named item is in the store.
   entry: cli  words: item-stored
   review: verify-tally/features/items.md#item-add: requirement changed or gone: Expect exit 0 and `added NAME`; `store.json` lists NAME.
+  review: verify-tally/features/items.md#item-add: requirement no claim maps: Expect exit 0 and `added NAME`; `store.json` must list NAME.
 ```
 
-Edits around those sentences (commands, prose, run history, another sub-feature's requirements) ask for nothing. Sources are not part of the claim's identity. When the reviewer judges that the claim still says the same, they map it to the new sentences: the version stays, and every pass recorded for it stands. When the claim's meaning changed, they change its identity instead, which makes a new version.
+Edits around those sentences (commands, prose, run history, another sub-feature's text) ask for nothing. A requirement sentence that another claim maps in the same sub-feature is covered there. Sources are not part of the claim's identity. When the reviewer judges that the claim still says the same, they map it to the new sentences: the version stays, and the uses recorded for it still count toward `propose`. No pass was judged against the new mapping, though, so the sources are part of the proof stamp: the first run after a re-map is live (`item-stored apple: claim sources changed`), and only later runs can skip. A sentence outside the sub-feature never clears a review. When the claim's meaning changed, the reviewer changes its identity instead, which makes a new version.
 
 ## The word lifecycle
 
@@ -223,11 +238,11 @@ A word is **provisional** until an outside curator admits it. verilex never call
    ```
 
    `verilex admit <word> --verdict <file>` refuses a verdict whose packet is unknown, or whose word files, claim version, claim sources or sections changed since the packet was built. Both verdicts are kept beside the packet. Only `admit` writes `.verilex/words/<word>/admission.json` (date, curator, packet, counted runs, word digest, and the claim version it proves or the hash of each implemented section); a rejected word stays as it was. The admission record is part of the word's stamp, so admitting a word runs its chains live once more before they can be skipped.
-5. **Drift.** `verilex check` compares each admitted word's word digest, and its claim version and the claim's review state (or its stored section hashes), with the project now. Changed word files, another claim version, a claim that needs review, or a changed or missing section makes the word **drift-suspect**: it always runs, and no earlier result is trusted for it, even though the verify skill is not part of its stamp. Drift is computed on every call, never cached. Propose a drift-suspect word again to re-admit it; a word that is drift-suspect only because its claim needs review stops being drift-suspect as soon as the claim is reviewed.
+5. **Drift.** `verilex check` compares each admitted word's word digest, and its claim version and the claim's review state (or its stored section hashes), with the project now. Changed word files, another claim version, a claim that needs review, or a changed or missing section makes the word **drift-suspect**: it always runs, and no earlier result is trusted for it, even though the verify skill is not part of its stamp. Drift is computed on every call, never cached. Propose a drift-suspect word again to re-admit it; a word that is drift-suspect only because its claim needs review stops being drift-suspect as soon as the claim is reviewed, and a re-map of the claim's sources runs its chains live once.
 
 `verilex gap 'A user renames an item'` writes a note to `.verilex/gaps/` for the verify skill's owner when the feature map has no section for a product moment.
 
-A word without a claim names feature-map sections in `implements`. Such a reference is `<skill>/<file>#<section>`, looked up under the project's skill directories. The section is the heading whose slug matches, up to the next heading of the same or a higher level. A sub-feature id written as inline code in the file (`` `item-add` ``) selects the whole feature file, since a sub-feature's meaning spreads across its file. A claim's sources use the finer anchor described under [claims](#claims).
+A word without a claim names feature-map sections in `implements`. Such a reference is `<skill>/<file>#<section>`, looked up under the project's skill directories. The section is the heading whose slug matches, up to the next heading of the same or a higher level. A sub-feature id written as inline code in the file (`` `item-add` ``) selects the whole feature file. A claim's sources use the finer anchor described under [claims](#claims).
 
 ## Adding verilex to a project
 

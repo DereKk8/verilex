@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -63,6 +64,9 @@ type Evidence struct {
 type ClaimSource struct {
 	Ref          string   `yaml:"ref" json:"ref"`
 	Requirements []string `yaml:"requirements" json:"requirements"`
+	// Covered lists what every claim of the project maps in the same sub-feature. A requirement
+	// sentence of the sub-feature outside it is one no claim proves yet. LoadClaims fills it.
+	Covered []string `yaml:"-" json:"-"`
 }
 
 // Version names the claim's current version: the first hex digits of its fingerprint.
@@ -97,7 +101,24 @@ func LoadClaims(p Project) (map[string]Claim, error) {
 		}
 		claims[c.Name] = c
 	}
+	covered := map[string][]string{}
+	for _, c := range claims {
+		for _, source := range c.Sources {
+			covered[subFeature(source.Ref)] = append(covered[subFeature(source.Ref)], source.Requirements...)
+		}
+	}
+	for _, c := range claims {
+		for i := range c.Sources {
+			c.Sources[i].Covered = covered[subFeature(c.Sources[i].Ref)]
+		}
+	}
 	return claims, nil
+}
+
+// subFeature names the sub-feature a source reference points at, however its path is spelled.
+func subFeature(ref string) string {
+	file, id, _ := strings.Cut(ref, "#")
+	return path.Clean(filepath.ToSlash(file)) + "#" + id
 }
 
 type claimFile struct {

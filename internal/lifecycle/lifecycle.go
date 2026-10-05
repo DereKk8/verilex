@@ -112,8 +112,8 @@ func (s *Status) claimDrift(p dictionary.Project, w dictionary.Word, a *Admissio
 		s.Drift = append(s.Drift, "admitted for "+admitted+", not claim "+w.Claim.Pin())
 	}
 	_, review, err := Review(p, *w.Claim)
-	for _, line := range review {
-		s.Drift = append(s.Drift, "claim "+w.Claim.Name+" needs review: "+line)
+	if len(review) > 0 {
+		s.Drift = append(s.Drift, "claim "+w.Claim.Name+" needs review: "+strings.Join(review, "; "))
 	}
 	return err
 }
@@ -144,13 +144,15 @@ func (s *Status) sectionDrift(p dictionary.Project, w dictionary.Word, a *Admiss
 }
 
 // Review pins each of a claim's sources against the verify skill as it is now, and lists why the
-// claim needs review: a sub-feature or a requirement sentence it maps to is gone. Prose, commands
-// and run history around them never ask for one. Review is computed on every call, never cached.
+// claim needs review: its sub-feature is gone, a requirement sentence it maps to is gone or has
+// left the sub-feature, or the sub-feature states a requirement that no claim maps. Prose,
+// commands and run history around them never ask for one. Review is computed on every call,
+// never cached.
 func Review(p dictionary.Project, c dictionary.Claim) ([]featuremap.Anchor, []string, error) {
 	anchors := make([]featuremap.Anchor, 0, len(c.Sources))
 	review := []string{}
 	for _, source := range c.Sources {
-		anchor, err := featuremap.Pin(p.Root, p.SkillDirs, source.Ref, source.Requirements)
+		anchor, err := featuremap.Pin(p.Root, p.SkillDirs, source.Ref, source.Requirements, source.Covered)
 		if err != nil {
 			return nil, nil, err
 		}

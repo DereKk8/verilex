@@ -22,8 +22,10 @@ const itemAdd = "verify-tally/features/items.md#item-add"
 // addRequirement is the item-add requirement sentence the item-added claim maps to.
 const addRequirement = "Expect exit 0 and `added NAME`; `store.json` lists NAME."
 
-// reviewAdd is why item-added needs review once its requirement sentence changes.
-const reviewAdd = "claim item-added needs review: " + itemAdd + ": requirement changed or gone: " + addRequirement
+// reviewAdd is why item-added needs review once changeAddRequirement rewrites its requirement
+// sentence: the sentence it maps is gone, and the new one is a requirement no claim maps yet.
+const reviewAdd = "claim item-added needs review: " + itemAdd + ": requirement changed or gone: " + addRequirement +
+	"; " + itemAdd + ": requirement no claim maps: Expect exit 0 and `stored NAME`; `store.json` lists NAME."
 
 // changeAddRequirement rewrites the item-add requirement sentence in the verify skill.
 func changeAddRequirement(t *testing.T, root string) {
@@ -302,7 +304,7 @@ func TestEditingFeatureMapSectionMarksWordDriftSuspect(t *testing.T) {
 	equal(t, status(t, root, "item-stored"), "drift-suspect")
 	equal(t, status(t, root, "store-open"), "admitted")
 
-	write(t, items, strings.Replace(original, "`item-add`", "`item-put`", 1), 0644)
+	write(t, items, strings.ReplaceAll(original, "`item-add`", "`item-put`"), 0644)
 	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 2 admitted drift-suspect; they always run\n  item-stored: claim item-added needs review: "+itemAdd+": sub-feature item-add is gone\n")
 
 	write(t, items, original, 0644)
@@ -453,7 +455,7 @@ func TestChainWithDriftSuspectWordIsNeverSkipped(t *testing.T) {
 		ranLive(t, record)
 		equal(t, record.Words[1].Stamp, first.Words[1].Stamp)
 	}
-	write(t, items, strings.Replace(original, "`item-add`", "`item-put`", 1), 0644)
+	write(t, items, strings.ReplaceAll(original, "`item-add`", "`item-put`"), 0644)
 	record := green(t, root, nil, chain)
 	equal(t, record.Rerun, "item-stored apple: drift-suspect: claim item-added needs review: "+itemAdd+": sub-feature item-add is gone")
 	ranLive(t, record)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -42,7 +43,7 @@ func TestResolveSelectsHeadingSectionsAndFeatureIDs(t *testing.T) {
 }
 
 const runbook = "# Items\n\n## Sub-features\n\n- `item-add` stores a named item.\n\n## Steps\n\n" +
-	"- **Add.** Run `tally add NAME`. Expect exit 0 and `added NAME`;\n  `store.json` lists NAME.\n" +
+	"- **`item-add`.** Run `tally add NAME`. Expect exit 0 and `added NAME`;\n  `store.json` lists NAME.\n" +
 	"- Run `tally add NAME` again; it must exit 0.\n" +
 	"- Verified 2026-09-12: `tally add` exits 0.\n" +
 	"- The CLI returns `{\"items\": []}` for an empty store. Then a user adds more.\n" +
@@ -72,48 +73,89 @@ func TestRequirementsKeepOnlyNormalizedRequirementSentences(t *testing.T) {
 	}
 }
 
-// R1: an anchor asks for review only when its sub-feature id or one of its requirement
-// sentences changes; prose, commands and run history around them never do.
-func TestPinFlagsOnlyChangedIdsAndRequirements(t *testing.T) {
+// pinner writes items.md under a skill directory and pins its `item-add` sub-feature.
+func pinner(t *testing.T) func(text string, requirements []string, covered ...string) featuremap.Anchor {
 	root := t.TempDir()
 	dir := filepath.Join(root, "skills", "verify-x")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	file := filepath.Join(dir, "items.md")
-	pin := func(text string, requirements ...string) featuremap.Anchor {
+	return func(text string, requirements []string, covered ...string) featuremap.Anchor {
 		t.Helper()
-		if err := os.WriteFile(file, []byte(text), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "items.md"), []byte(text), 0644); err != nil {
 			t.Fatal(err)
 		}
-		a, err := featuremap.Pin(root, []string{"skills"}, "verify-x/items.md#item-add", requirements)
+		a, err := featuremap.Pin(root, []string{"skills"}, "verify-x/items.md#item-add", requirements, covered)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return a
 	}
-	sentence := "Expect exit 0 and `added NAME`; `store.json` lists NAME."
-	base := pin(runbook, sentence)
+}
+
+func reviews(t *testing.T, a featuremap.Anchor, want ...string) {
+	t.Helper()
+	if !slices.Equal(a.Review, want) {
+		t.Fatalf("review %q, want %q", a.Review, want)
+	}
+}
+
+const added = "Expect exit 0 and `added NAME`; `store.json` lists NAME."
+
+// R1: an anchor asks for review only when its sub-feature id or one of its requirement
+// sentences changes; prose, commands and run history around them never do.
+func TestPinFlagsOnlyChangedIdsAndRequirements(t *testing.T) {
+	pin := pinner(t)
+	base := pin(runbook, []string{added})
 	if len(base.Review) != 0 || base.File != filepath.Join("skills", "verify-x", "items.md") || len(base.Hash) != 64 {
 		t.Fatalf("%#v", base)
 	}
 	noise := strings.NewReplacer("Run `tally add NAME`.", "Run `tally --quiet add NAME`.", "stores a named item", "keeps a named item", "2026-09-12", "2026-10-01").Replace(runbook)
-	if a := pin(noise, sentence); len(a.Review) != 0 || a.Hash != base.Hash {
+	if a := pin(noise, []string{added}); len(a.Review) != 0 || a.Hash != base.Hash {
 		t.Fatalf("noise asked for review: %#v", a)
 	}
-	if a := pin(strings.Replace(runbook, "`added NAME`", "`stored NAME`", 1), sentence); len(a.Review) != 1 || a.Review[0] != "requirement changed or gone: "+sentence {
-		t.Fatalf("%#v", a)
+	reviews(t, pin(strings.Replace(runbook, "`added NAME`", "`stored NAME`", 1), []string{added}),
+		"requirement changed or gone: "+added, "requirement no claim maps: Expect exit 0 and `stored NAME`; `store.json` lists NAME.")
+	reviews(t, pin(strings.ReplaceAll(runbook, "`item-add`", "`item-put`"), []string{added}), "sub-feature item-add is gone")
+	reviews(t, pin(runbook, []string{"Run `tally add NAME`.", added}), "requirement changed or gone: Run `tally add NAME`.")
+	missing, err := featuremap.Pin(t.TempDir(), []string{"skills"}, "verify-x/items.md#item-add", []string{added}, nil)
+	if err != nil || len(missing.Review) != 1 || !strings.HasPrefix(missing.Review[0], "no feature file") {
+		t.Fatalf("%#v %v", missing, err)
 	}
-	if a := pin(strings.Replace(runbook, "`item-add`", "`item-put`", 1), sentence); len(a.Review) != 1 || a.Review[0] != "sub-feature item-add is gone" {
-		t.Fatalf("%#v", a)
+}
+
+// R1: a sub-feature is the text its id names, so its requirement sentences count only there. A
+// sentence moved to another step, an id left only as a mention elsewhere, or a claim mapped to a
+// sentence of another step asks for review.
+func TestPinScopesRequirementsToTheirSubFeature(t *testing.T) {
+	pin := pinner(t)
+	moved := strings.Replace(runbook, " Expect exit 0 and `added NAME`;\n  `store.json` lists NAME.\n", "\n", 1) + "| add | " + added + " |\n"
+	reviews(t, pin(moved, []string{added}), "requirement is outside sub-feature item-add: "+added)
+	mention := strings.ReplaceAll(runbook, "`item-add`", "`item-put`") + "\nUse `item-add` only through the CLI.\n"
+	reviews(t, pin(mention, []string{added}), "sub-feature item-add is gone")
+	wrapped := strings.Replace(runbook, "**`item-add`.**", "**Add.**", 1) + "\nText that wraps onto the next line\n`item-add` there does not open a block.\n"
+	reviews(t, pin(wrapped, []string{added}), "requirement is outside sub-feature item-add: "+added)
+	reviews(t, pin(runbook, []string{added, "Expect NAME on its own line."}), "requirement is outside sub-feature item-add: Expect NAME on its own line.")
+
+	// A heading, a table row, and the lines and fences nested under a list item all belong to it.
+	for name, text := range map[string]string{
+		"heading":   "# Items\n\n## Steps\n\n### item-add\n\nRun `tally add NAME`.\n\n#### Result\n\n" + added + "\n\n### item-list\n\nExpect NAME on its own line.\n",
+		"table row": "| Step | Result |\n|---|---|\n| `item-add` | " + added + " |\n| `item-list` | Expect NAME on its own line. |\n",
+		"nested":    "- `item-add`: Run `tally add NAME`.\n\n  ```sh\n  tally add x # must exit 0\n  ```\n\n  " + added + "\n- `item-list`: Expect NAME on its own line.\n",
+	} {
+		if a := pin(text, []string{added}); len(a.Review) != 0 {
+			t.Fatalf("%s: %#v", name, a)
+		}
 	}
-	if a := pin(runbook, "Run `tally add NAME`."); len(a.Review) != 1 {
-		t.Fatalf("an action sentence was accepted as a requirement: %#v", a)
-	}
-	if err := os.Remove(file); err != nil {
-		t.Fatal(err)
-	}
-	if a, err := featuremap.Pin(root, []string{"skills"}, "verify-x/items.md#item-add", []string{sentence}); err != nil || len(a.Review) != 1 || !strings.HasPrefix(a.Review[0], "no feature file") {
-		t.Fatalf("%#v %v", a, err)
-	}
+}
+
+// A requirement the sub-feature states that no claim maps asks for review and is named, unless
+// a claim maps it in the same sub-feature.
+func TestPinFlagsRequirementsNoClaimMaps(t *testing.T) {
+	pin := pinner(t)
+	refused := "Expect exit 2 and `exists NAME` when NAME is already stored."
+	text := strings.Replace(runbook, "`store.json` lists NAME.\n", "`store.json` lists NAME. "+refused+"\n", 1)
+	reviews(t, pin(text, []string{added}), "requirement no claim maps: "+refused)
+	reviews(t, pin(text, []string{added}, added, "- "+refused))
+	reviews(t, pin(text, []string{added, refused}))
 }

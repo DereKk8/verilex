@@ -12,9 +12,9 @@ import (
 )
 
 // Anchor is where a claim's meaning sits in a verify skill: a stable sub-feature id plus the
-// normalized requirement sentences the claim maps to. Prose, commands, run history and layout
-// around them can change freely; only a change to the id or to one of those sentences asks for
-// a review.
+// normalized requirement sentences the claim maps to, all inside the text the id names. Prose,
+// commands, run history and layout around them can change freely; a change to the id, to one of
+// those sentences, or a requirement the sub-feature gains that no claim maps asks for a review.
 type Anchor struct {
 	Ref          string   `json:"ref"`
 	File         string   `json:"file,omitempty"`
@@ -25,15 +25,14 @@ type Anchor struct {
 	Review []string `json:"review,omitempty"`
 }
 
-// Pin checks that ref (`<skill>/<file>#<sub-feature-id>`) still names its sub-feature and that
-// every sentence in requirements is still a requirement sentence of that feature file. A missing
-// file, id or sentence goes into the anchor's Review; only an unreadable file is an error.
-func Pin(root string, skillDirs []string, ref string, requirements []string) (Anchor, error) {
+// Pin checks ref (`<skill>/<file>#<sub-feature-id>`) against the verify skill as it is now:
+// the sub-feature must still be there, every sentence in requirements must be one of its
+// requirement sentences, and each of its requirement sentences must be in requirements or in
+// covered (what any claim maps in the same sub-feature). Every miss goes into the anchor's
+// Review; only an unreadable file is an error.
+func Pin(root string, skillDirs []string, ref string, requirements, covered []string) (Anchor, error) {
 	path, id, _ := strings.Cut(ref, "#")
-	pinned := make([]string, 0, len(requirements))
-	for _, sentence := range requirements {
-		pinned = append(pinned, Normalize(sentence))
-	}
+	pinned := normalizeAll(requirements)
 	sorted := slices.Clone(pinned)
 	slices.Sort(sorted)
 	sum := sha256.Sum256([]byte(id + "\n" + strings.Join(sorted, "\n")))
@@ -54,13 +53,25 @@ func Pin(root string, skillDirs []string, ref string, requirements []string) (An
 		}
 		a.File = filepath.Join(dir, clean)
 		text := strings.ReplaceAll(string(data), "\r\n", "\n")
-		if _, found := section(text, id); !found {
+		scope, found := subFeature(text, id)
+		if !found {
 			a.Review = append(a.Review, fmt.Sprintf("sub-feature %s is gone", id))
+			return a, nil
 		}
-		current := Requirements(text)
+		inScope, inFile := Requirements(scope), Requirements(text)
 		for _, sentence := range pinned {
-			if !slices.Contains(current, sentence) {
+			switch {
+			case slices.Contains(inScope, sentence):
+			case slices.Contains(inFile, sentence):
+				a.Review = append(a.Review, fmt.Sprintf("requirement is outside sub-feature %s: %s", id, sentence))
+			default:
 				a.Review = append(a.Review, "requirement changed or gone: "+sentence)
+			}
+		}
+		mapped := append(slices.Clone(pinned), normalizeAll(covered)...)
+		for _, sentence := range inScope {
+			if !slices.Contains(mapped, sentence) {
+				a.Review = append(a.Review, "requirement no claim maps: "+sentence)
 			}
 		}
 		return a, nil
@@ -68,6 +79,99 @@ func Pin(root string, skillDirs []string, ref string, requirements []string) (An
 	a.Review = append(a.Review, fmt.Sprintf("no feature file %s under %s", path, strings.Join(skillDirs, ", ")))
 	return a, nil
 }
+
+func normalizeAll(sentences []string) []string {
+	result := make([]string, 0, len(sentences))
+	for _, sentence := range sentences {
+		result = append(result, Normalize(sentence))
+	}
+	return result
+}
+
+// subFeature returns the text a sub-feature id names: the section under a heading whose anchor
+// is the id, plus every list item, paragraph or table row that opens with the id as inline code
+// (`- `+"`id`"+`: Run ...`), each with the lines nested under it. A mention of the id anywhere
+// else names nothing, so a requirement moved out of these blocks leaves the sub-feature.
+func subFeature(text, id string) (string, bool) {
+	parts := []string{}
+	if section, ok := headingSection(text, id); ok {
+		parts = append(parts, section)
+	}
+	lines := strings.Split(text, "\n")
+	fenced := false
+	for i := 0; i < len(lines); i++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "```") {
+			fenced = !fenced
+			continue
+		}
+		if fenced || !opens(lines, i, id) {
+			continue
+		}
+		end := blockEnd(lines, i)
+		parts = append(parts, strings.Join(lines[i:end], "\n"))
+		i = end - 1
+	}
+	return strings.Join(parts, "\n\n"), len(parts) > 0
+}
+
+// opens reports whether lines[i] starts a list item, paragraph or table row with `id`.
+func opens(lines []string, i int, id string) bool {
+	line, trimmed := lines[i], strings.TrimSpace(lines[i])
+	var start string
+	switch {
+	case strings.HasPrefix(trimmed, "|"):
+		start = strings.TrimSpace(strings.TrimPrefix(trimmed, "|"))
+	case listMarker.MatchString(line):
+		start = marker.ReplaceAllString(line, "")
+	case i == 0 || strings.TrimSpace(lines[i-1]) == "" || heading.MatchString(lines[i-1]):
+		start = marker.ReplaceAllString(line, "")
+	default:
+		return false
+	}
+	return strings.HasPrefix(strings.TrimLeft(start, "*_"), "`"+id+"`")
+}
+
+// blockEnd returns the index just past the block that opens at lines[i]. A table row stands
+// alone; a paragraph ends at a blank line or at the next list item, table, fence or heading; a
+// list item also keeps the lines, fences and blank-separated paragraphs indented under it.
+func blockEnd(lines []string, i int) int {
+	if strings.HasPrefix(strings.TrimSpace(lines[i]), "|") {
+		return i + 1
+	}
+	item, indent := listMarker.MatchString(lines[i]), indentOf(lines[i])
+	j := i + 1
+	for j < len(lines) {
+		line, trimmed := lines[j], strings.TrimSpace(lines[j])
+		nested := item && indentOf(line) > indent
+		switch {
+		case heading.MatchString(line):
+			return j
+		case trimmed == "":
+			k := j
+			for k < len(lines) && strings.TrimSpace(lines[k]) == "" {
+				k++
+			}
+			if !item || k == len(lines) || indentOf(lines[k]) <= indent {
+				return j
+			}
+			j = k
+		case strings.HasPrefix(trimmed, "```"):
+			if !nested {
+				return j
+			}
+			for j++; j < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[j]), "```"); j++ {
+			}
+			j = min(j+1, len(lines))
+		case !nested && (listMarker.MatchString(line) || strings.HasPrefix(trimmed, "|")):
+			return j
+		default:
+			j++
+		}
+	}
+	return j
+}
+
+func indentOf(line string) int { return len(line) - len(strings.TrimLeft(line, " \t")) }
 
 var (
 	// requirementWord marks a requirement sentence, matched with code spans masked.
@@ -78,19 +182,21 @@ var (
 	listMarker   = regexp.MustCompile(`^\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+`)
 	marker       = regexp.MustCompile(`^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?`)
 	emphasis     = regexp.MustCompile(`\*\*|__`)
+	// label is a leading sub-feature id (masked) that names the step a sentence belongs to.
+	label = regexp.MustCompile("^\x00\\d+\x00[:.]\\s*")
 )
 
 // Requirements lists a feature file's requirement sentences, normalized: the sentences that
 // state what must happen or what counts as success (`Expect`, `must`, `require`, `exits`,
-// `returns`, `Success is`). A sentence that starts with `Run ` is an action, so its command text
-// never counts; a sentence that carries a date is run history; headings and fenced blocks are
+// `returns`, `Success is`). A sentence that starts with `Run `, after an optional sub-feature
+// label such as `+"`item-add`:"+`, is an action, so its command text never counts; a sentence that carries a date is run history; headings and fenced blocks are
 // not sentences. Literal values in code spans stay, because they are what is required.
 func Requirements(text string) []string {
 	result := []string{}
 	for _, unit := range units(text) {
 		masked, spans := mask(unit)
 		for _, sentence := range split(masked) {
-			if strings.HasPrefix(sentence, "Run ") || datedHistory.MatchString(sentence) || !requirementWord.MatchString(sentence) {
+			if strings.HasPrefix(label.ReplaceAllString(sentence, ""), "Run ") || datedHistory.MatchString(sentence) || !requirementWord.MatchString(sentence) {
 				continue
 			}
 			if normalized := collapse(unmask(sentence, spans)); !slices.Contains(result, normalized) {

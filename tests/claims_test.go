@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -158,7 +159,7 @@ func TestChangedSourceRequirementFlagsClaimForReview(t *testing.T) {
 	first := green(t, root, nil, chain)
 	labels := []string{"store-open", "item-stored apple", "item-listed apple"}
 	items := feature(root, "items.md")
-	original := read(t, items)
+	original, claim := read(t, items), read(t, claimFile(root, "item-added"))
 
 	edit(t, items, "Run `bin/tally --store \"$STORE\" add NAME`.", "Run `bin/tally --store \"$STORE\" --quiet add NAME` from the checkout.")
 	edit(t, items, "A user adds named items to an open store and lists them.", "A user adds named items to an open store, then lists them.")
@@ -171,24 +172,89 @@ func TestChangedSourceRequirementFlagsClaimForReview(t *testing.T) {
 	write(t, items, original, 0644)
 	reworded := "Expect exit 0 and `added NAME`, and expect `store.json` to list NAME."
 	edit(t, items, addRequirement, reworded)
-	review := itemAdd + ": requirement changed or gone: " + addRequirement
+	review := itemAdd + ": requirement changed or gone: " + addRequirement + "; " + itemAdd + ": requirement no claim maps: " + reworded
 	equal(t, verilex(t, root, nil, "claims").stdout, ""+
-		v1+"  A named item is in the store.\n  entry: cli  words: item-stored\n  review: "+review+"\n"+
+		v1+"  A named item is in the store.\n  entry: cli  words: item-stored\n"+
+		"  review: "+itemAdd+": requirement changed or gone: "+addRequirement+"\n"+
+		"  review: "+itemAdd+": requirement no claim maps: "+reworded+"\n"+
 		pinOf(t, root, "item-listed")+"  A stored item shows up when a user lists the store.\n  entry: cli  words: item-listed\n"+
 		pinOf(t, root, "store-opened")+"  A new, empty store is open and ready for items.\n  entry: cli  words: store-open\n")
 	equal(t, pinOf(t, root, "item-added"), v1)
 	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: claim item-added needs review: "+review+"\n")
-	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; item-stored apple: drift-suspect: claim item-added needs review: "+review+"\n")
+	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; "+headline("item-stored apple: drift-suspect: claim item-added needs review: "+review)+"\n")
 
 	// The reviewer judges that the claim still says the same and maps it to the new sentence.
+	// The version and the passes recorded for it stand, but no pass was judged against the new
+	// mapping, so every word that proves the claim runs live once before it may skip again.
 	edit(t, claimFile(root, "item-added"), addRequirement, reworded)
 	equal(t, pinOf(t, root, "item-added"), v1)
 	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
-	equal(t, plan(t, root, chain).stdout, "plan: skip 3, run 0\n"+skips(first.Run, labels...))
+	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; item-stored apple: claim sources changed\n")
+	remapped := green(t, root, nil, chain)
+	equal(t, remapped.Rerun, "item-stored apple: claim sources changed")
+	ranLive(t, remapped)
+	equal(t, remapped.Words[1].Proves, v1)
+	equal(t, plan(t, root, chain).stdout, "plan: skip 3, run 0\n"+skips(remapped.Run, labels...))
 
-	edit(t, items, "`item-add`", "`item-put`")
+	// A requirement added to the sub-feature that no claim maps asks for review and is named;
+	// mapping it there clears the review and, again, the next run goes live.
+	write(t, items, strings.Replace(read(t, items), reworded, reworded+" Expect exit 2 and `exists NAME` when NAME is already stored.", 1), 0644)
+	unmapped := itemAdd + ": requirement no claim maps: Expect exit 2 and `exists NAME` when NAME is already stored."
+	contains(t, verilex(t, root, nil, "claims").stdout, "  entry: cli  words: item-stored\n  review: "+unmapped+"\n")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: claim item-added needs review: "+unmapped+"\n")
+	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; item-stored apple: drift-suspect: claim item-added needs review: "+unmapped+"\n")
+	edit(t, claimFile(root, "item-added"), "      - "+strconv.Quote(reworded), "      - "+strconv.Quote(reworded)+"\n      - \"Expect exit 2 and `exists NAME` when NAME is already stored.\"")
+	equal(t, pinOf(t, root, "item-added"), v1)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
+	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; item-stored apple: claim sources changed\n")
+	write(t, items, original, 0644)
+	write(t, claimFile(root, "item-added"), claim, 0644)
+	equal(t, green(t, root, nil, chain).Rerun, "item-stored apple: claim sources changed")
+
+	write(t, items, strings.ReplaceAll(original, "`item-add`", "`item-put`"), 0644)
 	contains(t, verilex(t, root, nil, "claims").stdout, "  review: "+itemAdd+": sub-feature item-add is gone\n")
 	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; item-stored apple: drift-suspect: claim item-added needs review: "+itemAdd+": sub-feature item-add is gone\n")
+}
+
+// Rule: a claim's requirement sentences count only inside the text its sub-feature id names: the
+// list items, paragraphs and table rows that open with the id, or a heading named by it. A
+// sentence moved to another step, an id left only as a mention, or a claim mapped to a sentence
+// of another sub-feature asks for review, so no word that proves the claim skips.
+func TestClaimRequirementsStayInsideTheirSubFeature(t *testing.T) {
+	root := curated(t)
+	green(t, root, nil, chain)
+	green(t, root, nil, chain, "--fresh")
+	items := feature(root, "items.md")
+	original, claim := read(t, items), read(t, claimFile(root, "item-added"))
+	itemList := "verify-tally/features/items.md#item-list"
+
+	// The item-add requirement moves into the item-list step.
+	edit(t, items, " Expect exit 0 and `added NAME`; `store.json` lists NAME.", "")
+	edit(t, items, "Expect NAME on its own line.", "Expect NAME on its own line. "+addRequirement)
+	claims := verilex(t, root, nil, "claims").stdout
+	contains(t, claims, "  entry: cli  words: item-stored\n  review: "+itemAdd+": requirement is outside sub-feature item-add: "+addRequirement+"\n")
+	contains(t, claims, "  entry: cli  words: item-listed\n  review: "+itemList+": requirement no claim maps: "+addRequirement+"\n")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 2 of 3 admitted drift-suspect; they always run\n"+
+		"  item-listed: claim item-listed needs review: "+itemList+": requirement no claim maps: "+addRequirement+"\n"+
+		"  item-stored: claim item-added needs review: "+itemAdd+": requirement is outside sub-feature item-add: "+addRequirement+"\n")
+	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; item-stored apple: drift-suspect: claim item-added needs review: "+itemAdd+": requirement is outside sub-feature item-add: "+addRequirement+"\n")
+
+	// The id stays only as a mention in prose, which names no sub-feature.
+	write(t, items, strings.ReplaceAll(original, "`item-add`", "`item-put`")+"\nNever drive `item-add` through the store file.\n", 0644)
+	contains(t, verilex(t, root, nil, "claims").stdout, "  entry: cli  words: item-stored\n  review: "+itemAdd+": sub-feature item-add is gone\n")
+	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; item-stored apple: drift-suspect: claim item-added needs review: "+itemAdd+": sub-feature item-add is gone\n")
+
+	// Mapping the claim to a sentence of another sub-feature never clears a review.
+	write(t, items, original, 0644)
+	edit(t, claimFile(root, "item-added"), "      - \""+addRequirement+"\"", "      - Expect NAME on its own line.")
+	review := itemAdd + ": requirement is outside sub-feature item-add: Expect NAME on its own line.; " + itemAdd + ": requirement no claim maps: " + addRequirement
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: claim item-added needs review: "+review+"\n")
+	done := verilex(t, root, nil, "propose", "item-stored")
+	equal(t, done.code, 2)
+	contains(t, done.stderr, "verilex: refused: ")
+	contains(t, done.stderr, "claim item-added needs review: "+review+"; bring its sources in line with the verify skill first")
+	write(t, claimFile(root, "item-added"), claim, 0644)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
 }
 
 // Rule: a claim pins the order of reality for every word that proves it. A variant word that

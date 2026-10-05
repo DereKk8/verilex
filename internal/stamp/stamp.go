@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
+	"github.com/DereKk8/verilex/internal/featuremap"
 	"github.com/DereKk8/verilex/internal/lifecycle"
 )
 
@@ -28,7 +29,8 @@ type Stamp struct {
 	// Digest covers every component; it is empty when the step cannot be stamped.
 	Digest string
 	// Components maps each thing the result depended on to its fingerprint:
-	// verilex, frame, shared, word, claim, "input <path>", "env <NAME>" and upstream.
+	// verilex, frame, shared, word, claim, "claim sources", "input <path>", "env <NAME>" and
+	// upstream.
 	Components map[string]string
 	// Unclear says why the step has no stamp.
 	Unclear string
@@ -143,6 +145,9 @@ func (h hasher) word(word dictionary.Word, root string, components map[string]st
 			return "claim " + word.Claim.Name + ": " + err.Error()
 		}
 		components["claim"] = c.Fingerprint
+		// Sources are not identity, yet a pass recorded before they were re-mapped was judged
+		// against other requirement sentences, so the first run after a re-map goes live.
+		components["claim sources"] = sources(c)
 	}
 	for _, input := range word.Inputs {
 		path := input
@@ -272,6 +277,22 @@ func lines(components map[string]string) string {
 		fmt.Fprintf(&b, "%q=%s\n", key, components[key])
 	}
 	return b.String()
+}
+
+// sources fingerprints where a claim is anchored: each reference with its normalized
+// requirement sentences, in any order.
+func sources(c dictionary.Claim) string {
+	anchors := make([]string, 0, len(c.Sources))
+	for _, source := range c.Sources {
+		requirements := make([]string, 0, len(source.Requirements))
+		for _, sentence := range source.Requirements {
+			requirements = append(requirements, featuremap.Normalize(sentence))
+		}
+		sort.Strings(requirements)
+		anchors = append(anchors, source.Ref+"\n"+strings.Join(requirements, "\n"))
+	}
+	sort.Strings(anchors)
+	return digestOf(strings.Join(anchors, "\n\n"))
 }
 
 func digestOf(text string) string {

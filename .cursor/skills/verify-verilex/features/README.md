@@ -7,6 +7,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 - A session from `.cursor/skills/verify-verilex/scripts/launch` (or `launch --bin PATH` for a given build), with `S` set to the printed session directory.
 - `.cursor/skills/verify-verilex/scripts/doctor "$S"` prints `doctor: ok` and the expected binary source and sha256.
 - The scratch product `$S/tally` is unmodified, except where a recipe edits it and restores it.
+- A recipe that says "A fresh session" needs a session no earlier recipe used: relaunch rather than reuse, because earlier runs change use counts, ledger skips and expected run counts.
 - Recipes marked "admitted baseline" first need `.cursor/skills/verify-verilex/scripts/admit-all "$S"` to print `admitted words: 3`.
 - Never drive a session this run did not launch, and never point `VERILEX_HOME` at `~/.local/state/verilex`.
 

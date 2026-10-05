@@ -9,6 +9,7 @@ Every `verilex run` ends in one of three verdicts with a matching exit code: `gr
 - `verdict-inconclusive-env` reports inconclusive and exits 2 when the product's environment blocks a word.
 - `verdict-inconclusive-frame` reports inconclusive and exits 2 when the frame doctor refuses the instance.
 - `verdict-honesty` turns unbacked claims into inconclusive: `pass` without an observation, `fail` without `preconditions_held`, an exit code that disagrees with the claim, stdout that is not one result JSON object, and a secret pattern in evidence.
+- `verdict-secret-project` applies the project's own `secret_patterns` from `.verilex/config.yaml` to word evidence.
 
 ## How to get to it (user POV)
 
@@ -40,12 +41,14 @@ Preconditions:
   | secret | `echo "token ghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/leak.txt"; echo '{"verdict": "pass", "observation": "wrote leak.txt"}'` | `secret pattern in evidence leak.txt` |
 
 - **Backed fail is red.** Write `echo '{"verdict": "fail", "preconditions_held": true, "detail": "rename lost"}'; exit 1` and run `"$S/vx" honesty-backed-fail verilex run 'store-open | probe-word'`. Output is `red: 1 green, 1 red` and exit `1`.
+- **Project secret pattern.** Write `echo "ticket PROBE-1234" > "$VERILEX_EVIDENCE/note.txt"; echo '{"verdict": "pass", "observation": "wrote note.txt"}'` and run `"$S/vx" secret-control verilex run 'store-open | probe-word'`: `green: 2 green`. Then run `echo 'secret_patterns: ["PROBE-[0-9]{4}"]' >> "$S/tally/.verilex/config.yaml"` and `"$S/vx" secret-project verilex run 'store-open | probe-word'`: `inconclusive: 1 green, 1 inconclusive` with cause `secret pattern in evidence note.txt`, exit `2`. Restore with `sed -i '$d' "$S/tally/.verilex/config.yaml"` and confirm `"$S/vx" secret-config cat "$S/tally/.verilex/config.yaml"` prints only `project: tally`.
 - **Honesty, second view.** Run `"$S/vx" honesty-runs verilex runs`. Each probe run is listed with the verdict it printed.
-- **Restore.** Run `rm -r "$S/tally/.verilex/words/probe-word"`.
+- **Restore.** Run `command rm -rf "$S/tally/.verilex/words/probe-word"`, then `"$S/vx" probe-restored ls "$S/tally/.verilex/words"`: `probe-word` is gone.
 
 ## Gotchas
 
 - An exit code mismatch is reported before a missing `preconditions_held`. The `no-preconditions` probe must exit `1`.
+- Editing `config.yaml` changes every word's stamp. Restore it before any skip recipe.
 - Never write a token-shaped literal into a repository file. Build the fake token at runtime, as in the `secret` row.
 - `TALLY_ADOPT_STORE` is read only by the frame, so it is not in any word's stamp. Without `--fresh`, a matching ledger skips the chain and the doctor never runs.
 - `verdict-red` needs `TALLY_DEFECT`, which the tally words declare in `env`, so the red run is live even after an admitted green run.

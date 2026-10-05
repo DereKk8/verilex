@@ -46,7 +46,7 @@ Read-only. It prints `doctor: ok` and the binary source, sha256, `vcs.revision` 
 "$S/vx" <label> <any read-only command>      # a second observation
 ```
 
-`vx` runs the command from `$S/tally` with `VERILEX_HOME=$S/home`, `TALLY_STORES=$S/stores` and `$S/bin` first on `PATH`, so `verilex` is the pinned binary. Extra environment passes through: `TALLY_DEFECT=drop-adds "$S/vx" ...`. It prints the command, stdout, stderr (prefixed `stderr| `) and `exit N  evidence: <dir>`, and exits with the command's code. Labels are short kebab-case names for the proof step. Relative paths resolve in `$S/tally`, so pass absolute paths for anything else: verdict files, `--project`, and repository files as `"$PWD/tests/..."`. The feature files hold the exact commands per feature.
+`vx` runs the command from `$S/tally` with `VERILEX_HOME=$S/home`, `TALLY_STORES=$S/stores` and `$S/bin` first on `PATH`, so `verilex` is the pinned binary. Extra environment passes through: `TALLY_DEFECT=drop-adds "$S/vx" ...`. It prints the command, stdout, stderr (prefixed `stderr| `) and `exit N  evidence: <dir>`, and exits with the command's code. Labels are short kebab-case names for the proof step. Relative paths resolve in `$S/tally`, so pass absolute paths for anything else: verdict files, `--project`, and repository files as `"$PWD/tests/..."`. `vx` adds `$ command` and `exit N` lines to its stdout, so read `<evidence>/NNN-<label>/stdout` when a step needs to parse JSON. Write file commands in recipes as `command rm`, `command cp` and `command mv`: some interactive shells alias them to prompting forms (`rm -I`), which silently skip the change in a non-interactive call. The feature files hold the exact commands per feature.
 
 ## Evidence
 
@@ -68,6 +68,17 @@ Proof standards:
 ```
 
 It tears down every run that `verilex runs` shows as `cleanup=kept` with `verilex cleanup <run>` (captured as evidence), then removes `$S` only when `$S/owner` matches the session. It kills no process: verilex leaves none running. It keeps the evidence directory and fails if that directory is gone. Delete `${TMPDIR:-/tmp}/verify-verilex-evidence/<session id>` yourself once the proof is reported.
+
+## Traps
+
+Each feature file lists its own gotchas. These traps cross features:
+
+- Provisional words never skip, and `--continue` refuses a kept instance whose history holds one. Run `admit-all` first.
+- The first run after an admission is live (`word changed`), because `admission.json` is part of every stamp.
+- Only variables in a word's `env` enter its stamp. Probe frame-only variables such as `TALLY_ADOPT_STORE` with `--fresh`.
+- `verilex plan` and `verilex check` exit `0` whatever they report. Read stdout.
+- `verilex runs` sorts by run id, so two runs in the same second are out of time order. Use the id a command printed.
+- Edits to `$S/tally` (words, `config.yaml`, the tally feature map) change stamps or cause drift. Restore them before the next recipe.
 
 ## Helpers
 

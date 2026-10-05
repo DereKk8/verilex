@@ -27,7 +27,7 @@ Preconditions:
 - **Refused exists.** Run the scaffold command again as `"$S/vx" new-exists ...`. Stderr `verilex: refused: .verilex/words/item-renamed already exists`, exit `2`.
 - **New project.** Run `mkdir -p "$S/fresh/.cursor/skills/verify-fresh/features"` and write `$S/fresh/.cursor/skills/verify-fresh/features/ping.md` with a `## Sub-features` list holding `` `ping-reply` ``. Run `"$S/vx" new-project verilex --project "$S/fresh" new ping-replied --implements verify-fresh/features/ping.md#ping-reply`. Stdout says it created `.verilex with config and frame stubs (launch, doctor, refresh, cleanup)`.
 - **New project, second view.** Run `"$S/vx" new-project-files find "$S/fresh/.verilex" -type f` and `"$S/vx" new-project-config cat "$S/fresh/.verilex/config.yaml"`. Seven files exist and the config reads `project: fresh`. Run `"$S/vx" new-project-run verilex --project "$S/fresh" run ping-replied`: `inconclusive: 0 green, 1 not run` with `launch: exit 2` and `cleanup: exit 2; the instance may outlive the run`.
-- **Restore.** Run `rm -r "$S/tally/.verilex/words/item-renamed"`.
+- **Restore.** Run `command rm -rf "$S/tally/.verilex/words/item-renamed"`, then `"$S/vx" new-restored ls "$S/tally/.verilex/words"`: `item-renamed` is gone.
 
 ## Gotchas
 

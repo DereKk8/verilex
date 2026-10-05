@@ -11,6 +11,7 @@
 - `run-json` prints the complete run record, including `rerun` (why it ran live) or `skipped`.
 - `run-skip` skips the whole chain, launching nothing, when every word is admitted and every stamp matches a green result with its evidence present.
 - `run-skip-invalidated` runs live again when a declared input changes or the relied-on evidence is gone.
+- `run-skip-no-inputs` never skips an admitted word that omits `inputs` or declares `inputs: []`.
 
 ## How to get to it (user POV)
 
@@ -20,7 +21,7 @@
 
 Preconditions:
 
-- A fresh session that passes the doctor. `run-skip` and `run-skip-invalidated` need the admitted baseline (`admit-all`).
+- A fresh session that passes the doctor. `run-skip` and `run-skip-invalidated` need the admitted baseline (`admit-all`). `run-skip-no-inputs` also needs a probe word with two counted uses.
 
 - **Live.** Run `"$S/vx" run-live verilex run 'store-open | item-stored apple | item-listed apple'`. Output `green: 3 green; run <RUN>`, exit `0`.
 - **Live, second view.** Run `"$S/vx" run-live-runs verilex runs` and `"$S/vx" run-live-stores ls "$S/stores"`. `<RUN>` shows `green  cleanup=done` and no store is left.
@@ -35,7 +36,9 @@ Preconditions:
 - **Skip JSON.** Run `"$S/vx" run-skip-json verilex run --json 'store-open | item-stored apple | item-listed apple'`. The record has `"skipped": true`, `"cleanup": "none"`, an empty `frame` and `relies_on` on each word.
 - **Fresh.** Run `"$S/vx" run-fresh verilex run --fresh 'store-open | item-stored apple | item-listed apple'`. Output `green: 3 green; run <RUN>` with no `skipped`; `verilex runs` shows it `cleanup=done`.
 - **Input changed.** Run `TALLY_DEFECT=none "$S/vx" run-env-changed verilex plan 'store-open | item-stored apple | item-listed apple'`. It prints `plan: skip 0, run 3; store-open: env TALLY_DEFECT changed`, so `run` would be live.
-- **Evidence gone.** Note `<A>` from `verilex plan`. Run `mv "$S/home/tally/runs/<A>/02-item-stored" "$S/moved"`, then `"$S/vx" run-evidence-gone verilex plan 'store-open | item-stored apple | item-listed apple'`: `item-stored apple: evidence from run <A> is gone`. Move it back with `mv "$S/moved" "$S/home/tally/runs/<A>/02-item-stored"`.
+- **Evidence gone.** Note `<A>` from `verilex plan`. Run `command mv "$S/home/tally/runs/<A>/02-item-stored" "$S/moved"`, then `"$S/vx" run-evidence-gone verilex plan 'store-open | item-stored apple | item-listed apple'`: `item-stored apple: evidence from run <A> is gone`. Move it back with `command mv "$S/moved" "$S/home/tally/runs/<A>/02-item-stored"`.
+- **No inputs.** Run `"$S/vx" inp-new verilex new probe-word --implements verify-tally/features/items.md#item-add` and write `$S/tally/.verilex/words/probe-word/run` as `#!/bin/sh` plus `echo '{"verdict": "pass", "observation": "probe saw the store"}'`. Run `"$S/vx" inp-use-1 verilex run 'store-open | probe-word'` and `inp-use-2` the same way, then `propose` and `admit` `probe-word` as in [admit.md](admit.md). Run the chain once more (live: `word changed`), then `"$S/vx" inp-plan verilex plan 'store-open | probe-word'`. It prints `plan: skip 0, run 2; probe-word: declares no inputs`.
+- **Empty inputs.** Add `inputs: []` under `provides: []` in `probe-word/word.md`, `propose` and `admit` it again, run the chain once, then `"$S/vx" inp-empty-plan verilex plan 'store-open | probe-word'`. It prints the same `probe-word: declares no inputs`. Restore with `command rm -rf "$S/tally/.verilex/words/probe-word"`.
 
 ## Gotchas
 

@@ -4,7 +4,7 @@
 set -uo pipefail
 S="${1:?usage: admit-all SESSION}"
 [ -x "$S/vx" ] || { echo "admit-all: $S is not a verify-verilex session" >&2; exit 2; }
-step() { out="$("$S/vx" "$@")" || { printf '%s\n' "$out"; echo "admit-all: FAIL at $2" >&2; exit 1; }; }
+step() { out="$("$S/vx" "$@")" || { printf '%s\n' "$out"; echo "admit-all: FAIL at $1" >&2; exit 1; }; }
 chain='store-open | item-stored apple | item-listed apple'
 step admit-all-use-1 verilex run "$chain"
 step admit-all-use-2 verilex run "$chain"

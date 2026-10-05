@@ -109,6 +109,15 @@ func TestClaimFingerprintIsStableAndFollowsItsIdentity(t *testing.T) {
 	equal(t, done.code, 2)
 	contains(t, done.stderr, "malformed claim")
 	contains(t, done.stderr, "field non_proof not found")
+
+	// A mapped sentence that is not one requirement sentence could never match the verify skill,
+	// so the claim is refused instead of needing review forever.
+	for _, sentence := range []string{"Run `bin/tally add NAME`.", "Verified 2026-09-12: `tally add` exits 0.", "Expect exit 0. Expect `added NAME`.", "The store holds NAME."} {
+		write(t, path, strings.Replace(original, `"Expect exit 0 and `+"`added NAME`; `store.json`"+` lists NAME."`, strconv.Quote(sentence), 1), 0644)
+		done = verilex(t, root, nil, "claims")
+		equal(t, done.code, 2)
+		contains(t, done.stderr, "is not one requirement sentence")
+	}
 }
 
 // Rule: a pass is evidence only for the claim version it ran against, on a fresh instance and

@@ -210,7 +210,7 @@ A word that proves a claim must also take every arg the claim uses, name one of 
 - `item-add`: Run `bin/tally --store "$STORE" add NAME`. Expect exit 0 and `added NAME`; `store.json` lists NAME.
 ```
 
-A requirement sentence says `Expect`, `must`, `require`, `exits`, `returns` or `Success is` outside its code spans. A sentence that starts with `Run `, after an optional sub-feature label, is an action, so its command never counts. A sentence with an ISO date (`2026-09-12`) is run history. Headings and fenced blocks are not sentences. Sentences are compared without list markers, emphasis or line breaks, and literal values in code spans count.
+A requirement sentence says `Expect`, `must`, `require`, `exits`, `returns` or `Success is` outside its code spans. A sentence that starts with `Run `, after an optional sub-feature label, is an action, so its command never counts. A sentence with an ISO date (`2026-09-12`) is run history. Headings and fenced blocks are not sentences. Sentences are compared without list markers, emphasis or line breaks, and literal values in code spans count. Each sentence a source maps must be one such requirement sentence, or the claim is refused when it loads.
 
 The claim **needs review** when its sub-feature is gone, when a sentence it maps is gone or now sits outside the sub-feature, or when the sub-feature states a requirement sentence that no claim maps. `verilex claims` and `verilex check` name the sentence, and every admitted word that proves the claim is drift-suspect, so no chain that holds one is skipped:
 

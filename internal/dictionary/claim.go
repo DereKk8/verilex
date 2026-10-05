@@ -16,6 +16,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/DereKk8/verilex/internal/featuremap"
 )
 
 // claimFormat changes whenever the meaning of a claim fingerprint changes.
@@ -183,6 +185,13 @@ func ReadClaim(path string) (Claim, error) {
 	for _, source := range c.Sources {
 		if !strings.Contains(source.Ref, "#") || len(set(source.Requirements)) == 0 {
 			return c, fmt.Errorf("%s: each source needs a 'ref' <skill>/<file>#<sub-feature> and the 'requirements' sentences the claim maps to", path)
+		}
+		// A mapped sentence that is not exactly one requirement sentence could never match the
+		// verify skill, so the claim would need review forever.
+		for _, sentence := range source.Requirements {
+			if found := featuremap.Requirements(sentence); len(found) != 1 || found[0] != featuremap.Normalize(sentence) {
+				return c, fmt.Errorf("%s: %s is not one requirement sentence: it must say Expect, must, require, exits, returns or Success is outside code spans, and not start with Run or carry a date", path, quote(sentence))
+			}
 		}
 	}
 	if err = undeclared(path, append(slices.Clone(c.Requires), c.Provides...), c.Args); err != nil {

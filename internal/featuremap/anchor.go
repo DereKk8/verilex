@@ -11,32 +11,50 @@ import (
 	"strings"
 )
 
-// Anchor is where a claim's meaning sits in a verify skill: a stable sub-feature id plus the
-// normalized requirement sentences the claim maps to, all inside the text the id names. Prose,
-// commands, run history and layout around them can change freely; a change to the id, to one of
-// those sentences, or a requirement the sub-feature gains that no claim maps asks for a review.
+// Source is what a claim pins in one sub-feature of a verify skill.
+type Source struct {
+	// Ref is `<skill>/<file>#<sub-feature-id>`.
+	Ref string
+	// Requirements are the requirement sentences of the sub-feature the claim maps to.
+	Requirements []string
+	// Prose is the sub-feature's prose fingerprint as the claim's reviewer last accepted it.
+	Prose string
+	// Covered lists what the claims that words prove map in the same sub-feature.
+	Covered []string
+}
+
+// ProseDigits is how many hex digits a prose fingerprint has.
+const ProseDigits = 12
+
+// Anchor is where a claim's meaning sits in a verify skill: a stable sub-feature id, the
+// normalized requirement sentences the claim maps to, and a fingerprint of the rest of the
+// sub-feature's prose, all inside the text the id names. Commands, run history and layout can
+// change freely; any other change in the sub-feature asks for a review.
 type Anchor struct {
 	Ref          string   `json:"ref"`
 	File         string   `json:"file,omitempty"`
 	Requirements []string `json:"requirements"`
-	// Hash fingerprints the id and the normalized requirement sentences the anchor pins.
+	// Prose fingerprints the sub-feature's prose as it is now; empty when the sub-feature is gone.
+	Prose string `json:"prose,omitempty"`
+	// Hash fingerprints what the anchor pins: the id, the accepted prose fingerprint and the
+	// normalized requirement sentences.
 	Hash string `json:"hash"`
 	// Review says why the verify skill no longer holds what the anchor pins; empty when it does.
 	Review []string `json:"review,omitempty"`
 }
 
-// Pin checks ref (`<skill>/<file>#<sub-feature-id>`) against the verify skill as it is now:
-// the sub-feature must still be there, every sentence in requirements must be one of its
-// requirement sentences, and each of its requirement sentences must be in requirements or in
-// covered (what any claim maps in the same sub-feature). Every miss goes into the anchor's
-// Review; only an unreadable file is an error.
-func Pin(root string, skillDirs []string, ref string, requirements, covered []string) (Anchor, error) {
-	path, id, _ := strings.Cut(ref, "#")
-	pinned := normalizeAll(requirements)
+// Pin checks a source against the verify skill as it is now. The sub-feature must still be
+// there; every sentence the source maps must be one of its requirement sentences; each of its
+// requirement sentences must be mapped by the source or covered; and its prose must still be
+// what the source accepted. Every miss goes into the anchor's Review; only an unreadable file
+// is an error.
+func Pin(root string, skillDirs []string, s Source) (Anchor, error) {
+	path, id, _ := strings.Cut(s.Ref, "#")
+	pinned := normalizeAll(s.Requirements)
 	sorted := slices.Clone(pinned)
 	slices.Sort(sorted)
-	sum := sha256.Sum256([]byte(id + "\n" + strings.Join(sorted, "\n")))
-	a := Anchor{Ref: ref, Requirements: pinned, Hash: hex.EncodeToString(sum[:])}
+	sum := sha256.Sum256([]byte(id + "\n" + s.Prose + "\n" + strings.Join(sorted, "\n")))
+	a := Anchor{Ref: s.Ref, Requirements: pinned, Hash: hex.EncodeToString(sum[:])}
 	clean, ok := relative(path)
 	if !ok || id == "" {
 		a.Review = append(a.Review, "not a <skill>/<file>#<sub-feature> reference")
@@ -68,16 +86,41 @@ func Pin(root string, skillDirs []string, ref string, requirements, covered []st
 				a.Review = append(a.Review, "requirement changed or gone: "+sentence)
 			}
 		}
-		mapped := append(slices.Clone(pinned), normalizeAll(covered)...)
+		mapped := append(slices.Clone(pinned), normalizeAll(s.Covered)...)
 		for _, sentence := range inScope {
 			if !slices.Contains(mapped, sentence) {
 				a.Review = append(a.Review, "requirement no claim maps: "+sentence)
 			}
 		}
+		a.Prose = prose(scope)
+		switch {
+		case s.Prose == "":
+			a.Review = append(a.Review, "prose is not pinned: check that the claim holds, then pin prose "+a.Prose)
+		case s.Prose != a.Prose:
+			a.Review = append(a.Review, "prose changed: check that the claim still holds, then pin prose "+a.Prose)
+		}
 		return a, nil
 	}
 	a.Review = append(a.Review, fmt.Sprintf("no feature file %s under %s", path, strings.Join(skillDirs, ", ")))
 	return a, nil
+}
+
+// prose fingerprints a sub-feature's prose: every heading and every sentence that is neither a
+// requirement sentence nor dated run history, in order, with each code span blanked. A command
+// edit changes nothing; any other edit does, the words of a Run sentence included. Requirement
+// sentences are left out because Pin checks each of them on its own.
+func prose(scope string) string {
+	parts := []string{}
+	for _, unit := range units(scope, true) {
+		masked, _ := mask(unit)
+		for _, sentence := range split(masked) {
+			if !datedHistory.MatchString(sentence) && !requirement(sentence) {
+				parts = append(parts, collapse(maskedSpan.ReplaceAllString(sentence, "``")))
+			}
+		}
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\n")))
+	return hex.EncodeToString(sum[:])[:ProseDigits]
 }
 
 func normalizeAll(sentences []string) []string {
@@ -90,7 +133,7 @@ func normalizeAll(sentences []string) []string {
 
 // subFeature returns the text a sub-feature id names: the section under a heading whose anchor
 // is the id, plus every list item, paragraph or table row that opens with the id as inline code
-// (`- `+"`id`"+`: Run ...`), each with the lines nested under it. A mention of the id anywhere
+// (- `id`: Run ...), each with the lines nested under it. A mention of the id anywhere
 // else names nothing, so a requirement moved out of these blocks leaves the sub-feature.
 func subFeature(text, id string) (string, bool) {
 	parts := []string{}
@@ -182,6 +225,8 @@ var (
 	listMarker   = regexp.MustCompile(`^\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+`)
 	marker       = regexp.MustCompile(`^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?`)
 	emphasis     = regexp.MustCompile(`\*\*|__`)
+	// maskedSpan is a code span as mask leaves it.
+	maskedSpan = regexp.MustCompile("\x00\\d+\x00")
 	// label is a leading sub-feature id (masked) that names the step a sentence belongs to.
 	label = regexp.MustCompile("^\x00\\d+\x00[:.]\\s*")
 )
@@ -189,14 +234,15 @@ var (
 // Requirements lists a feature file's requirement sentences, normalized: the sentences that
 // state what must happen or what counts as success (`Expect`, `must`, `require`, `exits`,
 // `returns`, `Success is`). A sentence that starts with `Run `, after an optional sub-feature
-// label such as `+"`item-add`:"+`, is an action, so its command text never counts; a sentence that carries a date is run history; headings and fenced blocks are
-// not sentences. Literal values in code spans stay, because they are what is required.
+// label such as `item-add`:, is an action, so its command text never counts; a sentence that
+// carries a date is run history; headings and fenced blocks are not sentences. Literal values
+// in code spans stay, because they are what is required.
 func Requirements(text string) []string {
 	result := []string{}
-	for _, unit := range units(text) {
+	for _, unit := range units(text, false) {
 		masked, spans := mask(unit)
 		for _, sentence := range split(masked) {
-			if strings.HasPrefix(label.ReplaceAllString(sentence, ""), "Run ") || datedHistory.MatchString(sentence) || !requirementWord.MatchString(sentence) {
+			if datedHistory.MatchString(sentence) || !requirement(sentence) {
 				continue
 			}
 			if normalized := collapse(unmask(sentence, spans)); !slices.Contains(result, normalized) {
@@ -207,6 +253,11 @@ func Requirements(text string) []string {
 	return result
 }
 
+// requirement reports whether a masked sentence states a requirement rather than an action.
+func requirement(sentence string) bool {
+	return !strings.HasPrefix(label.ReplaceAllString(sentence, ""), "Run ") && requirementWord.MatchString(sentence)
+}
+
 // Normalize brings one sentence into the form Requirements produces, so a sentence quoted in a
 // claim matches the runbook however its list marker, emphasis or line breaks are written.
 func Normalize(sentence string) string {
@@ -214,9 +265,9 @@ func Normalize(sentence string) string {
 	return collapse(unmask(masked, spans))
 }
 
-// units splits Markdown into paragraphs, list items and table cells, leaving out headings and
-// fenced blocks.
-func units(text string) []string {
+// units splits Markdown into paragraphs, list items and table cells, leaving out fenced blocks
+// and, unless headings is set, headings.
+func units(text string, headings bool) []string {
 	result := []string{}
 	current := []string{}
 	flush := func() {
@@ -235,7 +286,12 @@ func units(text string) []string {
 		}
 		switch {
 		case fenced:
-		case trimmed == "" || heading.MatchString(line):
+		case heading.MatchString(line):
+			flush()
+			if headings {
+				result = append(result, strings.TrimSpace(strings.Trim(trimmed, "#")))
+			}
+		case trimmed == "":
 			flush()
 		case strings.HasPrefix(trimmed, "|"):
 			flush()

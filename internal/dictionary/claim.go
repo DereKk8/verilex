@@ -61,13 +61,15 @@ type Evidence struct {
 	NonProofs []string `yaml:"non_proofs" json:"non_proofs"`
 }
 
-// ClaimSource anchors a claim in the verify skill: a sub-feature reference and the requirement
-// sentences there that the claim maps to.
+// ClaimSource anchors a claim in the verify skill: a sub-feature reference, the requirement
+// sentences there that the claim maps to, and the fingerprint of the sub-feature's other prose
+// as the claim's reviewer accepted it.
 type ClaimSource struct {
 	Ref          string   `yaml:"ref" json:"ref"`
+	Prose        string   `yaml:"prose" json:"prose"`
 	Requirements []string `yaml:"requirements" json:"requirements"`
-	// Covered lists what every claim of the project maps in the same sub-feature. A requirement
-	// sentence of the sub-feature outside it is one no claim proves yet. LoadClaims fills it.
+	// Covered lists what the claims that words prove map in the same sub-feature. A requirement
+	// sentence of the sub-feature outside it is one no word proves. Load fills it.
 	Covered []string `yaml:"-" json:"-"`
 }
 
@@ -103,18 +105,35 @@ func LoadClaims(p Project) (map[string]Claim, error) {
 		}
 		claims[c.Name] = c
 	}
+	return claims, nil
+}
+
+// cover fills each claim source's Covered from the claims that a word proves at their current
+// version. A claim that no word proves covers nothing: it can never clear another claim's review.
+func cover(claims map[string]Claim, words []Word) {
 	covered := map[string][]string{}
-	for _, c := range claims {
-		for _, source := range c.Sources {
-			covered[subFeature(source.Ref)] = append(covered[subFeature(source.Ref)], source.Requirements...)
+	proven := map[string]bool{}
+	for _, w := range words {
+		if w.Claim != nil && w.Stale == "" && !proven[w.Claim.Name] {
+			proven[w.Claim.Name] = true
+			for _, source := range claims[w.Claim.Name].Sources {
+				covered[subFeature(source.Ref)] = append(covered[subFeature(source.Ref)], source.Requirements...)
+			}
 		}
 	}
-	for _, c := range claims {
+	for name, c := range claims {
+		c.Sources = slices.Clone(c.Sources)
 		for i := range c.Sources {
 			c.Sources[i].Covered = covered[subFeature(c.Sources[i].Ref)]
 		}
+		claims[name] = c
 	}
-	return claims, nil
+	for i := range words {
+		if words[i].Claim != nil {
+			c := claims[words[i].Claim.Name]
+			words[i].Claim = &c
+		}
+	}
 }
 
 // subFeature names the sub-feature a source reference points at, however its path is spelled.
@@ -138,6 +157,7 @@ type claimFile struct {
 var (
 	claimPin = regexp.MustCompile(`^([\pL\pN][\pL\pN._-]*)@(\S+)$`)
 	argName  = regexp.MustCompile(`^[\pL\pN_]+$`)
+	prose    = regexp.MustCompile(fmt.Sprintf("^[0-9a-f]{%d}$", featuremap.ProseDigits))
 )
 
 // ReadClaim reads and checks one claim file and fingerprints its identity. Unknown fields are
@@ -185,6 +205,9 @@ func ReadClaim(path string) (Claim, error) {
 	for _, source := range c.Sources {
 		if !strings.Contains(source.Ref, "#") || len(set(source.Requirements)) == 0 {
 			return c, fmt.Errorf("%s: each source needs a 'ref' <skill>/<file>#<sub-feature> and the 'requirements' sentences the claim maps to", path)
+		}
+		if source.Prose != "" && !prose.MatchString(source.Prose) {
+			return c, fmt.Errorf("%s: 'prose' must be the %d-digit fingerprint `verilex claims` prints, not %s", path, featuremap.ProseDigits, quote(source.Prose))
 		}
 		// A mapped sentence that is not exactly one requirement sentence could never match the
 		// verify skill, so the claim would need review forever.

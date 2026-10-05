@@ -174,6 +174,7 @@ evidence:
     - "`added NAME` alone does not prove the item was stored."
 sources:
   - ref: verify-tally/features/items.md#item-add    # <skill>/<file>#<sub-feature id>
+    prose: 2948a95bd310                             # the sub-feature's prose, as its reviewer accepted it
     requirements:                                   # the requirement sentences the claim maps to
       - "Expect exit 0 and `added NAME`; `store.json` lists NAME."
 ```
@@ -212,7 +213,9 @@ A word that proves a claim must also take every arg the claim uses, name one of 
 
 A requirement sentence says `Expect`, `must`, `require`, `exits`, `returns` or `Success is` outside its code spans. A sentence that starts with `Run `, after an optional sub-feature label, is an action, so its command never counts. A sentence with an ISO date (`2026-09-12`) is run history. Headings and fenced blocks are not sentences. Sentences are compared without list markers, emphasis or line breaks, and literal values in code spans count. Each sentence a source maps must be one such requirement sentence, or the claim is refused when it loads.
 
-The claim **needs review** when its sub-feature is gone, when a sentence it maps is gone or now sits outside the sub-feature, or when the sub-feature states a requirement sentence that no claim maps. `verilex claims` and `verilex check` name the sentence, and every admitted word that proves the claim is drift-suspect, so no chain that holds one is skipped:
+Everything else in the sub-feature is its **prose**: headings and the other sentences, the words of `Run` sentences included, with each code span blanked and dated run history left out. A source pins the prose by its 12-digit fingerprint, which `verilex claims` prints.
+
+The claim **needs review** when its sub-feature is gone, when a sentence it maps is gone or now sits outside the sub-feature, when the sub-feature states a requirement sentence that no claim maps, or when the sub-feature's prose is not what the source pins. `verilex claims` and `verilex check` name the sentence (or the prose fingerprint to pin after review), and every admitted word that proves the claim is drift-suspect, so no chain that holds one is skipped:
 
 ```
 $ verilex claims
@@ -222,7 +225,7 @@ item-added@18e2db0cee8f  A named item is in the store.
   review: verify-tally/features/items.md#item-add: requirement no claim maps: Expect exit 0 and `added NAME`; `store.json` must list NAME.
 ```
 
-Edits around those sentences (commands, prose, run history, another sub-feature's text) ask for nothing. A requirement sentence that another claim maps in the same sub-feature is covered there. Sources are not part of the claim's identity. When the reviewer judges that the claim still says the same, they map it to the new sentences: the version stays, and the uses recorded for it still count toward `propose`. No pass was judged against the new mapping, though, so the sources are part of the proof stamp: the first run after a re-map is live (`item-stored apple: claim sources changed`), and only later runs can skip. A sentence outside the sub-feature never clears a review. When the claim's meaning changed, the reviewer changes its identity instead, which makes a new version.
+Commands, dated run history, layout and another sub-feature's text ask for nothing. A requirement sentence that another claim maps in the same sub-feature is covered there, but only while a word proves that claim at its current version: a claim no word proves covers nothing. Sources are not part of the claim's identity. When the reviewer judges that the claim still says the same, they map it to the new sentences or pin the new prose: the version stays, and the uses recorded for it still count toward `propose`. No pass was judged against the new sources, though, so they are part of the proof stamp: the first run after a re-map is live (`item-stored apple: claim sources changed`), and only later runs can skip. A sentence outside the sub-feature never clears a review. When the claim's meaning changed, the reviewer changes its identity instead, which makes a new version.
 
 ## The word lifecycle
 

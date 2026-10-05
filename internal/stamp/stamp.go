@@ -279,8 +279,8 @@ func lines(components map[string]string) string {
 	return b.String()
 }
 
-// sources fingerprints where a claim is anchored: each reference with its normalized
-// requirement sentences, in any order.
+// sources fingerprints where a claim is anchored: each reference with its accepted prose
+// fingerprint and its normalized requirement sentences, in any order.
 func sources(c dictionary.Claim) string {
 	anchors := make([]string, 0, len(c.Sources))
 	for _, source := range c.Sources {
@@ -289,7 +289,7 @@ func sources(c dictionary.Claim) string {
 			requirements = append(requirements, featuremap.Normalize(sentence))
 		}
 		sort.Strings(requirements)
-		anchors = append(anchors, source.Ref+"\n"+strings.Join(requirements, "\n"))
+		anchors = append(anchors, source.Ref+"\n"+source.Prose+"\n"+strings.Join(requirements, "\n"))
 	}
 	sort.Strings(anchors)
 	return digestOf(strings.Join(anchors, "\n\n"))

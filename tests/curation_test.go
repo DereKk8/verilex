@@ -273,7 +273,7 @@ func TestAdmitRefusesVerdictThatDoesNotMatchItsPacket(t *testing.T) {
 	// The claim's sources are not its identity, but the curator judged the word against them.
 	claim := claimFile(root, "item-added")
 	original := read(t, claim)
-	write(t, claim, original+"  - ref: verify-tally/features/items.md#item-list\n    requirements: [Expect NAME on its own line.]\n", 0644)
+	write(t, claim, original+"  - ref: verify-tally/features/items.md#item-list\n    prose: 144f2a75a892\n    requirements: [Expect NAME on its own line.]\n", 0644)
 	file := verdict(t, root, `{"word": "item-stored", "packet": "`+packet.ID+`", "verdict": "admit", "curator": "m"}`)
 	done := verilex(t, root, nil, "admit", "item-stored", "--verdict", file)
 	equal(t, done.code, 2)

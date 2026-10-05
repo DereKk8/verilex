@@ -8,5 +8,6 @@ evidence:
   observation: The listing matches store.json.
 sources:
   - ref: verify-tally/features/items.md#item-list
+    prose: 144f2a75a892
     requirements:
       - Expect NAME on its own line.

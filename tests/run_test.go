@@ -218,7 +218,7 @@ func TestEnvironmentTroubleIsInconclusiveNeverRed(t *testing.T) {
 	equal(t, done.code, 2)
 	record := lastRun(t, root)
 	equal(t, *record.Verdict, "inconclusive")
-	equal(t, record.Words[0].Claim, "blocked")
+	equal(t, record.Words[0].Reported, "blocked")
 	reason, ok := record.Words[0].Reason.(string)
 	if !ok || !strings.HasSuffix(reason, "is locked by another process") {
 		t.Fatalf("reason: %v", record.Words[0].Reason)
@@ -230,7 +230,7 @@ func TestChainAgainstOrderOfRealityIsRefusedBeforeLaunch(t *testing.T) {
 	root := product(t)
 	done := verilex(t, root, nil, "run", "item-stored apple | store-open")
 	equal(t, done.code, 2)
-	equal(t, done.stderr, "verilex: refused: item-stored apple requires store; nothing earlier provides it\n")
+	equal(t, done.stderr, "verilex: refused: item-stored apple requires store, pinned by claim item-added; nothing earlier provides it\n")
 	if _, err := os.Stat(filepath.Join(filepath.Dir(root), "state")); !os.IsNotExist(err) {
 		t.Fatalf("state exists: %v", err)
 	}
@@ -386,7 +386,9 @@ func TestWordsJSONAndProjectDiscovery(t *testing.T) {
 	root := product(t)
 	done := verilex(t, root, nil, "words")
 	equal(t, done.code, 0)
-	equal(t, done.stdout, "item-listed name\n  promise:  A stored item shows up when a user lists the store.\n  requires: item:{name}  provides: -\n  status:   provisional\nitem-stored name\n  promise:  A named item is in the store.\n  requires: store  provides: item:{name}\n  status:   provisional\nstore-open\n  promise:  A new, empty store is open and ready for items.\n  requires: -  provides: store\n  status:   provisional\n")
+	equal(t, done.stdout, "item-listed name\n  promise:  A stored item shows up when a user lists the store.\n  claim:    "+pinOf(t, root, "item-listed")+" via cli\n  requires: item:{name}  provides: -\n  status:   provisional\n"+
+		"item-stored name\n  promise:  A named item is in the store.\n  claim:    "+pinOf(t, root, "item-added")+" via cli\n  requires: store  provides: item:{name}\n  status:   provisional\n"+
+		"store-open\n  promise:  A new, empty store is open and ready for items.\n  claim:    "+pinOf(t, root, "store-opened")+" via cli\n  requires: -  provides: store\n  status:   provisional\n")
 	done = verilex(t, root, nil, "--project", filepath.Join(root, "bin"), "run", "store-open | item-stored 'red apple'", "--json")
 	equal(t, done.code, 0)
 	var record runner.Record
@@ -429,7 +431,7 @@ func TestLegacyYAMLAndProjectRegexContracts(t *testing.T) {
 	t.Run("YAML 1.1 booleans are not list strings", func(t *testing.T) {
 		root := product(t)
 		path := filepath.Join(root, ".verilex", "words", "store-open", "word.md")
-		write(t, path, strings.Replace(read(t, path), "requires: []", "requires: [on]", 1), 0644)
+		write(t, path, strings.Replace(read(t, path), "entry: cli", "entry: cli\nrequires: [on]", 1), 0644)
 		done := verilex(t, root, nil, "words")
 		equal(t, done.code, 2)
 		contains(t, done.stderr, "'requires' must be a list of strings")

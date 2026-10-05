@@ -17,7 +17,7 @@ import (
 	"github.com/DereKk8/verilex/internal/verdict"
 )
 
-const usage = "usage: verilex [-h] [--project PROJECT] {run,plan,words,runs,cleanup,new,propose,admit,gap,check} ...\n"
+const usage = "usage: verilex [-h] [--project PROJECT] {run,plan,words,claims,runs,cleanup,new,propose,admit,gap,check} ...\n"
 
 type options struct {
 	project, command, operand, verdict, from string
@@ -73,6 +73,8 @@ func Main(argv []string, out, stderr io.Writer) int {
 		return 0
 	case "cleanup":
 		return cleanup(project, args.operand, out, refuse)
+	case "claims":
+		return claims(project, args.json, out, refuse)
 	}
 	words, err := dictionary.LoadWords(project)
 	if err != nil {
@@ -81,7 +83,11 @@ func Main(argv []string, out, stderr io.Writer) int {
 	if args.command == "words" {
 		for _, word := range words {
 			fmt.Fprintln(out, strings.TrimSpace(word.Name+" "+strings.Join(word.Args, " ")))
-			fmt.Fprintf(out, "  promise:  %s\n  requires: %s  provides: %s\n", word.Promise, states(word.Requires), states(word.Provides))
+			fmt.Fprintf(out, "  promise:  %s\n", word.Promise)
+			if word.Claim != nil {
+				fmt.Fprintf(out, "  claim:    %s via %s\n", word.Proves(), word.Entry)
+			}
+			fmt.Fprintf(out, "  requires: %s  provides: %s\n", states(word.Requires), states(word.Provides))
 			status, err := lifecycle.StatusOf(project, word)
 			if err != nil {
 				return refuse(err)
@@ -152,16 +158,17 @@ var commands = map[string]command{
 	"run":     {"chain", "[--keep] [--fresh] [--continue RUN] [--json] chain", "run a chain of words, e.g. 'a | b X | c'", []string{"--keep", "--fresh", "--json"}, []string{"--continue"}},
 	"plan":    {"chain", "[--continue RUN] [--json] chain", "show whether a chain would be skipped or run live, running nothing", []string{"--json"}, []string{"--continue"}},
 	"words":   {"", "", "list the dictionary and each word's lifecycle status", nil, nil},
+	"claims":  {"", "[--json]", "list each claim's current version, the words that prove it, and any review it needs", []string{"--json"}, nil},
 	"runs":    {"", "", "list this project's runs and any instance still alive", nil, nil},
 	"cleanup": {"run", "run", "tear down a kept run's instance", nil, nil},
 	"new":     {"word", "--implements REF [--implements REF ...] word", "scaffold a provisional word", nil, []string{"--implements"}},
 	"propose": {"word", "word", "build a curator packet for a word used in two runs", nil, nil},
 	"admit":   {"word", "--verdict FILE word", "record an outside curator's admit or reject verdict", nil, []string{"--verdict"}},
 	"gap":     {"description", "description", "record a product moment the feature map has no section for", nil, nil},
-	"check":   {"", "", "report admitted words whose feature-map sections or files changed (drift-suspect)", nil, nil},
+	"check":   {"", "", "report admitted words whose files, claim or feature-map sections changed (drift-suspect)", nil, nil},
 }
 
-var order = []string{"run", "plan", "words", "runs", "cleanup", "new", "propose", "admit", "gap", "check"}
+var order = []string{"run", "plan", "words", "claims", "runs", "cleanup", "new", "propose", "admit", "gap", "check"}
 
 func parse(argv []string) (options, bool, error) {
 	cwd, err := os.Getwd()

@@ -28,7 +28,7 @@ type Stamp struct {
 	// Digest covers every component; it is empty when the step cannot be stamped.
 	Digest string
 	// Components maps each thing the result depended on to its fingerprint:
-	// verilex, frame, shared, word, "input <path>", "env <NAME>" and upstream.
+	// verilex, frame, shared, word, claim, "input <path>", "env <NAME>" and upstream.
 	Components map[string]string
 	// Unclear says why the step has no stamp.
 	Unclear string
@@ -134,6 +134,15 @@ func (h hasher) word(word dictionary.Word, root string, components map[string]st
 	var err error
 	if components["word"], err = h.path(word.Path); err != nil {
 		return "word files: " + err.Error()
+	}
+	// A pass is evidence only for the claim version it ran against. The claim is read again,
+	// so a claim edited while a run goes changes the stamp taken after it.
+	if word.Claim != nil {
+		c, err := dictionary.ReadClaim(word.Claim.Path)
+		if err != nil {
+			return "claim " + word.Claim.Name + ": " + err.Error()
+		}
+		components["claim"] = c.Fingerprint
 	}
 	for _, input := range word.Inputs {
 		path := input

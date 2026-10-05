@@ -1,0 +1,12 @@
+claim: item-listed
+sentence: A stored item shows up when a user lists the store.
+args: [name]
+entry: [cli]
+requires: ["item:{name}"]
+evidence:
+  action: "`tally list` prints NAME on its own line."
+  observation: The listing matches store.json.
+sources:
+  - ref: verify-tally/features/items.md#item-list
+    requirements:
+      - Expect NAME on its own line.

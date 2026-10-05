@@ -19,12 +19,16 @@ type Frame struct {
 }
 
 type WordRecord struct {
-	Word        string          `json:"word"`
-	Args        []string        `json:"args"`
-	Provides    []string        `json:"provides"`
-	Implements  []string        `json:"implements"`
+	Word       string   `json:"word"`
+	Args       []string `json:"args"`
+	Provides   []string `json:"provides"`
+	Implements []string `json:"implements"`
+	// Proves is the claim version the word proved (<claim>@<version>) and Entry the user entry
+	// point it went through; both are empty for a word without a claim.
+	Proves      string          `json:"proves,omitempty"`
+	Entry       string          `json:"entry,omitempty"`
 	Verdict     verdict.Verdict `json:"verdict"`
-	Claim       string          `json:"claim,omitempty"`
+	Reported    string          `json:"reported,omitempty"`
 	Reason      any             `json:"reason"`
 	Observation any             `json:"observation"`
 	Detail      any             `json:"detail"`

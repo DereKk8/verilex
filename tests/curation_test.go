@@ -19,6 +19,19 @@ import (
 
 const itemAdd = "verify-tally/features/items.md#item-add"
 
+// addRequirement is the item-add requirement sentence the item-added claim maps to.
+const addRequirement = "Expect exit 0 and `added NAME`; `store.json` lists NAME."
+
+// reviewAdd is why item-added needs review once its requirement sentence changes.
+const reviewAdd = "claim item-added needs review: " + itemAdd + ": requirement changed or gone: " + addRequirement
+
+// changeAddRequirement rewrites the item-add requirement sentence in the verify skill.
+func changeAddRequirement(t *testing.T, root string) {
+	t.Helper()
+	items := feature(root, "items.md")
+	write(t, items, strings.Replace(read(t, items), "Expect exit 0 and `added NAME`", "Expect exit 0 and `stored NAME`", 1), 0644)
+}
+
 func feature(root, file string) string {
 	return filepath.Join(root, ".cursor", "skills", "verify-tally", "features", file)
 }
@@ -167,9 +180,14 @@ func TestProposeNeedsUsesInTwoDifferentRuns(t *testing.T) {
 			t.Fatalf("use evidence %s: %v", use.Evidence, err)
 		}
 	}
-	equal(t, len(packet.Sections), 1)
-	equal(t, packet.Sections[0].Ref, itemAdd)
-	contains(t, packet.Sections[0].Text, "`item-add` stores a named item.")
+	equal(t, len(packet.Sections), 0)
+	equal(t, packet.Claim.Pin, pinOf(t, root, "item-added"))
+	equal(t, packet.Claim.Entry, "cli")
+	contains(t, packet.Claim.Text, "sentence: A named item is in the store.")
+	equal(t, len(packet.Claim.Sources), 1)
+	equal(t, packet.Claim.Sources[0].Ref, itemAdd)
+	equal(t, packet.Claim.Sources[0].Requirements, []string{addRequirement})
+	equal(t, packet.Claim.Sources[0].Review, []string(nil))
 	contains(t, packet.Files["word.md"], "word: item-stored")
 	contains(t, packet.Files["run"], "tally(\"add\", name)")
 	names := []string{}
@@ -202,7 +220,8 @@ func TestAdmitRecordsCuratorVerdict(t *testing.T) {
 	equal(t, admission.Curator, "curator-model-1")
 	equal(t, admission.Packet, packet.ID)
 	equal(t, admission.Runs, []string{packet.Uses[0].Run, packet.Uses[1].Run})
-	equal(t, admission.Sections, map[string]string{itemAdd: packet.Sections[0].Hash})
+	equal(t, admission.Claim, pinOf(t, root, "item-added"))
+	equal(t, admission.Sections, map[string]string(nil))
 	equal(t, status(t, root, "item-stored"), "admitted")
 	equal(t, status(t, root, "store-open"), "provisional")
 	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (1 admitted)\n")
@@ -249,12 +268,20 @@ func TestAdmitRefusesVerdictThatDoesNotMatchItsPacket(t *testing.T) {
 		t.Fatalf("a refused verdict admitted the word: %v", err)
 	}
 
-	items := feature(root, "items.md")
-	write(t, items, read(t, items)+"- Adding an item twice keeps one entry.\n", 0644)
+	// The claim's sources are not its identity, but the curator judged the word against them.
+	claim := claimFile(root, "item-added")
+	original := read(t, claim)
+	write(t, claim, original+"  - ref: verify-tally/features/items.md#item-list\n    requirements: [Expect NAME on its own line.]\n", 0644)
 	file := verdict(t, root, `{"word": "item-stored", "packet": "`+packet.ID+`", "verdict": "admit", "curator": "m"}`)
 	done := verilex(t, root, nil, "admit", "item-stored", "--verdict", file)
 	equal(t, done.code, 2)
 	equal(t, done.stderr, "verilex: refused: item-stored changed since packet "+packet.ID+"; propose it again\n")
+	write(t, claim, original, 0644)
+
+	changeAddRequirement(t, root)
+	done = verilex(t, root, nil, "admit", "item-stored", "--verdict", file)
+	equal(t, done.code, 2)
+	equal(t, done.stderr, "verilex: refused: "+reviewAdd+"; bring its sources in line with the verify skill first; item-stored changed since packet "+packet.ID+"; propose it again\n")
 	equal(t, status(t, root, "item-stored"), "provisional")
 }
 
@@ -268,15 +295,15 @@ func TestEditingFeatureMapSectionMarksWordDriftSuspect(t *testing.T) {
 
 	items := feature(root, "items.md")
 	original := read(t, items)
-	write(t, items, strings.Replace(original, "Expect exit 0 and `added NAME`", "Expect exit 0 and `stored NAME`", 1), 0644)
+	changeAddRequirement(t, root)
 	done := verilex(t, root, nil, "check")
 	equal(t, done.code, 0)
-	equal(t, done.stdout, "check: 1 of 2 admitted drift-suspect; they always run\n  item-stored: "+itemAdd+": section changed\n")
+	equal(t, done.stdout, "check: 1 of 2 admitted drift-suspect; they always run\n  item-stored: "+reviewAdd+"\n")
 	equal(t, status(t, root, "item-stored"), "drift-suspect")
 	equal(t, status(t, root, "store-open"), "admitted")
 
 	write(t, items, strings.Replace(original, "`item-add`", "`item-put`", 1), 0644)
-	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 2 admitted drift-suspect; they always run\n  item-stored: "+itemAdd+": section missing\n")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 2 admitted drift-suspect; they always run\n  item-stored: claim item-added needs review: "+itemAdd+": sub-feature item-add is gone\n")
 
 	write(t, items, original, 0644)
 	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (2 admitted)\n")
@@ -287,6 +314,24 @@ func TestEditingFeatureMapSectionMarksWordDriftSuspect(t *testing.T) {
 
 	packet := propose(t, root, "store-open")
 	equal(t, packet.Status, lifecycle.DriftSuspect)
+}
+
+// A word without a claim keeps the older anchor: its whole feature-map section, or the whole
+// file for a sub-feature id.
+func TestWordWithoutClaimDriftsWithItsWholeSection(t *testing.T) {
+	root := product(t)
+	addWord(t, root, "store-glanced", `echo '{"verdict": "pass", "observation": "fine"}'`+"\n")
+	used(t, root, "store-open | store-glanced")
+	used(t, root, "store-open | store-glanced")
+	packet := admit(t, root, "store-glanced")
+	equal(t, packet.Claim, (*curation.ClaimPacket)(nil))
+	equal(t, len(packet.Sections), 1)
+	contains(t, packet.Sections[0].Text, "`store-open` opens an empty store.")
+	equal(t, status(t, root, "store-glanced"), "admitted")
+
+	store := feature(root, "store.md")
+	write(t, store, read(t, store)+"- Store names are case-sensitive.\n", 0644)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 1 admitted drift-suspect; they always run\n  store-glanced: verify-tally/features/store.md#store-open: section changed\n")
 }
 
 func TestGapRecordsNoteWithoutTouchingVerifySkill(t *testing.T) {
@@ -320,7 +365,7 @@ func curated(t *testing.T) string {
 }
 
 // admitted writes an admission record for each named word (every word when none is named)
-// that matches the word's files and feature-map sections as they are now.
+// that matches the word's files and claim version (or feature-map sections) as they are now.
 func admitted(t *testing.T, root string, names ...string) {
 	t.Helper()
 	project, err := dictionary.FindProject(root)
@@ -339,13 +384,18 @@ func admitted(t *testing.T, root string, names ...string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		admission := lifecycle.Admission{Word: word.Name, Date: time.Now().UTC().Format(time.RFC3339), Curator: "test-curator", Packet: "0123456789abcdef", Runs: []string{"1-a", "2-b"}, WordDigest: digest, Sections: map[string]string{}}
-		for _, ref := range word.Implements {
-			section, err := featuremap.Resolve(project.Root, project.SkillDirs, ref)
-			if err != nil {
-				t.Fatal(err)
+		admission := lifecycle.Admission{Word: word.Name, Date: time.Now().UTC().Format(time.RFC3339), Curator: "test-curator", Packet: "0123456789abcdef", Runs: []string{"1-a", "2-b"}, WordDigest: digest}
+		if word.Claim != nil {
+			admission.Claim = word.Claim.Pin()
+		} else {
+			admission.Sections = map[string]string{}
+			for _, ref := range word.Implements {
+				section, err := featuremap.Resolve(project.Root, project.SkillDirs, ref)
+				if err != nil {
+					t.Fatal(err)
+				}
+				admission.Sections[ref] = section.Hash
 			}
-			admission.Sections[ref] = section.Hash
 		}
 		data, err := json.Marshal(admission)
 		if err != nil {
@@ -395,17 +445,17 @@ func TestChainWithDriftSuspectWordIsNeverSkipped(t *testing.T) {
 
 	items := feature(root, "items.md")
 	original := read(t, items)
-	write(t, items, strings.Replace(original, "Expect exit 0 and `added NAME`", "Expect exit 0 and `stored NAME`", 1), 0644)
+	changeAddRequirement(t, root)
 	equal(t, status(t, root, "item-stored"), "drift-suspect")
 	for i := 0; i < 2; i++ {
 		record := green(t, root, nil, chain)
-		equal(t, record.Rerun, "item-stored apple: drift-suspect: "+itemAdd+": section changed")
+		equal(t, record.Rerun, "item-stored apple: drift-suspect: "+reviewAdd)
 		ranLive(t, record)
 		equal(t, record.Words[1].Stamp, first.Words[1].Stamp)
 	}
 	write(t, items, strings.Replace(original, "`item-add`", "`item-put`", 1), 0644)
 	record := green(t, root, nil, chain)
-	equal(t, record.Rerun, "item-stored apple: drift-suspect: "+itemAdd+": section missing")
+	equal(t, record.Rerun, "item-stored apple: drift-suspect: claim item-added needs review: "+itemAdd+": sub-feature item-add is gone")
 	ranLive(t, record)
 
 	// An admission record that cannot be read holds the word too.
@@ -441,8 +491,7 @@ func TestOnlyJudgedLiveRunsCountAsUses(t *testing.T) {
 	equal(t, done.code, 2)
 	equal(t, verdicts(leaked), []string{"green", "green", "green"})
 
-	items := feature(root, "items.md")
-	write(t, items, read(t, items)+"- Adding an item twice keeps one entry.\n", 0644)
+	write(t, filepath.Join(root, ".verilex", "words", "item-stored", "word.md"), read(t, filepath.Join(root, ".verilex", "words", "item-stored", "word.md"))+"More words.\n", 0644)
 	equal(t, status(t, root, "item-stored"), "drift-suspect")
 	done = verilex(t, root, nil, "propose", "item-stored")
 	equal(t, done.code, 2)

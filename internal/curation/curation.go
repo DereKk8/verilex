@@ -15,8 +15,13 @@ import (
 	"github.com/DereKk8/verilex/internal/featuremap"
 )
 
+// sections resolves the feature-map sections a word without a claim implements; a word that
+// proves a claim is anchored through its claim instead.
 func sections(p dictionary.Project, w dictionary.Word) ([]featuremap.Section, error) {
 	result := make([]featuremap.Section, 0, len(w.Implements))
+	if w.Claim != nil {
+		return result, nil
+	}
 	for _, ref := range w.Implements {
 		section, err := featuremap.Resolve(p.Root, p.SkillDirs, ref)
 		if err != nil {

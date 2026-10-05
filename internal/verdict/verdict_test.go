@@ -18,7 +18,7 @@ func TestJudgeKeepsTheHonestyRules(t *testing.T) {
 		{"pass without observation", exit(0), `{"verdict": "pass", "observation": " "}`, Inconclusive, "pass without a second observation"},
 		{"fail without preconditions", exit(1), `{"verdict": "fail", "detail": "broken"}`, Inconclusive, "fail without stating that its preconditions held"},
 		{"exit disagrees", exit(0), `{"verdict": "fail", "preconditions_held": true}`, Inconclusive, "exit 0 disagrees with verdict fail"},
-		{"three-verdict words are not claims", exit(0), `{"verdict": "green", "observation": "seen"}`, Inconclusive, "result has no verdict of pass, fail or blocked"},
+		{"three-verdict words are not reports", exit(0), `{"verdict": "green", "observation": "seen"}`, Inconclusive, "result has no verdict of pass, fail or blocked"},
 		{"not json", exit(0), `ok`, Inconclusive, "stdout is not one result JSON object"},
 	}
 	for _, c := range cases {

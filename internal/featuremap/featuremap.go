@@ -1,6 +1,6 @@
-// Package featuremap owns reading the verify skill's feature map: resolving a word's
-// `implements` reference to a section and hashing that section. It only reads; verilex
-// never edits a verify skill.
+// Package featuremap owns reading the verify skill's feature map: pinning a claim's anchors
+// (a sub-feature id plus normalized requirement sentences) and resolving an older word's
+// `implements` reference to a whole section. It only reads; verilex never edits a verify skill.
 package featuremap
 
 import (
@@ -38,8 +38,8 @@ func (e *MissingError) Error() string { return fmt.Sprintf("%s: %s", e.Ref, e.Wh
 // Without an anchor the section is the whole file.
 func Resolve(root string, skillDirs []string, ref string) (Section, error) {
 	path, anchor, _ := strings.Cut(ref, "#")
-	clean := filepath.Clean(filepath.FromSlash(path))
-	if path == "" || filepath.IsAbs(clean) || clean == "." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
+	clean, ok := relative(path)
+	if !ok {
 		return Section{}, &MissingError{ref, "not a <skill>/<file>#<section> reference"}
 	}
 	for _, dir := range skillDirs {

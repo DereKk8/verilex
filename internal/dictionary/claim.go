@@ -203,7 +203,7 @@ func ReadClaim(path string) (Claim, error) {
 		// verify skill, so the claim would need review forever.
 		for _, sentence := range source.Requirements {
 			if found := featuremap.Requirements(sentence); len(found) != 1 || found[0] != featuremap.Normalize(sentence) {
-				return c, fmt.Errorf("%s: %s is not one requirement sentence: it must say Expect, must, require, exits, returns or Success is outside code spans, and be neither an action (Run ...) nor run history (Verified 2026-09-12: ...)", path, quote(sentence))
+				return c, fmt.Errorf("%s: %s is not one requirement sentence: it must say Expect, must, require, exits, returns or Success is outside code spans, and not be an action (Run ...)", path, quote(sentence))
 			}
 		}
 	}

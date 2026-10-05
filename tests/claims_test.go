@@ -112,7 +112,7 @@ func TestClaimFingerprintIsStableAndFollowsItsIdentity(t *testing.T) {
 
 	// A mapped sentence that is not one requirement sentence could never match the verify skill,
 	// so the claim is refused instead of needing review forever.
-	for _, sentence := range []string{"Run `bin/tally add NAME`.", "Verified 2026-09-12: `tally add` exits 0.", "Expect exit 0. Expect `added NAME`.", "The store holds NAME."} {
+	for _, sentence := range []string{"Run `bin/tally add NAME`.", "Expect exit 0. Expect `added NAME`.", "The store holds NAME."} {
 		write(t, path, strings.Replace(original, `"Expect exit 0 and `+"`added NAME`; `store.json`"+` lists NAME."`, strconv.Quote(sentence), 1), 0644)
 		done = verilex(t, root, nil, "claims")
 		equal(t, done.code, 2)
@@ -172,7 +172,7 @@ func TestChangedSourceRequirementFlagsClaimForReview(t *testing.T) {
 
 	edit(t, items, "Run `bin/tally --store \"$STORE\" add NAME`.", "Run `bin/tally --store \"$STORE\" --quiet add NAME`.")
 	edit(t, items, "A user adds named items to an open store and lists them.", "A user adds named items to an open store, then lists them.")
-	edit(t, items, "Expect exit 0 and `added NAME`; `store.json` lists NAME.", "**Expect** exit 0 and\n  `added NAME`;   `store.json` lists NAME. Verified 2026-09-12: it exits 0.")
+	edit(t, items, "Expect exit 0 and `added NAME`; `store.json` lists NAME.", "**Expect** exit 0 and\n  `added NAME`;   `store.json` lists NAME.")
 	write(t, items, read(t, items)+"\nVerified 2026-09-12: `tally add` exits 0 on a fresh store.\n", 0644)
 	equal(t, strings.Contains(verilex(t, root, nil, "claims").stdout, "review:"), false)
 	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
@@ -320,9 +320,9 @@ func TestProseChangeInSubFeatureFlagsClaimForReview(t *testing.T) {
 }
 
 // Rule: a dated sentence in the sub-feature is read like any other, so a rule written with a
-// date asks for review. Only the explicit run-history form (`Verified 2026-09-12: ...` or
-// `2026-09-12: ...`) is left out. Any edit inside a fenced block of the sub-feature asks for
-// review too, while an edit to an inline command does not.
+// date asks for review, written as run history too, and so does a run-history edit. Any edit
+// inside a fenced block of the sub-feature asks for review too, a tilde fence and a fence right
+// after the step included, while an edit to an inline command does not.
 func TestDatedRulesAndFencedBlocksFlagClaimForReview(t *testing.T) {
 	root := curated(t)
 	green(t, root, nil, chain)
@@ -353,25 +353,35 @@ func TestDatedRulesAndFencedBlocksFlagClaimForReview(t *testing.T) {
 	addStep(" On 2026-10-01 the store file moved to format 2.")
 	flagged("prose changed: check that the claim still holds, then pin prose " + prose())
 	write(t, items, original, 0644)
-	addStep(" Verified 2026-10-01: it exits 0. 2026-10-02: run 7 was green.")
-	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
-	contains(t, plan(t, root, chain).stdout, "plan: skip 3, run 0\n")
+	addStep(" Verified 2026-10-01: a NAME added twice must exit 2.")
+	flagged("requirement no claim maps: Verified 2026-10-01: a NAME added twice must exit 2.")
+	write(t, items, original, 0644)
+	addStep(" 2026-10-02: run 7 was green.")
+	flagged("prose changed: check that the claim still holds, then pin prose " + prose())
 
 	// A fenced block added under the step, then an edit inside it, each ask for review.
-	write(t, items, original, 0644)
-	addStep("\n\n  ```sh\n  bin/tally --store \"$STORE\" add NAME\n  ```")
-	withFence := prose()
-	flagged("prose changed: check that the claim still holds, then pin prose " + withFence)
-	edit(t, claimFile(root, "item-added"), "prose: 2948a95bd310", "prose: "+withFence)
-	admitted(t, root, "item-stored")
-	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
-	ranLive(t, green(t, root, nil, chain))
-	edit(t, items, "  bin/tally --store \"$STORE\" add NAME\n", "  bin/tally --store \"$STORE\" --quiet add NAME\n")
-	edited := prose()
-	if edited == withFence {
-		t.Fatal("the fence edit kept the prose")
+	pinned := "2948a95bd310"
+	for _, c := range [][3]string{
+		{"\n\n  ```sh\n  bin/tally --store \"$STORE\" add NAME\n  ```", "  bin/tally --store \"$STORE\" add NAME\n", "  bin/tally --store \"$STORE\" --quiet add NAME\n"},
+		{"\n\n  ~~~sh\n  echo `date` | bin/tally --store \"$STORE\" add NAME\n  ~~~", "`date`", "`uname`"},
+		{"\n\n```sh\nbin/tally --store \"$STORE\" add NAME\n```\n", "bin/tally --store \"$STORE\" add NAME\n", "bin/tally --store \"$STORE\" --quiet add NAME\n"},
+	} {
+		write(t, items, original, 0644)
+		addStep(c[0])
+		withFence := prose()
+		flagged("prose changed: check that the claim still holds, then pin prose " + withFence)
+		edit(t, claimFile(root, "item-added"), "prose: "+pinned, "prose: "+withFence)
+		pinned = withFence
+		admitted(t, root, "item-stored")
+		equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
+		ranLive(t, green(t, root, nil, chain))
+		edit(t, items, c[1], c[2])
+		edited := prose()
+		if edited == withFence {
+			t.Fatalf("the fence edit kept the prose: %q", c[0])
+		}
+		flagged("prose changed: check that the claim still holds, then pin prose " + edited)
 	}
-	flagged("prose changed: check that the claim still holds, then pin prose " + edited)
 }
 
 // Rule: another claim's mapping covers a requirement sentence only when a curator admitted one

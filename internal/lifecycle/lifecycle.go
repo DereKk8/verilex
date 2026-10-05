@@ -216,7 +216,7 @@ func (s *Status) sectionDrift(p dictionary.Project, w dictionary.Word, a *Admiss
 // Review pins each of a claim's sources against the verify skill as it is now, and lists why the
 // claim needs review: its sub-feature is gone, a requirement sentence it maps to is gone or has
 // left the sub-feature, the sub-feature states a requirement that no proven claim maps, or its
-// other prose changed. Commands and dated run history never ask for one. Review is computed on
+// other prose changed. Inline commands never ask for one. Review is computed on
 // every call, never cached.
 func Review(p dictionary.Project, c dictionary.Claim) ([]featuremap.Anchor, []string, error) {
 	anchors := make([]featuremap.Anchor, 0, len(c.Sources))

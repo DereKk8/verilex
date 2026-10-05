@@ -28,9 +28,9 @@ const ProseDigits = 12
 
 // Anchor is where a claim's meaning sits in a verify skill: a stable sub-feature id, the
 // normalized requirement sentences the claim maps to, and a fingerprint of the rest of the
-// sub-feature's prose, all inside the text the id names. Inline commands, run history and layout
-// can change freely; any other change in the sub-feature, fenced blocks included, asks for a
-// review.
+// sub-feature's prose, all inside the text the id names. Inline commands and layout can change
+// freely; any other change in the sub-feature, fenced blocks and dated lines included, asks for
+// a review.
 type Anchor struct {
 	Ref          string   `json:"ref"`
 	File         string   `json:"file,omitempty"`
@@ -106,9 +106,9 @@ func Pin(root string, skillDirs []string, s Source) (Anchor, error) {
 	return a, nil
 }
 
-// prose fingerprints a sub-feature's prose: every heading and every sentence that is neither a
-// requirement sentence nor run history, in order, with each inline code span blanked, then every
-// line of its fenced blocks as written. An edit to an inline command changes nothing; any other
+// prose fingerprints a sub-feature's prose: every heading and every sentence that is not a
+// requirement sentence, in order, with each inline code span blanked, then every line of its
+// fenced blocks as written. An edit to an inline command changes nothing; any other
 // edit does, the words of a Run sentence and the inside of a fenced block included. Requirement
 // sentences are left out because Pin checks each of them on its own.
 func prose(scope string) string {
@@ -116,7 +116,7 @@ func prose(scope string) string {
 	for _, unit := range units(scope, true) {
 		masked, _ := mask(unit)
 		for _, sentence := range split(masked) {
-			if !history(sentence) && !requirement(sentence) {
+			if !requirement(sentence) {
 				parts = append(parts, collapse(maskedSpan.ReplaceAllString(sentence, "``")))
 			}
 		}
@@ -132,13 +132,11 @@ func prose(scope string) string {
 // trailing whitespace.
 func fences(text string) []string {
 	result := []string{}
-	fenced := false
+	var f fence
 	for _, line := range strings.Split(text, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") {
-			fenced = !fenced
-			result = append(result, trimmed)
-		} else if fenced {
+		if f.step(line) {
+			result = append(result, strings.TrimSpace(line))
+		} else if f != "" {
 			result = append(result, strings.TrimRight(line, " \t"))
 		}
 	}
@@ -155,24 +153,29 @@ func normalizeAll(sentences []string) []string {
 
 // subFeature returns the text a sub-feature id names: the section under a heading whose anchor
 // is the id, plus every list item, paragraph or table row that opens with the id as inline code
-// (- `id`: Run ...), each with the lines nested under it. A mention of the id anywhere
-// else names nothing, so a requirement moved out of these blocks leaves the sub-feature.
+// (- `id`: Run ...), each with the lines nested under it and the fenced blocks that follow it
+// with only blank lines between. A mention of the id anywhere else names nothing, so a
+// requirement moved out of these blocks leaves the sub-feature.
 func subFeature(text, id string) (string, bool) {
 	parts := []string{}
 	if section, ok := headingSection(text, id); ok {
 		parts = append(parts, section)
 	}
 	lines := strings.Split(text, "\n")
-	fenced := false
+	var f fence
 	for i := 0; i < len(lines); i++ {
-		if strings.HasPrefix(strings.TrimSpace(lines[i]), "```") {
-			fenced = !fenced
-			continue
-		}
-		if fenced || !opens(lines, i, id) {
+		if f.step(lines[i]) || f != "" || !opens(lines, i, id) {
 			continue
 		}
 		end := blockEnd(lines, i)
+		for next := end; next < len(lines); next++ {
+			if fenceRun.MatchString(lines[next]) {
+				end = fenceEnd(lines, next)
+				next = end - 1
+			} else if strings.TrimSpace(lines[next]) != "" {
+				break
+			}
+		}
 		parts = append(parts, strings.Join(lines[i:end], "\n"))
 		i = end - 1
 	}
@@ -220,13 +223,11 @@ func blockEnd(lines []string, i int) int {
 				return j
 			}
 			j = k
-		case strings.HasPrefix(trimmed, "```"):
+		case fenceRun.MatchString(line):
 			if !nested {
 				return j
 			}
-			for j++; j < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[j]), "```"); j++ {
-			}
-			j = min(j+1, len(lines))
+			j = fenceEnd(lines, j)
 		case !nested && (listMarker.MatchString(line) || strings.HasPrefix(trimmed, "|")):
 			return j
 		default:
@@ -241,13 +242,10 @@ func indentOf(line string) int { return len(line) - len(strings.TrimLeft(line, "
 var (
 	// requirementWord marks a requirement sentence, matched with code spans masked.
 	requirementWord = regexp.MustCompile(`\b(Require|require|must|Expect|Success is|exits?|returns?)\b`)
-	// runHistory marks a run-history sentence, which records when something was seen, not a
-	// rule. Only the explicit form counts: an ISO date, optionally after `Verified`, then a colon.
-	runHistory = regexp.MustCompile(`^(?:Verified )?\d{4}-\d{2}-\d{2}:`)
-	codeSpan   = regexp.MustCompile("`[^`\n]*`")
-	listMarker = regexp.MustCompile(`^\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+`)
-	marker     = regexp.MustCompile(`^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?`)
-	emphasis   = regexp.MustCompile(`\*\*|__`)
+	codeSpan        = regexp.MustCompile("`[^`\n]*`")
+	listMarker      = regexp.MustCompile(`^\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+`)
+	marker          = regexp.MustCompile(`^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?`)
+	emphasis        = regexp.MustCompile(`\*\*|__`)
 	// maskedSpan is a code span as mask leaves it.
 	maskedSpan = regexp.MustCompile("\x00\\d+\x00")
 	// label is a leading sub-feature id (masked) that names the step a sentence belongs to.
@@ -257,16 +255,15 @@ var (
 // Requirements lists a feature file's requirement sentences, normalized: the sentences that
 // state what must happen or what counts as success (`Expect`, `must`, `require`, `exits`,
 // `returns`, `Success is`). A sentence that starts with `Run `, after an optional sub-feature
-// label such as `item-add`:, is an action, so its command text never counts; a run-history
-// sentence (`Verified 2026-09-12: ...` or `2026-09-12: ...`) is not a rule; headings and fenced
-// blocks are not sentences. Any other sentence with a date is read like the rest. Literal values
-// in code spans stay, because they are what is required.
+// label such as `item-add`:, is an action, so its command text never counts; headings and fenced
+// blocks are not sentences. A dated sentence is read like the rest. Literal values in code spans
+// stay, because they are what is required.
 func Requirements(text string) []string {
 	result := []string{}
 	for _, unit := range units(text, false) {
 		masked, spans := mask(unit)
 		for _, sentence := range split(masked) {
-			if history(sentence) || !requirement(sentence) {
+			if !requirement(sentence) {
 				continue
 			}
 			if normalized := collapse(unmask(sentence, spans)); !slices.Contains(result, normalized) {
@@ -275,11 +272,6 @@ func Requirements(text string) []string {
 		}
 	}
 	return result
-}
-
-// history reports whether a masked sentence is run history.
-func history(sentence string) bool {
-	return runHistory.MatchString(label.ReplaceAllString(sentence, ""))
 }
 
 // requirement reports whether a masked sentence states a requirement rather than an action.
@@ -305,16 +297,15 @@ func units(text string, headings bool) []string {
 			current = nil
 		}
 	}
-	fenced := false
+	var f fence
 	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") {
-			fenced = !fenced
+		if f.step(line) {
 			flush()
 			continue
 		}
 		switch {
-		case fenced:
+		case f != "":
 		case heading.MatchString(line):
 			flush()
 			if headings {

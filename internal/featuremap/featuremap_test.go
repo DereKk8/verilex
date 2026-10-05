@@ -51,12 +51,13 @@ const runbook = "# Items\n\n## Sub-features\n\n- `item-add` stores a named item.
 	"```sh\ntally add x # must exit 0\n```\n\n" +
 	"| Step | Result |\n|---|---|\n| list | Expect NAME on its own line. |\n"
 
-// R2: requirement sentences drop action sentences (and so their commands), dated run history,
-// fenced code and layout, and keep literal values in code spans.
+// R2: requirement sentences drop action sentences (and so their commands), fenced code and
+// layout, and keep literal values in code spans. A dated sentence is read like any other.
 func TestRequirementsKeepOnlyNormalizedRequirementSentences(t *testing.T) {
 	got := featuremap.Requirements(runbook)
 	want := []string{
 		"Expect exit 0 and `added NAME`; `store.json` lists NAME.",
+		"Verified 2026-09-12: `tally add` exits 0.",
 		"The CLI returns `{\"items\": []}` for an empty store.",
 		"Expect NAME on its own line.",
 	}
@@ -116,7 +117,7 @@ func changed(a featuremap.Anchor) string {
 const added = "Expect exit 0 and `added NAME`; `store.json` lists NAME."
 
 // R1: an anchor asks for review only when its sub-feature id or one of its requirement
-// sentences changes; commands and run history around them never do.
+// sentences changes; commands and text outside the sub-feature never do.
 func TestPinFlagsOnlyChangedIdsAndRequirements(t *testing.T) {
 	pin := pinner(t, runbook)
 	base := pin(runbook, []string{added})
@@ -139,7 +140,7 @@ func TestPinFlagsOnlyChangedIdsAndRequirements(t *testing.T) {
 
 // Any change to the sub-feature's prose outside code spans asks for review, the words of a Run
 // sentence included, so a rule written outside a requirement sentence is never missed. Command
-// edits, dated run history and layout do not.
+// edits and layout do not. A dated line is read like any other, so editing run history flags too.
 func TestPinFlagsProseChangesButNotCommands(t *testing.T) {
 	pin := pinner(t, runbook)
 	base := pin(runbook, []string{added})
@@ -148,6 +149,7 @@ func TestPinFlagsProseChangesButNotCommands(t *testing.T) {
 		"definition":   {"stores a named item", "keeps a named item"},
 		"new sentence": {"lists NAME.\n", "lists NAME. Never add a NAME twice.\n"},
 		"dated prose":  {"lists NAME.\n", "lists NAME. On 2026-10-01 the store moved to format 2.\n"},
+		"bare date":    {"lists NAME.\n", "lists NAME. 2026-09-12: run 3 was green.\n"},
 	} {
 		a := pin(strings.Replace(runbook, edit[0], edit[1], 1), []string{added})
 		if a.Prose == base.Prose {
@@ -156,20 +158,19 @@ func TestPinFlagsProseChangesButNotCommands(t *testing.T) {
 		reviews(t, a, changed(a))
 	}
 	for name, edit := range map[string][2]string{
-		"command":     {"Run `tally add NAME`.", "Run `tally --store \"$STORE\" add NAME`."},
-		"run history": {"lists NAME.\n", "lists NAME. Verified 2026-09-12: it exits 0.\n"},
-		"bare date":   {"lists NAME.\n", "lists NAME. 2026-09-12: run 3 was green.\n"},
-		"layout":      {"Run `tally add NAME`. Expect", "Run   `tally add NAME`.\n  Expect"},
-		"emphasis":    {"stores a named item", "stores a **named** item"},
+		"command":  {"Run `tally add NAME`.", "Run `tally --store \"$STORE\" add NAME`."},
+		"layout":   {"Run `tally add NAME`. Expect", "Run   `tally add NAME`.\n  Expect"},
+		"emphasis": {"stores a named item", "stores a **named** item"},
 	} {
 		if a := pin(strings.Replace(runbook, edit[0], edit[1], 1), []string{added}); len(a.Review) != 0 {
 			t.Fatalf("%s: %#v", name, a)
 		}
 	}
-	// A dated rule is a rule: only the explicit run-history form is left out.
-	dated := "Since 2026-10-01 a NAME added twice must exit 2."
-	reviews(t, pin(strings.Replace(runbook, "lists NAME.\n", "lists NAME. "+dated+"\n", 1), []string{added}), "requirement no claim maps: "+dated)
-	reviews(t, pin(strings.Replace(runbook, "lists NAME.\n", "lists NAME. "+dated+"\n", 1), []string{added, dated}))
+	// A dated rule is a rule, written as run history too.
+	for _, dated := range []string{"Since 2026-10-01 a NAME added twice must exit 2.", "Verified 2026-10-01: a NAME added twice must exit 2."} {
+		reviews(t, pin(strings.Replace(runbook, "lists NAME.\n", "lists NAME. "+dated+"\n", 1), []string{added}), "requirement no claim maps: "+dated)
+		reviews(t, pin(strings.Replace(runbook, "lists NAME.\n", "lists NAME. "+dated+"\n", 1), []string{added, dated}))
+	}
 
 	// Any edit inside a fenced block of the sub-feature asks for review; trailing spaces do not.
 	fenced := strings.Replace(runbook, "`store.json` lists NAME.\n", "`store.json` lists NAME.\n\n  ```sh\n  tally add NAME\n  ```\n", 1)
@@ -190,6 +191,27 @@ func TestPinFlagsProseChangesButNotCommands(t *testing.T) {
 	}
 	if a := pinFenced(strings.Replace(fenced, "  tally add NAME\n", "  tally add NAME  \n", 1), []string{added}); len(a.Review) != 0 {
 		t.Fatalf("trailing spaces asked for review: %#v", a)
+	}
+
+	// A tilde fence is a fence, so a code span inside it is not blanked, and a backtick fence
+	// inside it is content. A fence that follows the step with only blank lines between, before
+	// the next item, belongs to the sub-feature.
+	for name, block := range map[string]string{
+		"tilde":     "  ~~~sh\n  echo `date` | tally add NAME\n  ```\n  Run `x`.\n  ~~~",
+		"following": "```sh\necho `date` | tally add NAME\n```",
+	} {
+		text := strings.Replace(runbook, "`store.json` lists NAME.\n", "`store.json` lists NAME.\n\n"+block+"\n\n", 1)
+		pinBlock := pinner(t, text)
+		if a := pinBlock(text, []string{added}); len(a.Review) != 0 {
+			t.Fatalf("%s: %#v", name, a)
+		}
+		for _, edit := range [][2]string{{"`date`", "`uname`"}, {"`x`", "`y`"}} {
+			if !strings.Contains(text, edit[0]) {
+				continue
+			}
+			a := pinBlock(strings.Replace(text, edit[0], edit[1], 1), []string{added})
+			reviews(t, a, changed(a))
+		}
 	}
 
 	root := t.TempDir()

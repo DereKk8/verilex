@@ -64,6 +64,42 @@ func Resolve(root string, skillDirs []string, ref string) (Section, error) {
 
 var heading = regexp.MustCompile(`^(#{1,6})[ \t]+(.*?)[ \t#]*$`)
 
+// fenceRun matches a line that opens or closes a fenced block: three or more backticks or tildes.
+var fenceRun = regexp.MustCompile("^\\s*(`{3,}|~{3,})")
+
+// fence tracks fenced blocks line by line: the run that opened the current block, or "" outside
+// one. A block opens with three or more backticks or tildes and closes with a bare run of the
+// same character at least as long, so a shorter or other fence inside it is content.
+type fence string
+
+// step moves f past line and reports whether line opens or closes a block.
+func (f *fence) step(line string) bool {
+	m := fenceRun.FindStringSubmatch(line)
+	switch {
+	case m == nil:
+		return false
+	case *f == "":
+		*f = fence(m[1])
+	case m[1][0] == (*f)[0] && len(m[1]) >= len(*f) && strings.TrimSpace(line) == m[1]:
+		*f = ""
+	default:
+		return false
+	}
+	return true
+}
+
+// fenceEnd returns the index just past the fenced block that opens at lines[i].
+func fenceEnd(lines []string, i int) int {
+	var f fence
+	f.step(lines[i])
+	for i++; i < len(lines); i++ {
+		if f.step(lines[i]) {
+			return i + 1
+		}
+	}
+	return i
+}
+
 func section(text, anchor string) (string, bool) {
 	if anchor == "" {
 		return text, true
@@ -82,14 +118,13 @@ func section(text, anchor string) (string, bool) {
 func headingSection(text, anchor string) (string, bool) {
 	lines := strings.Split(text, "\n")
 	start, level := -1, 0
-	fenced := false
+	var f fence
 	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "```") {
-			fenced = !fenced
+		if f.step(line) {
 			continue
 		}
 		m := heading.FindStringSubmatch(line)
-		if fenced || m == nil {
+		if f != "" || m == nil {
 			continue
 		}
 		if start >= 0 && len(m[1]) <= level {

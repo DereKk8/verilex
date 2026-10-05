@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# verify-verilex Drive: run one command inside a session and keep its transcript as evidence.
+# usage: capture SESSION LABEL CMD [ARG...]   (launch writes SESSION/vx, which fills in SESSION)
+set -uo pipefail
+S="${1:?usage: capture SESSION LABEL CMD [ARG...]}"; label="${2:?missing LABEL}"; shift 2
+[ $# -gt 0 ] || { echo "capture: missing CMD" >&2; exit 2; }
+[ -f "$S/session" ] && [ -f "$S/owner" ] || { echo "capture: $S is not a verify-verilex session" >&2; exit 2; }
+evidence="$(sed -n 's/^evidence=//p' "$S/session")"
+n=$(( $(find "$evidence" -mindepth 1 -maxdepth 1 -type d | wc -l) + 1 ))
+dir="$evidence/$(printf '%03d' "$n")-$label"
+mkdir -p "$dir"
+q() { case "$1" in ''|*[!A-Za-z0-9_./=:@%+,-]*) printf "'%s'" "${1//\'/\'\\\'\'}" ;; *) printf %s "$1" ;; esac; }
+line=""; for arg in "$@"; do line+="${line:+ }$(q "$arg")"; done
+echo "$line" > "$dir/command"
+env | grep -E '^(TALLY_|VERILEX_)' | grep -v '^VERILEX_HOME=' > "$dir/env" || true
+(
+  cd "$S/tally" || exit 2
+  export VERILEX_HOME="$S/home" TALLY_STORES="$S/stores" PATH="$S/bin:$PATH"
+  "$@"
+) > "$dir/stdout" 2> "$dir/stderr"
+code=$?
+echo "$code" > "$dir/exit"
+echo "\$ $(cat "$dir/command")"
+cat "$dir/stdout"
+[ -s "$dir/stdout" ] && [ -n "$(tail -c1 "$dir/stdout")" ] && echo
+[ -s "$dir/stderr" ] && sed 's/^/stderr| /' "$dir/stderr"
+echo "exit $code  evidence: $dir"
+exit "$code"

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# verify-verilex Doctor: read-only check that SESSION is ours and worth driving.
+# usage: doctor SESSION
+set -uo pipefail
+S="${1:?usage: doctor SESSION}"
+fail() { echo "doctor: FAIL $*"; exit 1; }
+[ -f "$S/session" ] && [ -f "$S/owner" ] || fail "$S is not a verify-verilex session"
+get() { sed -n "s/^$1=//p" "$S/session"; }
+[ "$(cat "$S/owner")" = "$(get id)" ] || fail "owner file does not match session id"
+[ -x "$S/bin/verilex" ] || fail "no binary at $S/bin/verilex"
+sha="$(sha256sum "$S/bin/verilex" | cut -d' ' -f1)"
+[ "$sha" = "$(get binary_sha256)" ] || fail "binary changed since launch"
+help="$("$S/bin/verilex" --help 2>&1)"
+[[ "$help" == "usage: verilex "* ]] || fail "binary does not answer --help"
+home="$(get verilex_home)"
+[ "$home" = "$S/home" ] && [ "$home" != "$HOME/.local/state/verilex" ] || fail "VERILEX_HOME is not inside the session"
+grep -qx 'project: tally' "$S/tally/.verilex/config.yaml" || fail "scratch product is not tally"
+command -v python3 >/dev/null || fail "python3 is missing (the scratch product needs it)"
+real="$HOME/.local/state/verilex/tally"
+if [ -d "$real" ] && [ -n "$(find "$real" -newer "$S/session" -print -quit)" ]; then
+  fail "files under $real changed since launch; something escaped VERILEX_HOME"
+fi
+echo "doctor: ok"
+echo "  session:  $S ($(get id))"
+echo "  binary:   $(get binary_source)"
+echo "  sha256:   $sha"
+command -v go >/dev/null && go version -m "$S/bin/verilex" 2>/dev/null | awk '$2 ~ /^vcs\.(revision|modified)=/ {sub("=", ": ", $2); print "  " $2}'
+echo "  kept stores: $(find "$S/stores" -mindepth 1 -maxdepth 1 | wc -l)"
+echo "  evidence: $(get evidence)"

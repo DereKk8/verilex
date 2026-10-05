@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# verify-verilex Cleanup: tear down kept instances through verilex, then remove the session. Keeps evidence.
+# usage: cleanup SESSION
+set -uo pipefail
+S="${1:?usage: cleanup SESSION}"
+[ -f "$S/session" ] && [ -f "$S/owner" ] || { echo "cleanup: $S is not a verify-verilex session; left alone" >&2; exit 2; }
+[ "$(cat "$S/owner")" = "$(sed -n 's/^id=//p' "$S/session")" ] || { echo "cleanup: owner mismatch; left $S alone" >&2; exit 2; }
+evidence="$(sed -n 's/^evidence=//p' "$S/session")"
+status=0
+if [ -x "$S/bin/verilex" ] && [ -d "$S/tally" ]; then
+  for run in $(cd "$S/tally" && VERILEX_HOME="$S/home" "$S/bin/verilex" runs 2>/dev/null | awk '$3 == "cleanup=kept" {print $1}'); do
+    "$S/vx" "cleanup-$run" verilex cleanup "$run" || status=1
+  done
+fi
+left="$(find "$S/stores" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
+[ "$left" -eq 0 ] || echo "cleanup: $left store(s) were still alive; removing them with the session"
+rm -rf "$S"
+[ -d "$evidence" ] || { echo "cleanup: FAIL evidence $evidence is gone"; exit 1; }
+echo "cleanup: removed $S; evidence kept at $evidence"
+exit "$status"

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# verify-verilex Launch: pin a verilex binary and create a disposable session around a scratch product.
+# usage: launch [--bin PATH]   (default: build ./cmd/verilex from this checkout)
+set -euo pipefail
+skill="$(cd "$(dirname "$0")/.." && pwd -P)"
+repo="$(git -C "$skill" rev-parse --show-toplevel)"
+bin=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --bin) [ $# -ge 2 ] || { echo "launch: --bin needs a path" >&2; exit 2; }; bin="$2"; shift 2 ;;
+    --bin=*) bin="${1#--bin=}"; shift ;;
+    *) echo "usage: launch [--bin PATH]" >&2; exit 2 ;;
+  esac
+done
+if [ -n "$bin" ] && { [ ! -f "$bin" ] || [ ! -x "$bin" ]; }; then
+  echo "launch: $bin is not an executable file" >&2; exit 2
+fi
+tmp="${TMPDIR:-/tmp}"
+S="$(mktemp -d "$tmp/verify-verilex.XXXXXX")"
+id="$(basename "$S")"
+evidence="$tmp/verify-verilex-evidence/$id"
+mkdir -p "$S/bin" "$S/home" "$S/stores" "$evidence"
+if [ -n "$bin" ]; then
+  source_desc="$(cd "$(dirname "$bin")" && pwd -P)/$(basename "$bin")"
+  cp "$bin" "$S/bin/verilex"
+else
+  source_desc="built from $repo at $(git -C "$repo" rev-parse HEAD)$(git -C "$repo" diff --quiet HEAD -- . 2>/dev/null || echo ' (dirty)')"
+  (cd "$repo" && go build -o "$S/bin/verilex" ./cmd/verilex)
+fi
+cp -R "$repo/tests/fixtures/tally" "$S/tally"
+sha="$(sha256sum "$S/bin/verilex" | cut -d' ' -f1)"
+cat > "$S/session" <<SESSION
+id=$id
+binary_source=$source_desc
+binary_sha256=$sha
+verilex_home=$S/home
+product=$S/tally
+evidence=$evidence
+SESSION
+echo "$id" > "$S/owner"
+cat > "$S/vx" <<VX
+#!/usr/bin/env bash
+exec "$skill/scripts/capture" "$S" "\$@"
+VX
+chmod +x "$S/vx"
+cp "$S/session" "$evidence/session"
+echo "session: $S"
+echo "binary: $source_desc ($sha)"
+echo "evidence: $evidence"

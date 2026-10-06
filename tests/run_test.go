@@ -373,7 +373,7 @@ func TestSyntaxAndMetadataValidationErrorsRefused(t *testing.T) {
 	done := verilex(t, root, nil, "run", `store-open | "item-stored`)
 	equal(t, done.code, 2)
 	contains(t, done.stderr, "verilex: refused: invalid word syntax in chain")
-	contains(t, done.stderr, "No closing quotation")
+	contains(t, done.stderr, "no closing quotation")
 	config := filepath.Join(root, ".verilex", "config.yaml")
 	write(t, config, "project: tally\nsecret_patterns: ['[']\n", 0644)
 	done = verilex(t, root, nil, "words")

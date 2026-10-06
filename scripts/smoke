@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Drive the verify-verilex skill end to end on the scratch product: launch, doctor, admit, live run, skip, cleanup.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+skill=.cursor/skills/verify-verilex/scripts
+chain='store-open | item-stored apple | item-listed apple'
+S=""
+trap '[ -z "$S" ] || "$skill/cleanup" "$S" >/dev/null || true' EXIT
+S="$("$skill/launch" | sed -n 's/^session: //p')"
+[ -n "$S" ] || { echo "smoke: launch printed no session" >&2; exit 1; }
+"$skill/doctor" "$S" >/dev/null
+admitted="$("$skill/admit-all" "$S")"
+grep -qx 'admitted words: 3' <<<"$admitted" || { printf '%s\n' "$admitted"; echo "smoke: admit-all did not admit 3 words" >&2; exit 1; }
+live="$("$S/vx" live verilex run "$chain")"
+grep -q 'green: 3 green; run ' <<<"$live" || { printf '%s\n' "$live"; echo "smoke: live run was not green" >&2; exit 1; }
+skip="$("$S/vx" skip verilex run "$chain")"
+grep -q 'green: 3 green, skipped: stamps match run ' <<<"$skip" || { printf '%s\n' "$skip"; echo "smoke: second run was not skipped" >&2; exit 1; }
+"$skill/snapshot" "$S" >/dev/null
+echo "smoke: ok"

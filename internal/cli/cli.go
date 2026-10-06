@@ -69,6 +69,8 @@ func Main(argv []string, out, stderr io.Writer) int {
 			status := "running"
 			if record.Verdict != nil {
 				status = string(*record.Verdict)
+			} else if !runner.Running(project, record.Run) {
+				status = "died"
 			}
 			fmt.Fprintf(out, "%s  %s  cleanup=%s  %s\n", record.Run, status, record.Cleanup, record.Chain)
 		}

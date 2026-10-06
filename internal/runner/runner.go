@@ -46,7 +46,7 @@ func New(project dictionary.Project, chain string, steps []dictionary.Step) (*Ru
 	if err != nil {
 		return nil, err
 	}
-	release, err := tryLock(filepath.Join(dir, "run.lock"))
+	release, err := tryLock(filepath.Join(dir, "run.lock"), exclusive)
 	if err != nil {
 		return nil, err
 	}

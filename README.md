@@ -31,7 +31,7 @@ The core is Go; frame steps and words can use any language installed on the prod
 | `verilex ticket <file> [--json]` | Validates a run ticket and prints each field with the level it came from |
 | `verilex words` | Lists the dictionary with each word's promise, claim, `requires`, `provides` and lifecycle status |
 | `verilex claims [--json]` | Lists each claim's current version, the words that prove it, and why it needs review |
-| `verilex runs` | Lists this project's runs and whether each instance was cleaned up |
+| `verilex runs` | Lists this project's runs and whether each instance was cleaned up; a run without a verdict shows `running` while its process lives and `died` once it is gone |
 | `verilex cleanup <run>` | Tears down an instance kept with `--keep`, or left behind by a run whose process died; refuses a run that is still going |
 | `verilex new <word> --implements <ref>` | Scaffolds a provisional word that implements a feature-map section |
 | `verilex propose <word>` | Builds a curator packet for a word used in at least two runs |
@@ -98,7 +98,8 @@ Many runs may target one product at once, from one machine or from many stateles
 
 - `verilex cleanup <run>` and `verilex run --continue <run>` refuse a run that is still going, before anything starts: `verilex: refused: <run> is still running and owns its instance; wait until it finishes`.
 - A kept instance goes to exactly one continuing run. Every other attempt to take it over is refused and records no run.
-- A run whose process died holds nothing, so `verilex cleanup <run>` tears down the instance it left behind.
+- A run whose process died holds nothing: `verilex runs` shows it `died`, and `verilex cleanup <run>` tears down the instance it left behind.
+- Reading a run never blocks another: concurrent `verilex plan --continue <run>` calls all answer.
 
 ## Proof stamps and skipping
 

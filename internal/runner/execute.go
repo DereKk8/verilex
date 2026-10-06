@@ -75,14 +75,21 @@ func execute(argv []string, evidence string, env []string, timeout int, stdin st
 // errBusy means another verilex process holds a run's lock.
 var errBusy = errors.New("busy")
 
-// tryLock takes an exclusive advisory lock on path without waiting; it returns errBusy while
-// another process holds it. The kernel drops the lock when the holder's process ends.
-func tryLock(path string) (func(), error) {
+// Lock modes: a run holds its lock exclusively while it lives, and so does a command that tears
+// down or takes over its instance; a command that only reads the run shares it.
+const (
+	exclusive = syscall.LOCK_EX
+	shared    = syscall.LOCK_SH
+)
+
+// tryLock takes an advisory lock on path without waiting; it returns errBusy while another
+// process holds a lock that conflicts. The kernel drops the lock when the holder's process ends.
+func tryLock(path string, mode int) (func(), error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}
-	if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err = syscall.Flock(int(f.Fd()), mode|syscall.LOCK_NB); err != nil {
 		f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return nil, errBusy
@@ -90,4 +97,15 @@ func tryLock(path string) (func(), error) {
 		return nil, err
 	}
 	return func() { f.Close() }, nil
+}
+
+// locked reports whether a process holds the lock at path exclusively. A missing lock file
+// means no process does.
+func locked(path string) bool {
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	return errors.Is(syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB), syscall.EWOULDBLOCK)
 }

@@ -149,6 +149,14 @@ func TestConcurrentRunsEachDriveOnlyTheirOwnInstance(t *testing.T) {
 func TestKeptInstanceGoesToExactlyOneContinuingRun(t *testing.T) {
 	root := curated(t)
 	kept := green(t, root, nil, chain, "--keep")
+	// Planning on a kept instance takes nothing over, so concurrent plans never refuse each other.
+	planned := []*process{}
+	for range 12 {
+		planned = append(planned, start(t, root, nil, "plan", chain, "--continue", kept.Run))
+	}
+	for _, p := range planned {
+		equal(t, p.wait(t), output{0, "plan: skip 3, run 0 on the instance kept by " + kept.Run + "\n" + skips(kept.Run, "store-open", "item-stored apple", "item-listed apple"), ""})
+	}
 	before := runCount(t, root)
 	const n = 6
 	attempts := []*process{}
@@ -192,6 +200,7 @@ func TestCleanupTearsDownTheInstanceOfARunThatDied(t *testing.T) {
 	p := start(t, root, map[string]string{"HOLDING": holding}, "run", "store-open | store-held")
 	id := held(t, holding, 1)[0]
 	equal(t, verilex(t, root, nil, "cleanup", id).stderr, "verilex: refused: "+id+" is still running and owns its instance; wait until it finishes\n")
+	equal(t, verilex(t, root, nil, "runs").stdout, id+"  running  cleanup=pending  store-open | store-held\n")
 	if err := p.cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
@@ -200,10 +209,12 @@ func TestCleanupTearsDownTheInstanceOfARunThatDied(t *testing.T) {
 	record := recordOf(t, root, id)
 	equal(t, record.Cleanup, "pending")
 	equal(t, stores(t, root), []string{"tally-" + id})
+	equal(t, verilex(t, root, nil, "runs").stdout, id+"  died  cleanup=pending  store-open | store-held\n")
 
 	done := verilex(t, root, nil, "cleanup", id)
 	equal(t, done.code, 0)
 	equal(t, done.stdout, "cleanup: done\n")
 	equal(t, stores(t, root), []string{})
 	equal(t, recordOf(t, root, id).Cleanup, "done")
+	equal(t, verilex(t, root, nil, "runs").stdout, id+"  died  cleanup=done  store-open | store-held\n")
 }

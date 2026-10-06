@@ -6,7 +6,8 @@ S="${1:?usage: capture SESSION LABEL CMD [ARG...]}"; label="${2:?missing LABEL}"
 [ $# -gt 0 ] || { echo "capture: missing CMD" >&2; exit 2; }
 [ -f "$S/session" ] && [ -f "$S/owner" ] || { echo "capture: $S is not a verify-verilex session" >&2; exit 2; }
 evidence="$(sed -n 's/^evidence=//p' "$S/session")"
-# mkdir without -p claims a number, so concurrent calls never share an evidence directory.
+# mkdir without -p claims the directory, so concurrent calls never share one. Calls started at
+# once may carry the same number under different labels.
 n=$(( $(find "$evidence" -mindepth 1 -maxdepth 1 -type d | wc -l) + 1 ))
 until dir="$evidence/$(printf '%03d' "$n")-$label" && mkdir "$dir" 2>/dev/null; do
   [ -d "$evidence" ] || { echo "capture: evidence directory $evidence is gone" >&2; exit 2; }

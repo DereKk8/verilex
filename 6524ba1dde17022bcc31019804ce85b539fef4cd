@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "summary": "Adds run tickets: each run names its intent or diff and its brain, resolved by ticket, profile, project, user and built-in precedence.",
+  "files": [
+    {
+      "path": "internal/ticket/ticket.go",
+      "summary": "Owns ticket parsing, profiles files, field validation and per-field precedence.",
+      "annotations": [
+        {
+          "newRange": [
+            30,
+            30
+          ],
+          "summary": "builtIn sets only effort: medium, so verilex names no harness or model of its own.",
+          "rationale": "A built-in harness or model would put vendor names into a model-free core, so a resolved ticket must get harness and model from the ticket, a profile or a default. Resolve refuses the ticket if either stays unset (tests/ticket_test.go 'harness unset').",
+          "author": "fm/verilex-run-spec"
+        },
+        {
+          "newRange": [
+            81,
+            151
+          ],
+          "summary": "Resolve picks the profile, then takes each brain field from the first level that sets it and records that level in From.",
+          "rationale": "Per-field resolution lets a ticket override one field while a profile supplies the rest. A project profile replaces a user profile of the same name as a whole, so two files never merge one profile. TestEachTicketLevelWinsOverTheLevelsBelow proves each level beats the ones below; a mutation that swapped project and user defaults failed it.",
+          "author": "fm/verilex-run-spec"
+        },
+        {
+          "newRange": [
+            237,
+            274
+          ],
+          "summary": "check validates each field and refuses with the field name; diff may not start with '-' or hold whitespace.",
+          "rationale": "The launcher (PER-249) may pass diff to git, so an option-shaped value is refused here. The effort list is the union of common harness levels; the launcher maps it. TestInvalidTicketIsRefusedNamingTheField covers each refusal in ticket, plan and run.",
+          "author": "fm/verilex-run-spec"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/cli.go",
+      "summary": "Adds the ticket command and the --ticket flag on run and plan.",
+      "annotations": [
+        {
+          "newRange": [
+            79,
+            98
+          ],
+          "summary": "Main resolves the ticket before loading words, so an invalid ticket refuses the call before anything starts.",
+          "rationale": "Without --ticket no profiles file is read, so existing calls behave as before. Verified with verify-verilex features/tickets.md (Refused: no run added, no store).",
+          "author": "fm/verilex-run-spec"
+        }
+      ]
+    },
+    {
+      "path": "internal/runner/plan.go",
+      "summary": "Carries the resolved ticket through Options into the plan.",
+      "annotations": [
+        {
+          "newRange": [
+            24,
+            26
+          ],
+          "summary": "Options.Ticket is carried only; Decide never reads it for the skip decision.",
+          "rationale": "The ticket is not part of any stamp, so a different ticket or profiles edit keeps a proven chain skipped. TestTicketIsCarriedWithoutChangingTheSkipDecision and the recipe step 'Profiles outside the stamp' prove it.",
+          "author": "fm/verilex-run-spec"
+        }
+      ]
+    },
+    {
+      "path": "tests/run_test.go",
+      "summary": "Isolates the config home per test product and splits out a command builder for concurrent runs.",
+      "annotations": [
+        {
+          "newRange": [
+            94,
+            112
+          ],
+          "summary": "command sets XDG_CONFIG_HOME inside the test's temp tree, so the operator's own profiles never reach a test.",
+          "rationale": "The concurrency test starts two processes with command and waits on both, which verilex() cannot do because it runs synchronously.",
+          "author": "fm/verilex-run-spec"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/scripts/capture",
+      "summary": "Points XDG_CONFIG_HOME at the session's config directory.",
+      "annotations": [
+        {
+          "newRange": [
+            18,
+            18
+          ],
+          "summary": "capture exports XDG_CONFIG_HOME=$S/config, so user profiles in a session are the session's own.",
+          "rationale": "Without it ~/.config/verilex/profiles.yaml would leak into recipes. The doctor now fails a session without $S/config, so sessions from older launches must be relaunched.",
+          "author": "fm/verilex-run-spec"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/scripts/snapshot",
+      "summary": "Read-only helper that hashes every file in a session's product, tickets and config home.",
+      "annotations": [
+        {
+          "newRange": [
+            1,
+            10
+          ],
+          "summary": "snapshot prints sha256 lines for $S/tally, $S/tickets and $S/config, so two snapshots diff to prove no file changed.",
+          "rationale": "The tickets recipe used an inline sh -c pipeline, which a permission checker cannot inspect, so agents driving the recipe stalled on a prompt. The helper makes each recipe command plain. Verified by the replay on 6524ba1: 36 files, identical before and after the concurrent runs.",
+          "author": "fm/verilex-run-spec"
+        }
+      ]
+    }
+  ]
+}

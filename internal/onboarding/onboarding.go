@@ -599,11 +599,6 @@ func runs(uses []curation.Use) []string {
 	return result
 }
 
-func claimText(c dictionary.Claim, words []string) ClaimText {
-	data, _ := os.ReadFile(c.Path)
-	return ClaimText{Claim: c.Pin(), Text: string(data), Words: words}
-}
-
 func claimNames(candidates []Candidate) string {
 	names := make([]string, len(candidates))
 	for i, c := range candidates {

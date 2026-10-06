@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "summary": "verilex plan and run now take derived claims, named claims and a diff, and the verdict carries any touched claim the run did not prove.",
+  "files": [
+    {
+      "path": "internal/index/plan.go",
+      "summary": "Owns the claim plan and the verilex-claim-plan-1 JSON contract.",
+      "annotations": [
+        {
+          "newRange": [75, 120],
+          "summary": "PlanClaims selects derived claims plus every named claim, or the diff-touched set when no claim was derived.",
+          "rationale": "Named claims are a floor, so they are unioned in and never replace derived claims. With no derived claims the selected set equals the touched set, because the default intent is to prove nothing the diff touched broke. tests/plan_claims_test.go checks both. A launcher that treats named claims as the whole job would miss derived claims.",
+          "author": "fm/verilex-plan-verdict"
+        },
+        {
+          "newRange": [178, 190],
+          "summary": "ForceLive runs the chain when a config key or image pin hit and every stamp still matches.",
+          "rationale": "Those dependencies are not in the proof stamp, so a matching stamp would skip a real change and report a false green. The claim-mode run passes ForceLive into Decide, the same skip function plan uses. A stamp mismatch still lets Decide choose the live reason.",
+          "author": "fm/verilex-plan-verdict"
+        }
+      ]
+    },
+    {
+      "path": "internal/index/touch.go",
+      "summary": "Intersects a diff with path, config-key, image-pin and runbook dependencies.",
+      "annotations": [
+        {
+          "newRange": [177, 196],
+          "summary": "declaredHit forces a run for config keys and image pins, and not for runbook refs.",
+          "rationale": "A runbook section hash is already in the claim-sources fingerprint, so a matching stamp still skips. Forcing that hit would be a false red. Config keys and image pins are not fingerprinted, so a hit must run.",
+          "author": "fm/verilex-plan-verdict"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/surface.go",
+      "summary": "plan and run share PlanClaims, and the run record stores the missed-claim warning.",
+      "annotations": [
+        {
+          "newRange": [19, 40],
+          "summary": "claimSurface plans once and, for run, executes the printed chain with the same flags.",
+          "rationale": "The launcher must execute chain, not only the run list, because an earlier claim can still be proved while a later claim must run. README documents that rule as verilex-claim-plan-1.",
+          "author": "fm/verilex-plan-verdict"
+        },
+        {
+          "newRange": [125, 134],
+          "summary": "attachCoverage sets warning when a touched claim was not proved green.",
+          "rationale": "The warning stays in the verdict so a dispatcher sees it even if the agent ignores the plan. Exit codes stay 0, 1 and 2. A green claim that ran as a prerequisite is not reported uncovered, because that would be a false red.",
+          "author": "fm/verilex-plan-verdict"
+        }
+      ]
+    },
+    {
+      "path": "internal/report/report.go",
+      "summary": "Puts the missed-claim warning on the first verdict line and prints expected against got.",
+      "annotations": [
+        {
+          "newRange": [34, 36],
+          "summary": "Human prints the warning on the verdict line before the run id.",
+          "rationale": "Quiet output stays verdict-first, so CI can see the warning without reading later lines. The phrase matches the JSON warning field.",
+          "author": "fm/verilex-plan-verdict"
+        }
+      ]
+    },
+    {
+      "path": "README.md",
+      "summary": "Documents the stable JSON the launcher binds to.",
+      "annotations": [
+        {
+          "newRange": [174, 211],
+          "summary": "The claim-plan section pins format verilex-claim-plan-1 and the run-record warning fields.",
+          "rationale": "Another worker drives this surface only through the CLI and this JSON. A different format is a breaking change. The section says to execute chain with the same flags.",
+          "author": "fm/verilex-plan-verdict"
+        }
+      ]
+    },
+    {
+      "path": "skills/verilex/SKILL.md",
+      "summary": "The short agent skill that teaches when to use verilex and how to drive the claim plan.",
+      "annotations": [
+        {
+          "newRange": [1, 20],
+          "summary": "The skill tells the agent to use both index lookups, treat named claims as a floor, and act on an uncovered warning.",
+          "rationale": "The skill is 1429 bytes, so its load cost is small next to one verification run. A fresh grok-4.7 process with only this skill completed a tally verification, used both lookups, passed store-opened as a named claim, and reran after a touched-claim warning.",
+          "author": "fm/verilex-plan-verdict"
+        }
+      ]
+    }
+  ]
+}

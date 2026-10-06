@@ -8,10 +8,11 @@
 - `runs-cleanup-state` shows `done`, `kept`, `continued` and `none`.
 - `runs-liveness` shows a run without a verdict as `running` while its process lives and `died` once it is gone.
 - `runs-refused-absent` shows that refused commands record no run.
+- `runs-json` prints `--json` rows with `run`, `verdict`, `warning`, `cleanup` and `chain`; a recorded missed-claim warning also ends the human line.
 
 ## How to get to it (user POV)
 
-- Run `verilex runs` in a product checkout.
+- Run `verilex runs [--json]` in a product checkout.
 
 ## Driving it with vx
 
@@ -25,6 +26,7 @@ Preconditions:
 - **Kept and continued.** Use [continue.md](continue.md) `continue-handover`: the kept run shows `cleanup=continued` and the continuing run `cleanup=kept`.
 - **None.** Use [run.md](run.md) `run-skip`: the skipped run shows `cleanup=none`.
 - **Liveness.** Use [parallel.md](parallel.md) `parallel-own-instance` (`running  cleanup=pending` while held) and `parallel-dead-run` (`died`).
+- **JSON and warning.** Use [verdicts.md](verdicts.md) **What was asked**.
 - **Refused absent.** Run `"$S/vx" runs-refused verilex run 'item-stored apple | store-open'`, then `"$S/vx" runs-after-refused verilex runs`. The list is unchanged.
 
 ## Gotchas

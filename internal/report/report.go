@@ -41,7 +41,10 @@ func Human(record runner.Record, out io.Writer) {
 		if cause = OneLine(cause); cause != "" {
 			label += ": " + cause
 		}
-		fmt.Fprintf(out, "  %s  %s\n    evidence: %s\n", v, label, evidence)
+		fmt.Fprintf(out, "  %s  %s\n", v, label)
+		if evidence != "" {
+			fmt.Fprintf(out, "    evidence: %s\n", evidence)
+		}
 	}
 	frames := map[string]runner.Frame{}
 	for _, f := range record.Frame {
@@ -65,7 +68,7 @@ func Human(record runner.Record, out io.Writer) {
 			}
 			claimed = true
 			step(claim.Verdict, claim.Claim, claim.Got, claim.Evidence)
-			if claim.Expected != "" || claim.Got != "" {
+			if claim.Expected != "" {
 				fmt.Fprintf(out, "    expected: %s\n    got: %s\n", claim.Expected, claim.Got)
 			}
 			if claim.Next != "" {
@@ -87,6 +90,9 @@ func Human(record runner.Record, out io.Writer) {
 	}
 	for _, missed := range record.Uncovered {
 		fmt.Fprintf(out, "  uncovered  %s\n    next: %s\n", missed.Claim, missed.Next)
+	}
+	for _, name := range record.Unclaimed {
+		fmt.Fprintf(out, "  unclaimed  %s: proves no claim; verify it with the product verify skill\n", name)
 	}
 	frame("doctor-after-failure")
 	frame("cleanup")

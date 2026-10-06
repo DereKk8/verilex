@@ -13,7 +13,11 @@
 - `plan-claims` plans derived claims, named claims and a diff: skip with fingerprints, run, order, chain and unpicked.
 - `plan-no-intent` with only `--changed` selects exactly the claims the diff touches.
 - `plan-named` includes every `--named` claim even when it was not derived and the diff did not touch it.
-- `plan-dependency` treats `config:<key>`, `image:<pin>` and `runbook:<ref>` as diff entries. A config key or image pin runs live.
+- `plan-dependency` treats `config:<key>`, `image:<pin>` and `runbook:<ref>` as diff entries. A config key or image pin runs live, in a claim plan and in a chain plan given `--changed`.
+- `plan-rerun` says `whole chain runs live` and lists standing passes as `proven`, not `skip`, when the run will drive every step.
+- `plan-continue-forced` refuses `--continue` with a claim plan, and with a chain whose diff hits a config key or image pin.
+- `plan-depends-paths` fingerprints `depends.paths`, so a change to that file runs live and cannot skip from an older pass.
+- `plan-unmapped` makes a diff no claim covers inconclusive (exit `2`), never green, and names a touched word that proves no claim.
 
 ## How to get to it (user POV)
 
@@ -42,13 +46,26 @@ Preconditions:
 - **No intent.** Run `"$S/vx" plan-no-intent verilex plan --json --changed .verilex/words/item-listed/run`. `intent` is `prove nothing this change touched broke`, `selected` and `touched` are `["item-listed"]`, and `unpicked` is `[]`.
 - **Config key runs live.** Run `"$S/vx" plan-config verilex plan --json --changed config:tally.list`. `selected` is `["item-listed"]` and `run[0].reason` is `config key tally.list changed`.
 - **Image pin and runbook.** Run `"$S/vx" plan-image verilex plan --json --changed image:ghcr.io/example/store:1`: `selected` is `["store-opened"]` and the run reason starts `image pin `. Run `"$S/vx" plan-runbook verilex plan --json --changed runbook:verify-tally/features/items.md#item-add`: `selected` is `["item-added"]`.
+- **Whole chain live.** On the admitted baseline after `<A>`, run `"$S/vx" plan-rerun verilex plan --claim item-listed --named item-added --changed config:tally.list`. The first line is `plan: whole chain runs live; run 1, proven 1; item-listed apple: config key tally.list changed`, then `proven  item-added  item-stored apple  relies on run <R>` and `run  item-listed  item-listed apple: config key tally.list changed`. Run `"$S/vx" plan-rerun-provider verilex plan --json --claim item-listed --changed image:ghcr.io/example/store:1`: `rerun` is `store-open: image pin ghcr.io/example/store:1 changed` and `unpicked` is `["store-opened"]`. A changed pin on a step that only provides a state still runs the chain live.
+- **Chain with a diff.** Run `"$S/vx" plan-chain-config verilex plan 'store-open | item-stored apple | item-listed apple' --changed config:tally.list`. It prints `plan: skip 0, run 3; item-listed apple: config key tally.list changed`. Then `"$S/vx" plan-chain-config-run verilex run --json 'store-open | item-stored apple | item-listed apple' --changed config:tally.list` has that `rerun`, no `"skipped": true`, and no word with `relies_on`.
+- **Continue refused.** Run `"$S/vx" plan-keep-force verilex run --keep 'store-open | item-stored apple | item-listed apple'` (run `<KEPT>`). Then run `"$S/vx" plan-continue-claim verilex plan --continue <KEPT> --claim item-listed --changed config:tally.list` and the same with `run`. Both exit `2` with stderr `verilex: refused: --continue is not used with a claim plan; run without --continue`. Run `"$S/vx" plan-continue-chain verilex run --continue <KEPT> 'store-open | item-stored apple | item-listed apple' --changed image:ghcr.io/example/store:1`: exit `2`, stderr `verilex: refused: store-open: image pin ghcr.io/example/store:1 changed; a kept instance cannot be reused for it: run without --continue`. `plan` with `--changed config:tally.list` refuses the same way, naming `item-listed apple: config key tally.list changed`. Second view: `"$S/vx" plan-continue-runs verilex runs` lists no new run and `<KEPT>` is still `cleanup=kept`. Tear it down with `"$S/vx" plan-keep-force-cleanup verilex cleanup <KEPT>`.
+- **depends.paths.** On the admitted baseline, make tally read its defect from a file and declare that file:
+  1. `sed -i 's|defect = os.environ.get("TALLY_DEFECT")$|defect = os.environ.get("TALLY_DEFECT") or (Path(__file__).parent.parent / "lib" / "mode").read_text().strip()|' "$S/tally/bin/tally"`
+  2. `mkdir -p "$S/tally/lib" && : > "$S/tally/lib/mode"`
+  3. `sed -i 's/^depends:$/depends:\n  paths: [lib\/mode]/' "$S/tally/.verilex/words/item-stored/word.md"`
+  4. Run `"$S/vx" dp-use-1 verilex run 'store-open | item-stored apple | item-listed apple'` and `dp-use-2` the same, then `"$S/vx" dp-onboard verilex onboard item-stored` and `"$S/vx" dp-live verilex run 'store-open | item-stored apple | item-listed apple'` (green, live).
+  5. `"$S/vx" dp-plan-before verilex plan --changed lib/mode` prints `plan: skip 1, run 0; prove nothing this change touched broke`.
+  6. `echo drop-adds > "$S/tally/lib/mode"`. Then `"$S/vx" dp-plan verilex plan --changed lib/mode` prints `run  item-added  item-stored apple: depends lib/mode changed`, and `"$S/vx" dp-run verilex run --changed lib/mode` prints `red: 1 green, 1 red; run <id>` with `red  item-added: tally said 'added apple' but store.json lacks apple`, exit `1`. Run `dp-run` once more: still red, never `skipped`.
+  7. Restore with `: > "$S/tally/lib/mode"`.
+- **Unmapped diff.** On a fresh session, before any run, run `"$S/vx" plan-unmapped verilex run --changed README.md`, and the same with `config:tally.lsit` and `bin/taly`. Each prints `inconclusive: no claim covers this change; fall back to the product verify skill`, exit `2`. Run `"$S/vx" plan-unmapped-plan verilex plan --changed config:tally.lsit`: `plan: inconclusive: no claim covers this change; fall back to the product verify skill`, exit `2`. `"$S/vx" plan-unmapped-json verilex plan --json --changed bin/taly` keeps `"format": "verilex-claim-plan-1"`, has `"chain": ""` and `inconclusive` set, exit `2`. Second view: `"$S/vx" plan-unmapped-runs verilex runs` prints nothing.
+- **Claimless word.** Run `"$S/vx" plan-stub-new verilex new probe-word --implements verify-tally/features/items.md#item-add`, then `"$S/vx" plan-stub verilex run --changed .verilex/words/probe-word/run`: `inconclusive: probe-word proves no claim and the diff touched it; fall back to the product verify skill`, exit `2`. After a bound run, `"$S/vx" plan-stub-mixed verilex plan --changed .verilex/words/probe-word/run --changed .verilex/words/item-listed/run` selects `item-listed` and ends `unclaimed  probe-word: proves no claim; verify it with the product verify skill`. Remove the stub with `command rm -r "$S/tally/.verilex/words/probe-word"`.
 
 ## Gotchas
 
-- `plan` exits `0` whether it would skip or run. Read the `skip N, run M` line, not the exit code.
+- `plan` exits `0` whether it would skip or run. Read the `skip N, run M` line, not the exit code. A claim plan whose diff no claim covers exits `2`, like the run.
 - `plan --continue` refuses exactly as `run --continue` would, including with provisional words (see [continue.md](continue.md)).
 - `no green result on record` is checked before `provisional`, so a pristine session never shows the provisional reason.
 - A `plan` right after `admit-all` reports `word admission changed`, not `provisional`: the seal of each word's onboarding decision is part of its stamp.
 - A claim plan before any run of a word that takes arguments is refused: `item-stored needs arguments name; run a chain that binds them, then plan again`. The admitted baseline's onboarded chains bind `apple`.
-- Execute the printed `chain` with the same flags. Do not run only the `run` list.
+- Execute the printed `chain` with `verilex run` and the same flags, no chain argument. Do not run only the `run` list.
 - `--json` of a claim plan has `"format": "verilex-claim-plan-1"`. A chain plan's JSON is still `steps`.

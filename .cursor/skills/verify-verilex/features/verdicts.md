@@ -12,6 +12,8 @@ Every `verilex run` ends in one of three verdicts with a matching exit code: `gr
 - `verdict-secret-project` applies the project's own `secret_patterns` from `.verilex/config.yaml` to word evidence.
 - `verdict-uncovered` carries `with N touched claim(s) not covered` in the verdict line, in human and JSON, when the run's plan missed a touched claim.
 - `verdict-failing-link` names the claim, evidence path, `expected` against `got`, and the next command.
+- `verdict-unmapped` is inconclusive (exit `2`) when the diff touches no claim, so green always has evidence.
+- `verdict-claims` gives every selected claim a verdict, `not run` included, and the run record names what it was asked (`format`, `requested`, `touched`).
 
 ## How to get to it (user POV)
 
@@ -50,6 +52,10 @@ Preconditions:
 - **Missed claim.** On an admitted baseline, run `"$S/vx" verdict-live verilex run 'store-open | item-stored apple | item-listed apple'` (run `<A>`). Then `"$S/vx" verdict-missed verilex run --claim store-opened --changed .verilex/words/item-listed/run`. The first line contains `green:` and `with 1 touched claim not covered`, then `uncovered  item-listed` and `next: verilex run --claim 'item-listed' --changed '.verilex/words/item-listed/run'`. Exit `0`.
 - **Missed claim, JSON.** Run `"$S/vx" verdict-missed-json verilex run --json --claim store-opened --changed .verilex/words/item-listed/run`. `warning` is `1 touched claim not covered` and `uncovered[0].claim` is `item-listed`. `verdict` is `green`.
 - **Failing link.** Run `TALLY_DEFECT=drop-adds "$S/vx" verdict-link verilex run --claim item-added`. Exit `1`. Stdout has `red  item-added:`, `expected: store.json lists NAME.`, `got: tally said 'added apple' but store.json lacks apple` and `next: verilex run --fresh --claim 'item-added'`.
+- **Unmapped diff is not green.** On a fresh session, run `"$S/vx" verdict-unmapped verilex run --changed config:tally.lsit` and `"$S/vx" verdict-typo verilex run --changed bin/taly`. Each exits `2` and starts `inconclusive: no claim covers this change`. Neither starts `green`. `"$S/vx" verdict-unmapped-json verilex run --json --changed README.md` has `"format": "verilex-claim-run-1"`, `"verdict": "inconclusive"` and `requested.changed` `["README.md"]`.
+- **Claim that did not run.** After `<A>`, run `TALLY_SIMULATE_LOCK=1 "$S/vx" verdict-not-run verilex run --claim item-listed --named store-opened`. Exit `2`. It lists `inconclusive  store-opened: tally: ... is locked by another process` with its evidence, then `inconclusive  item-listed: not run` and `next: verilex run --fresh --claim 'item-listed'`, with no empty `evidence:` line. With `--json`, `claims` names both.
+- **Red is not also uncovered.** Run `TALLY_DEFECT=drop-adds "$S/vx" verdict-red-touched verilex run --claim item-listed --changed bin/tally`. Exit `1`. It lists `red  item-added` with `expected`, `got` and `next: verilex run --fresh --claim 'item-added' --changed 'bin/tally'`. No `uncovered  item-added` line: the chain ran that claim.
+- **What was asked.** After **Missed claim**, run `"$S/vx" verdict-runs verilex runs`: the missed run's line ends `warning: 1 touched claim not covered`. `"$S/vx" verdict-runs-json verilex runs --json` has that run with `"warning": "1 touched claim not covered"`. `"$S/vx" verdict-record cat "$S/home/tally/runs/<id>/run.json"` has `"format": "verilex-claim-run-1"`, `requested` with `claims` `["store-opened"]` and `changed` `[".verilex/words/item-listed/run"]`, and `touched` `["item-listed"]`.
 
 ## Gotchas
 

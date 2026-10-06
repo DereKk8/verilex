@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
+	"github.com/DereKk8/verilex/internal/index"
 	"github.com/DereKk8/verilex/internal/lifecycle"
 	"github.com/DereKk8/verilex/internal/report"
 	"github.com/DereKk8/verilex/internal/runner"
@@ -69,6 +70,14 @@ func Main(argv []string, out, stderr io.Writer) int {
 		if err != nil {
 			return refuse(err)
 		}
+		type runRow struct {
+			Run     string `json:"run"`
+			Verdict string `json:"verdict"`
+			Warning string `json:"warning,omitempty"`
+			Cleanup string `json:"cleanup"`
+			Chain   string `json:"chain"`
+		}
+		rows := []runRow{}
 		for _, record := range records {
 			status := "running"
 			if record.Verdict != nil {
@@ -76,7 +85,20 @@ func Main(argv []string, out, stderr io.Writer) int {
 			} else if !runner.Running(project, record.Run) {
 				status = "died"
 			}
-			fmt.Fprintf(out, "%s  %s  cleanup=%s  %s\n", record.Run, status, record.Cleanup, record.Chain)
+			rows = append(rows, runRow{record.Run, status, record.Warning, record.Cleanup, record.Chain})
+		}
+		if args.json {
+			if err = encode(out, rows); err != nil {
+				return refuse(err)
+			}
+			return 0
+		}
+		for _, row := range rows {
+			fmt.Fprintf(out, "%s  %s  cleanup=%s  %s", row.Run, row.Verdict, row.Cleanup, row.Chain)
+			if row.Warning != "" {
+				fmt.Fprintf(out, "  warning: %s", row.Warning)
+			}
+			fmt.Fprintln(out)
 		}
 		return 0
 	case "cleanup":
@@ -135,6 +157,13 @@ func Main(argv []string, out, stderr io.Writer) int {
 		return refuse(err)
 	}
 	opts := runner.Options{Keep: args.keep, Fresh: args.fresh, Continue: args.from, Ticket: resolved}
+	if len(args.changed) > 0 {
+		ix, err := index.Build(project)
+		if err != nil {
+			return refuse(err)
+		}
+		opts.ForceLive = ix.ForcedLive(project, steps, args.changed)
+	}
 	plan, err := runner.Decide(project, steps, opts)
 	if err != nil {
 		return refuse(err)
@@ -203,7 +232,7 @@ var commands = map[string]command{
 	"words":   {"", "", "list the dictionary and each word's lifecycle status", nil, nil},
 	"claims":  {"", "[--json]", "list each claim's current version, the words that prove it, and any review it needs", []string{"--json"}, nil},
 	"index":   {"", "[--intent TEXT | --changed FILE ...] [--json] [claim [word]]", "show the product's active claims, one claim's words, or one word's run details; or look claims up by intent or by changed files", []string{"--json"}, []string{"--intent", "--changed"}},
-	"runs":    {"", "", "list this project's runs and any instance still alive", nil, nil},
+	"runs":    {"", "[--json]", "list this project's runs and any instance still alive", []string{"--json"}, nil},
 	"cleanup": {"run", "run", "tear down a kept run's instance", nil, nil},
 	"new":     {"word", "--implements REF [--implements REF ...] word", "scaffold a provisional word", nil, []string{"--implements"}},
 	"onboard": {"word", "[--same-as CLAIM | --distinct] [--json] word", "onboard a word that proves a claim: group it under its claim, gate its correctness, record the decision; or answer its open grouping question", []string{"--distinct", "--json"}, []string{"--same-as"}},
@@ -315,7 +344,7 @@ func parse(argv []string) (options, bool, error) {
 		if len(pos) == 1 {
 			o.operand = pos[0]
 		}
-		if o.operand != "" && (len(o.claims) > 0 || len(o.named) > 0 || (o.command == "plan" && len(o.changed) > 0)) {
+		if o.operand != "" && (len(o.claims) > 0 || len(o.named) > 0) {
 			return o, false, fmt.Errorf("pass a chain, or claims and a diff, not both")
 		}
 		if o.operand == "" && len(o.claims) == 0 && len(o.named) == 0 && len(o.changed) == 0 {

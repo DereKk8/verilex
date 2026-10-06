@@ -19,6 +19,16 @@ type Frame struct {
 	Leak     string `json:"leak,omitempty"`
 }
 
+// ClaimRunFormat is the claim-run JSON contract. A different value is a breaking change.
+const ClaimRunFormat = "verilex-claim-run-1"
+
+// Request is the claim-plan input this run was given. An empty list means the caller passed none.
+type Request struct {
+	Claims  []string `json:"claims"`
+	Named   []string `json:"named"`
+	Changed []string `json:"changed"`
+}
+
 // Uncovered is a touched claim this run did not prove, and the command that would prove it.
 type Uncovered struct {
 	Claim string `json:"claim"`
@@ -86,6 +96,13 @@ type Record struct {
 	Reason  *string          `json:"reason"`
 	Skipped bool             `json:"skipped,omitempty"`
 	Rerun   string           `json:"rerun,omitempty"`
+	// Format, Requested and Touched are set on a claim-plan run so a launcher can see what was
+	// asked without trusting the agent. Format is verilex-claim-run-1.
+	Format    string   `json:"format,omitempty"`
+	Requested *Request `json:"requested,omitempty"`
+	Touched   []string `json:"touched,omitempty"`
+	// Unclaimed names words the diff touched that prove no claim, so no claim verdict covers them.
+	Unclaimed []string `json:"unclaimed,omitempty"`
 	// Warning, Uncovered and Claims are set when this run was given a diff or a claim plan.
 	// Warning is empty when every touched claim was proved. Uncovered names touched claims this
 	// run did not prove, each with the next command that would prove it. Claims is one verdict

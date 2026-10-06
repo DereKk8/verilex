@@ -9,12 +9,12 @@ You are the brain. verilex is the hands. It does not pick claims and it does not
 
 Reach for verilex when the product has `.verilex/` and the change should be proved by recorded claims. Fall back to the product's verify skill when a lookup returns no claim, a word is missing, or you must drive the product by hand.
 
-No intent means prove nothing this change touched broke.
+No intent means prove nothing this change touched broke. If verilex says no claim covers the change, that is inconclusive: fall back to the product verify skill.
 
 1. `verilex index --intent '<intent>'` and `verilex index --changed <change>`. A change is a path, `config:<key>`, `image:<pin>` or `runbook:<ref>`.
 2. Derive claims from both lookups. Named claims are a floor, never a ceiling. Pass them with `--named`. Do not treat a named list as the whole job.
-3. `verilex plan --claim <derived> --named <named> --changed <change>`. With no intent, omit `--claim`.
-4. Read skip (fingerprints), run, order, chain and unpicked. Run `chain` with the same `--claim`, `--named` and `--changed` flags. Do not run only the `run` list.
+3. `verilex plan --claim <derived> --named <named> --changed <change>`. With no intent, omit `--claim`. Do not pass `--continue`.
+4. Read skip, run, order, chain and unpicked. Then run `verilex run --claim <derived> --named <named> --changed <change>`: the same flags, no chain argument. If the plan says `whole chain runs live`, every step runs, including `proven` ones; report it that way.
 5. If the plan lists `unpicked`, or the verdict says `touched claim not covered`, add those claims with `--claim` and run again before you accept the result.
 
 The command output is the rest of the contract.

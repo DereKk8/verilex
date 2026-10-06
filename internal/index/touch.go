@@ -18,12 +18,14 @@ type diffKind struct {
 }
 
 // touch is which claims and words a diff hits, and why a hit the proof stamp does not
-// fingerprint must run live. files is how the diff is reported back.
+// fingerprint must run live, by claim (forced) and by word (forcedWords). files is how the diff
+// is reported back.
 type touch struct {
-	files   []string
-	covered map[string]bool
-	claims  map[string]bool
-	forced  map[string]string
+	files       []string
+	covered     map[string]bool
+	claims      map[string]bool
+	forced      map[string]string
+	forcedWords map[string]string
 }
 
 // touchOf intersects a diff with word dependencies. A path hits a word's directory, its inputs,
@@ -32,7 +34,7 @@ type touch struct {
 // runbook refs and section hashes its claim sources pin. A config key or image pin is not in
 // the proof stamp, so a hit forces the claim to run.
 func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
-	hit := touch{files: []string{}, covered: map[string]bool{}, claims: map[string]bool{}, forced: map[string]string{}}
+	hit := touch{files: []string{}, covered: map[string]bool{}, claims: map[string]bool{}, forced: map[string]string{}, forcedWords: map[string]string{}}
 	var paths []string
 	var typed []diffKind
 	for _, item := range raw {
@@ -110,6 +112,9 @@ func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
 		reason := declaredHit(w, typed)
 		if covers(deps) || reason != "" || sectionHit(typed, refs, digests) {
 			hit.covered[w.Name] = true
+			if reason != "" {
+				hit.forcedWords[w.Name] = reason
+			}
 			if name := ix.claimName(w); name != "" {
 				hit.claims[name] = true
 				if reason != "" {
@@ -119,6 +124,35 @@ func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
 		}
 	}
 	return hit
+}
+
+// forcedChain is why a chain must run live for this diff: its first step whose word depends on
+// a config key or image pin the diff changed. "" when the stamps decide.
+func (hit touch) forcedChain(steps []dictionary.Step) string {
+	for _, step := range steps {
+		if why := hit.forcedWords[step.Word.Name]; why != "" {
+			return step.Label() + ": " + why
+		}
+	}
+	return ""
+}
+
+// unclaimed names the hit words that prove no claim, in name order.
+func (hit touch) unclaimed(words []dictionary.Word) []string {
+	names := []string{}
+	for _, word := range words {
+		if hit.covered[word.Name] && word.Claim == nil {
+			names = append(names, word.Name)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+// ForcedLive is why a chain must run live for a diff, or "" when the stamps decide. A chain
+// run given --changed passes it to the runner, so a matching stamp cannot hide the diff.
+func (ix Index) ForcedLive(p dictionary.Project, steps []dictionary.Step, changes []string) string {
+	return ix.touchOf(p, changes).forcedChain(steps)
 }
 
 // claimName is the grouped claim a word proves, or "" when it proves none.

@@ -17,6 +17,9 @@ import (
 
 // claimSurface plans claims and a diff, and runs that plan. plan and run share PlanClaims.
 func claimSurface(project dictionary.Project, words []dictionary.Word, args options, resolved *ticket.Ticket, out, stderr io.Writer, refuse func(error) int) int {
+	if args.from != "" {
+		return refuse(errors.New("--continue is not used with a claim plan; run without --continue"))
+	}
 	ix, err := index.Build(project)
 	if err != nil {
 		return refuse(err)
@@ -30,13 +33,16 @@ func claimSurface(project dictionary.Project, words []dictionary.Word, args opti
 			if err = encode(out, plan); err != nil {
 				return refuse(err)
 			}
-			return 0
+		} else {
+			printClaimPlan(plan, out)
 		}
-		printClaimPlan(plan, out)
+		if plan.Inconclusive != "" {
+			return verdict.Inconclusive.ExitCode()
+		}
 		return 0
 	}
-	if plan.Chain == "" {
-		return printNothingTouched(args.json, out, refuse)
+	if plan.Inconclusive != "" {
+		return nothingCovered(plan, args, out, refuse)
 	}
 	steps, err := dictionary.ParseChain(plan.Chain, words)
 	if err != nil {
@@ -58,7 +64,11 @@ func claimSurface(project dictionary.Project, words []dictionary.Word, args opti
 	if refused := (runner.Refused{}); errors.As(runErr, &refused) {
 		return refuse(refused.Err)
 	}
-	if err = attachCoverage(&record, ix, plan.Unpicked, args.changed); err != nil {
+	record.Format = runner.ClaimRunFormat
+	record.Requested = requested(args)
+	record.Touched = plan.Touched
+	record.Unclaimed = plan.Unclaimed
+	if err = attachCoverage(&record, ix, plan.Selected, plan.Unpicked, args.changed); err != nil {
 		return refuse(err)
 	}
 	if record.Dir != "" {
@@ -78,7 +88,11 @@ func coverChain(project dictionary.Project, record *runner.Record, changed []str
 	if err != nil {
 		return err
 	}
-	if err = attachCoverage(record, ix, ix.TouchedClaims(project, changed), changed); err != nil {
+	record.Format = runner.ClaimRunFormat
+	record.Requested = &runner.Request{Claims: []string{}, Named: []string{}, Changed: listed(changed)}
+	record.Touched = ix.TouchedClaims(project, changed)
+	record.Unclaimed = ix.UnclaimedWords(project, changed)
+	if err = attachCoverage(record, ix, nil, record.Touched, changed); err != nil {
 		return err
 	}
 	if record.Dir != "" {
@@ -87,8 +101,7 @@ func coverChain(project dictionary.Project, record *runner.Record, changed []str
 	return nil
 }
 
-func attachCoverage(record *runner.Record, ix index.Index, missed []string, changed []string) error {
-	proved := map[string]bool{}
+func attachCoverage(record *runner.Record, ix index.Index, selected, missed []string, changed []string) error {
 	words := map[string]dictionary.Word{}
 	for _, word := range ix.Words() {
 		words[word.Name] = word
@@ -105,9 +118,6 @@ func attachCoverage(record *runner.Record, ix index.Index, missed []string, chan
 			continue
 		}
 		seen[name] = true
-		if step.Verdict == verdict.Green {
-			proved[name] = true
-		}
 		item := runner.ClaimReport{
 			Claim: name, Proves: step.Proves, Word: step.Word,
 			Step: strings.Join(append([]string{step.Word}, step.Args...), " "), Verdict: step.Verdict, Evidence: step.Evidence,
@@ -119,9 +129,18 @@ func attachCoverage(record *runner.Record, ix index.Index, missed []string, chan
 		}
 		record.Claims = append(record.Claims, item)
 	}
+	for _, name := range selected {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		record.Claims = append(record.Claims, runner.ClaimReport{
+			Claim: name, Verdict: verdict.Inconclusive, Got: "not run", Next: nextCommand(name, changed, true),
+		})
+	}
 	record.Uncovered = nil
 	for _, name := range missed {
-		if proved[name] {
+		if seen[name] {
 			continue
 		}
 		record.Uncovered = append(record.Uncovered, runner.Uncovered{Claim: name, Next: nextCommand(name, changed, false)})
@@ -171,36 +190,65 @@ func nextCommand(claim string, changed []string, fresh bool) string {
 	return strings.Join(parts, " ")
 }
 
-func printNothingTouched(asJSON bool, out io.Writer, refuse func(error) int) int {
-	if asJSON {
+// nothingCovered answers a run whose diff no claim covers. Green would claim the product works
+// with no evidence, so the verdict is inconclusive and nothing launches.
+func nothingCovered(plan index.ClaimPlan, args options, out io.Writer, refuse func(error) int) int {
+	if args.json {
 		value := struct {
 			Format    string               `json:"format"`
 			Verdict   verdict.Verdict      `json:"verdict"`
 			Reason    string               `json:"reason"`
+			Requested *runner.Request      `json:"requested"`
+			Touched   []string             `json:"touched"`
+			Unclaimed []string             `json:"unclaimed"`
 			Claims    []runner.ClaimReport `json:"claims"`
 			Uncovered []runner.Uncovered   `json:"uncovered"`
-			Chain     string               `json:"chain"`
-		}{index.PlanFormat, verdict.Green, index.NoIntent, []runner.ClaimReport{}, []runner.Uncovered{}, ""}
+		}{runner.ClaimRunFormat, verdict.Inconclusive, plan.Inconclusive, requested(args), plan.Touched, plan.Unclaimed, []runner.ClaimReport{}, []runner.Uncovered{}}
 		if err := encode(out, value); err != nil {
 			return refuse(err)
 		}
-		return 0
+	} else {
+		fmt.Fprintf(out, "inconclusive: %s\n", plan.Inconclusive)
 	}
-	fmt.Fprintln(out, "green: nothing this change touched broke")
-	return 0
+	return verdict.Inconclusive.ExitCode()
+}
+
+func requested(args options) *runner.Request {
+	return &runner.Request{Claims: listed(args.claims), Named: listed(args.named), Changed: listed(args.changed)}
+}
+
+func listed(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func printClaimPlan(plan index.ClaimPlan, out io.Writer) {
-	fmt.Fprintf(out, "plan: skip %d, run %d", len(plan.Skip), len(plan.Run))
+	if plan.Inconclusive != "" {
+		fmt.Fprintf(out, "plan: inconclusive: %s\n", plan.Inconclusive)
+		return
+	}
+	// When the chain runs live, a standing pass no longer means a skipped step: say proven.
+	skipped := "skip"
+	if plan.Rerun == "" {
+		fmt.Fprintf(out, "plan: skip %d, run %d", len(plan.Skip), len(plan.Run))
+	} else {
+		skipped = "proven"
+		fmt.Fprintf(out, "plan: whole chain runs live; run %d, proven %d", len(plan.Run), len(plan.Skip))
+	}
 	if plan.Intent == index.NoIntent {
 		fmt.Fprintf(out, "; %s", plan.Intent)
 	}
 	if plan.Warning != "" {
 		fmt.Fprintf(out, "; %s", plan.Warning)
 	}
+	if plan.Rerun != "" {
+		fmt.Fprintf(out, "; %s", report.OneLine(plan.Rerun))
+	}
 	fmt.Fprintln(out)
 	for _, skip := range plan.Skip {
-		fmt.Fprintf(out, "  skip  %s  %s  relies on run %s\n", skip.Claim, skip.Step, skip.ReliesOn)
+		fmt.Fprintf(out, "  %s  %s  %s  relies on run %s\n", skipped, skip.Claim, skip.Step, skip.ReliesOn)
 		keys := make([]string, 0, len(skip.Fingerprints))
 		for key := range skip.Fingerprints {
 			keys = append(keys, key)
@@ -221,6 +269,9 @@ func printClaimPlan(plan index.ClaimPlan, out io.Writer) {
 	}
 	for _, name := range plan.Unpicked {
 		fmt.Fprintf(out, "  unpicked  %s\n", name)
+	}
+	for _, name := range plan.Unclaimed {
+		fmt.Fprintf(out, "  unclaimed  %s: proves no claim; verify it with the product verify skill\n", name)
 	}
 }
 

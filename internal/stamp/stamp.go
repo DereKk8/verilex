@@ -172,6 +172,16 @@ func (h hasher) word(word dictionary.Word, root string, components map[string]st
 			return "input " + input + ": " + err.Error()
 		}
 	}
+	// depends.paths is a declared footprint. A pass recorded before that file changed must not skip.
+	for _, input := range word.Depends.Paths {
+		path := input
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(root, path)
+		}
+		if components["depends "+input], err = h.path(path); err != nil {
+			return "depends " + input + ": " + err.Error()
+		}
+	}
 	for _, name := range word.Env {
 		value, set := os.LookupEnv(name)
 		components["env "+name] = digestOf(fmt.Sprintf("%t\x00%s", set, value))

@@ -173,9 +173,9 @@ A refused chain is refused by `plan` too, with the same message and exit code `2
 
 ### Claim plan
 
-`verilex plan` without a chain plans claims and a diff. The caller passes claims it derived from its intent (`--claim`, repeatable), named claims (`--named`, repeatable) and the diff (`--changed`, repeatable). Named claims are always included and never limit the derived claims. With no `--claim`, the intent is "prove nothing this change touched broke" and the selected claims are exactly the claims the diff touches, plus any named claims. `verilex run` with the same flags executes `chain` and carries a missed-claim warning in the verdict. Pass a chain, or claims and a diff, not both. A chain run may still take `--changed`; touched claims that chain did not prove are uncovered.
+`verilex plan` without a chain plans claims and a diff. The caller passes claims it derived from its intent (`--claim`, repeatable), named claims (`--named`, repeatable) and the diff (`--changed`, repeatable). Named claims are always included and never limit the derived claims. With no `--claim`, the intent is "prove nothing this change touched broke" and the selected claims are exactly the claims the diff touches, plus any named claims. `verilex run` with the same flags executes `chain` and carries a missed-claim warning in the verdict. Pass a chain, or claims and a diff, not both. A chain `plan` or `run` may still take `--changed`: a config key or image pin hit runs that chain live, and on a run, touched claims the chain did not prove are uncovered.
 
-A diff entry is a file path, or `config:<key>`, `image:<pin>` or `runbook:<ref>` (`path:<file>` is a path). The diff intersects word dependencies: paths (the word directory, its inputs, its claim file, the feature files its sources point at, declared `depends.paths`, and the files every word shares), config keys (`depends.config_keys`), image pins (`depends.images`) and runbook section refs and hashes (claim sources and `depends.runbook`). A config key or image pin is not in the proof stamp, so a hit runs live. A runbook hit uses the claim-sources fingerprint: a matching stamp still skips.
+A diff entry is a file path, or `config:<key>`, `image:<pin>` or `runbook:<ref>` (`path:<file>` is a path). The diff intersects word dependencies: paths (the word directory, its inputs, its claim file, the feature files its sources point at, declared `depends.paths`, and the files every word shares), config keys (`depends.config_keys`), image pins (`depends.images`) and runbook section refs and hashes (claim sources and `depends.runbook`). `depends.paths` is in the proof stamp, so a change to that file cannot skip from a pass recorded before it. A config key or image pin is not in the proof stamp, so a hit runs live. A runbook hit uses the claim-sources fingerprint: a matching stamp still skips. `--continue` is refused with a claim plan, and on a chain whose diff hits a config key or image pin: a kept instance's history cannot prove a change the stamp does not cover.
 
 `--json` prints `verilex-claim-plan-1`. A different `format` is a breaking change; a launcher should refuse any other value. Execute `chain` through `verilex run` with the same `--claim`, `--named` and `--changed` flags. Do not run only the `run` list: an earlier claim can still be proved while a later one must run, and the chain still has to provide every required state.
 
@@ -190,7 +190,8 @@ A diff entry is a file path, or `config:<key>`, `image:<pin>` or `runbook:<ref>`
   "chain": "store-open | item-stored apple | item-listed apple",
   "touched": ["item-listed"],
   "unpicked": ["store-opened"],
-  "warning": "1 touched claim not picked"
+  "warning": "1 touched claim not picked",
+  "rerun": "item-stored apple: word changed"
 }
 ```
 
@@ -198,7 +199,9 @@ A diff entry is a file path, or `config:<key>`, `image:<pin>` or `runbook:<ref>`
 - `selected` is the claims the plan proves, sorted. It equals `touched` when there is no intent and no named claim outside the diff.
 - `skip` and `run` partition `selected`, in chain order. `skip` means a pass stands for that step's stamp and claim version and is younger than 7 days; `fingerprints` are that pass's components and `relies_on` is the run that recorded it. `run` is why no pass stands, or why a dependency the stamp does not fingerprint changed.
 - `order` is every claim `chain` proves, topological from word `requires` and `provides`. `chain` may include words that only provide a state a selected claim requires. `verilex run` still skips the whole chain only when every step's stamp matches; otherwise it runs the chain live.
+- `unclaimed` are words the diff touches that prove no claim, omitted when there are none.
 - `unpicked` are claims the diff touches that were not selected. `warning` is `1 touched claim not picked` or `N touched claims not picked`, and is omitted when `unpicked` is empty.
+- `rerun` is why `verilex run` executes every word in `chain`, and is omitted when the run skips them all. With `rerun`, a claim in `skip` still has a standing pass, but its step runs again. The human plan then starts `plan: whole chain runs live` and lists those claims as `proven`, not `skip`.
 - An unknown claim, a stale pin, a claim with no word, or a word whose arguments no recorded chain binds is refused (exit `2`) and runs nothing.
 
 `verilex run --json` with these flags prints the run record plus three fields, omitted on a chain run given no diff:
@@ -207,7 +210,9 @@ A diff entry is a file path, or `config:<key>`, `image:<pin>` or `runbook:<ref>`
 - `uncovered`: touched claims this run did not prove, each `{claim, next}`.
 - `warning`: `1 touched claim not covered` or `N touched claims not covered`. The human verdict line carries the same phrase (`green: 1 green, with 1 touched claim not covered; run <id>`). Exit codes stay `0`, `1` and `2`; a warning does not change them.
 
-When the diff touches no claim and no claim was named, `verilex run` launches nothing and prints `green: nothing this change touched broke` (JSON: `verdict` `green`, `reason` that sentence, empty `claims` and `uncovered`, no `run`).
+When the diff touches no claim and no claim was given or named, nothing can prove the change, so the verdict is inconclusive, not green. `verilex run` launches nothing and prints `inconclusive: no claim covers this change; fall back to the product verify skill`, exit `2`. A mistyped path or key lands here too. If the diff touched a word that proves no claim, the reason names that word instead. `verilex plan` prints `plan: inconclusive: <reason>` and also exits `2`; its JSON keeps `verilex-claim-plan-1` and adds `inconclusive`, the reason. `verilex run --json` prints `format` `verilex-claim-run-1`, `verdict` `inconclusive`, `reason`, `requested`, `touched` and `unclaimed`, and records no run. In any diff, touched words that prove no claim are listed as `unclaimed` in the plan, the run record and both human outputs, because no claim verdict covers them.
+
+A claim-plan run record, and a chain run given `--changed`, adds `format` (`verilex-claim-run-1`), `requested` (`claims`, `named`, `changed`) and `touched`, so a launcher reads what verilex was asked from verilex, not from the agent. `claims` lists every selected claim, including one that did not run (`verdict` `inconclusive`, `got` `not run`). A claim that ran, even red, is not also `uncovered`. `verilex runs --json` lists each run's `run`, `verdict`, `warning`, `cleanup` and `chain`, and the human `runs` line ends with `warning: <phrase>` when one was recorded.
 
 ### Continuing a kept instance
 
@@ -553,7 +558,7 @@ provides: []             # states it makes true beyond its claim's, optional
 inputs: [bin/tally]      # product paths the result depends on; omit or leave empty to never skip
 env: [TALLY_DEFECT]      # environment variables the result depends on, optional
 depends:                 # optional diff footprint beyond inputs and claim sources
-  paths: []              # more product paths
+  paths: []              # more product paths; fingerprinted, so a change cannot skip
   config_keys: []        # a diff entry config:<key> touches this word; not in the proof stamp, so a hit runs live
   images: []             # image pins; image:<pin> likewise runs live
   runbook: []            # extra runbook refs; claim sources already count, and their hashes are in the stamp

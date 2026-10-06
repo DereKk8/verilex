@@ -33,6 +33,14 @@ type ClaimPlan struct {
 	Touched  []string       `json:"touched"`
 	Unpicked []string       `json:"unpicked"`
 	Warning  string         `json:"warning,omitempty"`
+	// Rerun is why `verilex run` executes every word in Chain, or "" when it skips them all.
+	// A claim in Skip still has a standing pass, yet the run drives its step again.
+	Rerun string `json:"rerun,omitempty"`
+	// Inconclusive is set when no claim covers the diff and none was given or named: nothing
+	// can prove the change, so the run is inconclusive. Unclaimed names touched words that
+	// prove no claim, so no claim verdict covers them.
+	Inconclusive string   `json:"inconclusive,omitempty"`
+	Unclaimed    []string `json:"unclaimed,omitempty"`
 
 	// force is why the chain must run live even when every stamp matches. It is not part of
 	// the JSON contract; `verilex run` reads it so a matching stamp cannot hide the diff.
@@ -55,6 +63,11 @@ type LiveClaim struct {
 	Word   string `json:"word"`
 	Step   string `json:"step"`
 	Reason string `json:"reason"`
+}
+
+// UnclaimedWords names the words a diff hits that prove no claim, in name order.
+func (ix Index) UnclaimedWords(p dictionary.Project, changes []string) []string {
+	return ix.touchOf(p, changes).unclaimed(ix.words)
 }
 
 // TouchedClaims names the claims a diff hits, in index order. It runs nothing and binds no arguments.
@@ -122,7 +135,12 @@ func (ix Index) PlanClaims(p dictionary.Project, derived, named, changes []strin
 	if n := len(plan.Unpicked); n > 0 {
 		plan.Warning = countPhrase(n, "touched claim not picked", "touched claims not picked")
 	}
+	plan.Unclaimed = hit.unclaimed(ix.words)
 	if len(plan.Selected) == 0 {
+		plan.Inconclusive = "no claim covers this change; fall back to the product verify skill"
+		if len(plan.Unclaimed) > 0 {
+			plan.Inconclusive = strings.Join(plan.Unclaimed, ", ") + " proves no claim and the diff touched it; fall back to the product verify skill"
+		}
 		return plan, nil
 	}
 	chain, order, err := ix.order(p, plan.Selected)
@@ -137,6 +155,7 @@ func (ix Index) PlanClaims(p dictionary.Project, derived, named, changes []strin
 	if err = dictionary.CheckOrder(steps); err != nil {
 		return plan, err
 	}
+	plan.force = hit.forcedChain(steps)
 	stamps := stamp.Chain(p, steps)
 	store := ledger.At(runner.LedgerDir(p))
 	seen := map[string]bool{}
@@ -153,11 +172,8 @@ func (ix Index) PlanClaims(p dictionary.Project, derived, named, changes []strin
 		if stamps[i].Hold != "" {
 			why = stamps[i].Hold
 		}
-		if why == "" && hit.forced[name] != "" {
+		if why == "" {
 			why = hit.forced[name]
-			if plan.force == "" {
-				plan.force = why
-			}
 		}
 		if why == "" {
 			prints := entry.Components
@@ -171,21 +187,16 @@ func (ix Index) PlanClaims(p dictionary.Project, derived, named, changes []strin
 		}
 		plan.Run = append(plan.Run, LiveClaim{Claim: name, Word: step.Word.Name, Step: step.Label(), Reason: why})
 	}
+	decided, err := runner.Decide(p, steps, runner.Options{ForceLive: plan.force})
+	if err != nil {
+		return plan, err
+	}
+	plan.Rerun = decided.Rerun
 	return plan, nil
 }
 
 // ForceLive is why a claim-mode run must not skip, or "" when the stamps already decide.
-func (p ClaimPlan) ForceLive() string {
-	if p.force == "" || len(p.Run) == 0 {
-		return ""
-	}
-	for _, live := range p.Run {
-		if live.Reason != p.force && !strings.HasPrefix(live.Reason, "config key ") && !strings.HasPrefix(live.Reason, "image pin ") {
-			return ""
-		}
-	}
-	return p.force
-}
+func (p ClaimPlan) ForceLive() string { return p.force }
 
 func (ix Index) resolveClaim(name string) (string, error) {
 	pin := name

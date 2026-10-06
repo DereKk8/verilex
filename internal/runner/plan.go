@@ -71,6 +71,8 @@ func Decide(project dictionary.Project, steps []dictionary.Step, opts Options) (
 	switch {
 	case opts.Continue != "" && opts.Fresh:
 		return p, errors.New("--fresh would run every word again on the kept instance; run without --continue")
+	case opts.Continue != "" && opts.ForceLive != "":
+		return p, fmt.Errorf("%s; a kept instance cannot be reused for it: run without --continue", opts.ForceLive)
 	case opts.Continue != "":
 		if p.kept, err = Kept(project, opts.Continue); err != nil {
 			return p, err
@@ -82,8 +84,6 @@ func Decide(project dictionary.Project, steps []dictionary.Step, opts Options) (
 		p.Rerun = "--keep needs a live instance"
 	case opts.Fresh:
 		p.Rerun = "--fresh asked for a live run"
-	case opts.ForceLive != "" && opts.Continue != "":
-		return p, fmt.Errorf("%s; a kept instance cannot be reused for it: run without --continue", opts.ForceLive)
 	case opts.ForceLive != "":
 		p.Rerun = opts.ForceLive
 	default:

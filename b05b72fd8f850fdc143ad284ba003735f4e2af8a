@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "summary": "Adds the model-free claim plan and verdict surface plus the agent skill, and closes three false greens the independent tester found.",
+  "files": [
+    {
+      "path": "internal/runner/plan.go",
+      "summary": "Decide refuses --continue when a diff forces a live run.",
+      "annotations": [
+        {
+          "newRange": [74, 75],
+          "summary": "Decide checks Continue plus ForceLive before the plain Continue case, so the refusal is reachable.",
+          "rationale": "D1: the refusal sat after the Continue case, so a kept instance's older history skipped a changed config key and printed green. TestContinueDoesNotSkipForcedDependency covers claim and chain mode, config key and image pin.",
+          "author": "fm/verilex-plan-verdict"
+        }
+      ]
+    },
+    {
+      "path": "internal/stamp/stamp.go",
+      "summary": "The word stamp fingerprints depends.paths.",
+      "annotations": [
+        {
+          "newRange": [173, 182],
+          "summary": "hasher.word adds one 'depends <path>' component per declared depends.paths entry.",
+          "rationale": "D2: a depends.paths hit touched the claim but the stamp ignored the file, so a stale pass proved a broken product. Words without depends.paths keep their stamps, so existing passes stand. A missing file holds the stamp, so the word runs live. TestDependsPathChangeDoesNotSkip makes tally read its defect from lib/mode and expects red twice.",
+          "author": "fm/verilex-plan-verdict"
+        }
+      ]
+    },
+    {
+      "path": "internal/index/plan.go",
+      "summary": "PlanClaims owns selection, skip and run, the shared rerun decision, and the inconclusive case.",
+      "annotations": [
+        {
+          "newRange": [138, 145],
+          "summary": "An empty selection sets Inconclusive instead of letting the run print an evidence-free green.",
+          "rationale": "D3: green means the product works with evidence (AGENTS.md rules 1-2). An unmapped or mistyped diff proves nothing, and red would claim a product failure, so inconclusive (exit 2) is the only honest verdict. Unclaimed names touched words without a claim in every diff.",
+          "author": "fm/verilex-plan-verdict"
+        },
+        {
+          "newRange": [190, 195],
+          "summary": "Rerun comes from runner.Decide on the same chain, so plan and run share one skip decision.",
+          "rationale": "F9: per-claim skip lines read as skipped steps while the run drove the whole chain. Rerun is the runner's own reason, so the plan cannot disagree with the run. A provider step whose pin changed now forces the chain live too.",
+          "author": "fm/verilex-plan-verdict"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/cli.go",
+      "summary": "A chain plan or run given --changed forces a live run on a config key or image pin hit.",
+      "annotations": [
+        {
+          "newRange": [160, 166],
+          "summary": "The chain path sets ForceLive from index.ForcedLive when --changed is given.",
+          "rationale": "Found during the fix round: 'run <chain> --changed config:tally.list' skipped from the ledger and printed green with no warning, the same false green as D1 without --continue. TestChainWithForcedDependencyRunsLive covers it.",
+          "author": "fm/verilex-plan-verdict"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/surface.go",
+      "summary": "Claim plan and run entrypoint: refusals, coverage, the launcher fields and the human plan.",
+      "annotations": [
+        {
+          "newRange": [104, 160],
+          "summary": "attachCoverage gives every selected claim a verdict and never lists a claim that ran as uncovered.",
+          "rationale": "F5 and F6: a selected claim that did not run vanished, and a claim that ran red was also uncovered. TestClaimReportAndRunContract covers both and the quiet not-run lines.",
+          "author": "fm/verilex-plan-verdict"
+        }
+      ]
+    }
+  ]
+}

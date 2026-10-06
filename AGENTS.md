@@ -6,7 +6,7 @@
 4. The biggest saving is work that never runs. A chain is skipped only when every proof stamp matches a green result younger than 7 days and every word is admitted (never provisional or drift-suspect); when in doubt, re-run. On a kept instance (`--continue`) only the prefix its history proves is skipped, and a word that changes state never runs twice on one instance. `plan` and `run` share one skip decision.
 5. Quiet output: verdict first, failures only, evidence by reference.
 6. Go core; words in any language.
-7. No harness machinery inside verilex; resuming a run comes from stamps, the ledger and a kept instance's history.
+7. No harness machinery inside the verilex core; harness code lives only in agent/. Resuming a run comes from stamps, the ledger and a kept instance's history.
 
 Entrypoint: `cmd/verilex/main.go`. Word contract: README.md, "Adding verilex to a project".
 Behavior tests: `go test ./...`.

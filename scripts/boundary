@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Fail if the verilex core imports the agent module or names a specific harness.
+# Skill-directory literals are not harness drivers: the core has to know where
+# project skills live (.cursor/skills, .claude/skills). Those strings are removed
+# before the name scan so they are not reported as a harness.
+# usage: scripts/boundary [ROOT]
+set -euo pipefail
+root="${1:-.}"
+root="$(cd "$root" && pwd)"
+if [ ! -d "$root/cmd" ] && [ ! -d "$root/internal" ]; then
+  echo "boundary: no cmd/ or internal/ under $root" >&2
+  exit 2
+fi
+
+import_hits="$(grep -R -n -E --include='*.go' 'github.com/DereKk8/verilex/agent(/|")' "$root/cmd" "$root/internal" 2>/dev/null || true)"
+if [ -n "$import_hits" ]; then
+  echo "core imports the agent module:"
+  printf '%s\n' "$import_hits"
+  exit 1
+fi
+
+names='claude-code|cursor-agent|opencode|antigravity|rovodev|copilot|grok|acpx|aider|gemini-cli|codex|claude|cursor|pi'
+pattern='(^|[^A-Za-z0-9_])('"$names"')([^A-Za-z0-9_]|$)'
+dirs=()
+[ -d "$root/cmd" ] && dirs+=("$root/cmd")
+[ -d "$root/internal" ] && dirs+=("$root/internal")
+hits=""
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  stripped="$(sed -e 's|\.cursor/skills||g' -e 's|\.claude/skills||g' -e 's|\.agents/skills||g' "$file")"
+  match="$(printf '%s\n' "$stripped" | grep -n -E "$pattern" || true)"
+  if [ -n "$match" ]; then
+    hits+="$file"$'\n'"$match"$'\n'
+  fi
+done < <(find "${dirs[@]}" -name '*.go' -type f)
+
+if [ -n "$hits" ]; then
+  echo "core names a specific harness:"
+  printf '%s\n' "$hits"
+  exit 1
+fi
+echo "boundary: ok"

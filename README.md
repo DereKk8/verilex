@@ -374,6 +374,17 @@ verilex: refused: ticket deep.yaml: effort: "turbo" is not one of minimal, low, 
 
 A run records its resolved ticket in its own run record (`ticket` in `--json` and `run.json`), and a plan prints it in `--json`. verilex only reads the ticket and profiles files and writes nothing shared for a ticket, so concurrent runs with different tickets never conflict. The ticket never changes what runs or what is skipped: it is not part of any proof stamp, and `.verilex/profiles.yaml` is not either.
 
+## Companion launcher
+
+`verilex-agent` is a separate module in `agent/`. The core does not import it and does not start a harness. The launcher reads the run spec through `verilex ticket`, starts the brain that spec names, and prints the JSON from `verilex run`. That JSON is verilex's own verdict, including any missed-claim warning verilex printed. The brain's message is not the verdict. A real harness starts only with `--allow-harness`. A named executable (`--brain`) is how tests and bots supply a brain without one.
+
+```
+go build -o verilex-agent ./agent/cmd/verilex-agent
+verilex-agent --ticket deep.yaml --project . --skill skills/verilex/SKILL.md
+```
+
+Each run gets its own state home, so two runs do not share a mutable instance. Pass the same `--ledger` to keep skip savings. A second run that reuses a home still in use is refused.
+
 ## The word lifecycle
 
 A word is **provisional** until it is admitted. A word that proves a claim is admitted by [onboarding](#onboarding); a word without a claim, by an outside curator (`propose` and `admit`). verilex never edits a verify skill and never calls a model: what only a reader can decide goes back to the calling agent as a decision request.

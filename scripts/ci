@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The blocking checks. CI calls each step; run with no argument to run them all.
-# usage: scripts/ci [lint|mod|vuln|test|build|smoke|canary|canary-guards ...]
+# usage: scripts/ci [lint|mod|vuln|test|build|smoke|boundary|canary|canary-guards ...]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -10,12 +10,15 @@ lint() {
   go vet ./...
   go tool staticcheck ./...
   go tool actionlint
-  shellcheck .cursor/skills/verify-verilex/scripts/* .verilex/frame/* scripts/ci scripts/canary-guards scripts/smoke
+  shellcheck .cursor/skills/verify-verilex/scripts/* .verilex/frame/* scripts/ci scripts/canary-guards scripts/smoke scripts/boundary
+  (cd agent && go vet ./...)
 }
 mod() {
   go mod verify
   go mod tidy -diff || { echo "go.mod or go.sum is stale (run go mod tidy)"; return 1; }
+  (cd agent && go mod tidy -diff) || { echo "agent/go.mod is stale (run go mod tidy in agent)"; return 1; }
 }
+boundary() { scripts/boundary; }
 vuln() { go tool govulncheck ./...; }
 test_() {
   # tests/ builds verilex itself; the instrumented binary writes coverage to GOCOVERDIR, which go test would override
@@ -26,8 +29,12 @@ test_() {
   go test -race -c -o "$cover/tests.test" ./tests
   (cd tests && GOFLAGS="${GOFLAGS:-} -cover" GOCOVERDIR="$cover" "$cover/tests.test")
   go tool covdata percent -i="$cover"
+  (cd agent && go test -race ./...)
 }
-build() { go build -o /dev/null ./cmd/verilex; }
+build() {
+  go build -o /dev/null ./cmd/verilex
+  go build -o /dev/null ./agent/cmd/verilex-agent
+}
 smoke() { scripts/smoke; }
 
 # The verilex build that grades the canary: a reviewed, known-good commit. Never the build under test,
@@ -76,11 +83,11 @@ canary() (
   return 1
 )
 
-steps=("$@"); [ $# -gt 0 ] || steps=(lint mod vuln test build smoke canary canary-guards)
+steps=("$@"); [ $# -gt 0 ] || steps=(lint mod vuln test build smoke boundary canary canary-guards)
 for step in "${steps[@]}"; do
   echo "== $step"
   case "$step" in
-    lint|mod|vuln|build|smoke|canary) "$step" ;;
+    lint|mod|vuln|build|smoke|boundary|canary) "$step" ;;
     test) test_ ;;
     canary-guards) scripts/canary-guards ;;
     *) echo "unknown step: $step" >&2; exit 2 ;;

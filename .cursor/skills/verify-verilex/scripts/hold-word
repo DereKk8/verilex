@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# verify-verilex Helper: install store-held, a probe word that holds its run until released, so several runs are in flight at once.
+# usage: hold-word SESSION [--remove]
+# A run holding in store-held touches $S/hold/<run>; `touch "$S/hold/<run>.go"` releases it.
+set -euo pipefail
+S="${1:?usage: hold-word SESSION [--remove]}"
+[ -x "$S/vx" ] || { echo "hold-word: $S is not a verify-verilex session" >&2; exit 2; }
+word="$S/tally/.verilex/words/store-held"
+if [ "${2:-}" = "--remove" ]; then
+  rm -rf "$word" "$S/hold"
+  echo "hold-word: removed store-held"
+  exit 0
+fi
+mkdir -p "$word" "$S/hold"
+cat > "$word/word.md" <<'WORD'
+---
+word: store-held
+promise: The open store stays in use until the verifier releases its run.
+requires: [store]
+implements: [verify-tally/features/store.md#store-open]
+timeout: 300
+---
+
+A probe word for verify-verilex: it names the store it drove and the owner label it found there.
+WORD
+cat > "$word/run" <<RUN
+#!/bin/sh
+cat >/dev/null
+store=\$(python3 -c 'import json, os; print(json.loads(os.environ["VERILEX_INSTANCE"])["store"])')
+owner=\$(cat "\$store/owner")
+touch "$S/hold/\$VERILEX_RUN"
+while [ ! -e "$S/hold/\$VERILEX_RUN.go" ]; do sleep 0.05; done
+echo "{\"verdict\": \"pass\", \"observation\": \"drove \$store owned by \$owner\"}"
+RUN
+chmod +x "$word/run"
+echo "hold-word: installed store-held; release a run with: touch $S/hold/<run>.go"

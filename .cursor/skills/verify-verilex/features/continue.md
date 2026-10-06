@@ -14,6 +14,8 @@
 - `continue-refuse-unknown` refuses an id that is not a run, or a run that kept no instance.
 - `continue-json` prints the continuing run's full record.
 - `continue-refresh-fail` makes the run inconclusive when `refresh` refuses the kept instance.
+- `continue-refuse-running` refuses a run that is still going.
+- `continue-one-taker` hands a kept instance to exactly one of several concurrent continuing runs.
 
 ## How to get to it (user POV)
 
@@ -39,6 +41,8 @@ Preconditions:
 - **JSON.** Run `"$S/vx" cont-json-keep verilex run --keep 'store-open | item-stored apple'` (run `<K2>`), then `"$S/vx" cont-json verilex run --continue <K2> --keep --json 'store-open | item-stored apple | item-listed apple'`. Exit `0`. Read the `stdout` file in the evidence directory that `vx` printed: `"verdict": "green"`, `"continues"` and `"owner"` are `<K2>`, `store-open` and `item-stored` carry `"relies_on": "<K2>"`, `"rerun"` is `item-listed apple: not run on the kept instance yet`, and `"cleanup": "kept"`. Note the continuing run `<C2>` from `"run"`.
 - **Refresh fails.** Run `echo foreign > "$S/stores/tally-<K2>/owner"`, then `"$S/vx" cont-refresh-fail verilex run --continue <C2> 'store-open | item-stored apple | item-listed apple'`. Output `inconclusive: 0 green, 3 not run, continued <C2>; run <R>` with `inconclusive  refresh: exit 1` and its `frame-refresh` evidence path, exit `2`.
 - **Refresh fails, second view.** Run `"$S/vx" cont-refresh-why cat "$S/home/tally/runs/<R>/frame-refresh/stderr"`: `refresh: ... is not owned by run <K2>; refusing to touch it`. Run `"$S/vx" cont-refresh-runs verilex runs`: `<C2>` shows `cleanup=continued` and `<R>` shows `inconclusive  cleanup=done`, yet `ls "$S/stores"` still lists `tally-<K2>`, because the tally cleanup frame refuses a store it does not own. The session `cleanup` helper removes it and reports `1 store(s) were still alive`.
+
+- **Running and one taker.** Use [parallel.md](parallel.md) `parallel-refuse-running` and `parallel-one-taker`.
 
 ## Gotchas
 

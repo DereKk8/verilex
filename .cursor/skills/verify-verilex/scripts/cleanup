@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# verify-verilex Cleanup: tear down kept instances through verilex, then remove the session. Keeps evidence.
+# verify-verilex Cleanup: tear down kept instances of every state home through verilex, then remove the session. Keeps evidence.
 # usage: cleanup SESSION
 set -uo pipefail
 S="${1:?usage: cleanup SESSION}"
@@ -8,8 +8,12 @@ S="${1:?usage: cleanup SESSION}"
 evidence="$(sed -n 's/^evidence=//p' "$S/session")"
 status=0
 if [ -x "$S/bin/verilex" ] && [ -d "$S/tally" ]; then
-  for run in $(cd "$S/tally" && VERILEX_HOME="$S/home" "$S/bin/verilex" runs 2>/dev/null | awk '$3 == "cleanup=kept" {print $1}'); do
-    "$S/vx" "cleanup-$run" verilex cleanup "$run" || status=1
+  for home in "$S/home" "$S"/instances/*; do
+    [ -d "$home" ] || continue
+    instance=""; [ "$home" = "$S/home" ] || instance="$(basename "$home")"
+    for run in $(cd "$S/tally" && VERILEX_HOME="$home" "$S/bin/verilex" runs 2>/dev/null | awk '$3 == "cleanup=kept" {print $1}'); do
+      VX_INSTANCE="$instance" "$S/vx" "cleanup-$run" verilex cleanup "$run" || status=1
+    done
   done
 fi
 left="$(find "$S/stores" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"

@@ -1,6 +1,6 @@
 ---
 name: verify-verilex
-description: "Drive the verilex CLI as its users do, against a disposable copy of the tally sample product with an isolated VERILEX_HOME; use when proving verilex behavior (run, plan, --continue, run tickets and profiles, words, claims, runs, cleanup, new, propose, admit, gap, check, the three verdicts and quiet output) on a fresh or a given verilex build."
+description: "Drive the verilex CLI as its users do, against a disposable copy of the tally sample product with an isolated VERILEX_HOME; use when proving verilex behavior (run, plan, --continue, run tickets and profiles, words, claims, runs, cleanup, new, propose, admit, gap, check, the three verdicts, quiet output, parallel runs and the shared ledger across stateless instances) on a fresh or a given verilex build."
 ---
 
 # Verify verilex
@@ -25,6 +25,8 @@ With `--bin`, a path that is not an executable file exits `2` and creates no ses
 | `$S/bin/verilex` | a copy of the binary under test (a later rebuild cannot change the session) |
 | `$S/tally/` | the scratch product; every command runs from here |
 | `$S/home/` | `VERILEX_HOME` for the session: runs, ledger, proposals |
+| `$S/instances/<name>/` | `VERILEX_HOME` of a stateless instance, created on first use with `VX_INSTANCE=<name>` |
+| `$S/ledger/` | a shared ledger, when a recipe sets `VERILEX_LEDGER="$S/ledger"` |
 | `$S/stores/` | tally stores (instances); `TALLY_STORES` points here |
 | `$S/config/` | `XDG_CONFIG_HOME` for the session: user profiles live in `$S/config/verilex/profiles.yaml` |
 | `$S/vx` | the session's capture helper (see Drive) |
@@ -47,7 +49,7 @@ Read-only. It prints `doctor: ok` and the binary source, sha256, `vcs.revision` 
 "$S/vx" <label> <any read-only command>      # a second observation
 ```
 
-`vx` runs the command from `$S/tally` with `VERILEX_HOME=$S/home`, `TALLY_STORES=$S/stores`, `XDG_CONFIG_HOME=$S/config` and `$S/bin` first on `PATH`, so `verilex` is the pinned binary. Extra environment passes through: `TALLY_DEFECT=drop-adds "$S/vx" ...`. It prints the command, stdout, stderr (prefixed `stderr| `) and `exit N  evidence: <dir>`, and exits with the command's code. Labels are short kebab-case names for the proof step. Relative paths resolve in `$S/tally`, so pass absolute paths for anything else: verdict files, `--project`, and repository files as `"$PWD/tests/..."`. `vx` adds `$ command` and `exit N` lines to its stdout, so read `<evidence>/NNN-<label>/stdout` when a step needs to parse JSON. Write file commands in recipes as `command rm`, `command cp` and `command mv`: some interactive shells alias them to prompting forms (`rm -I`), which silently skip the change in a non-interactive call. The feature files hold the exact commands per feature.
+`vx` runs the command from `$S/tally` with `VERILEX_HOME=$S/home`, `TALLY_STORES=$S/stores`, `XDG_CONFIG_HOME=$S/config` and `$S/bin` first on `PATH`, so `verilex` is the pinned binary. `VX_INSTANCE=<name> "$S/vx" ...` plays a stateless instance instead: its `VERILEX_HOME` is `$S/instances/<name>`. Concurrent `vx` calls never share an evidence directory, so a recipe may start several with `&`. Extra environment passes through: `TALLY_DEFECT=drop-adds "$S/vx" ...`. It prints the command, stdout, stderr (prefixed `stderr| `) and `exit N  evidence: <dir>`, and exits with the command's code. Labels are short kebab-case names for the proof step. Relative paths resolve in `$S/tally`, so pass absolute paths for anything else: verdict files, `--project`, and repository files as `"$PWD/tests/..."`. `vx` adds `$ command` and `exit N` lines to its stdout, so read `<evidence>/NNN-<label>/stdout` when a step needs to parse JSON. Write file commands in recipes as `command rm`, `command cp` and `command mv`: some interactive shells alias them to prompting forms (`rm -I`), which silently skip the change in a non-interactive call. The feature files hold the exact commands per feature.
 
 ## Evidence
 
@@ -80,6 +82,8 @@ Each feature file lists its own gotchas. These traps cross features:
 - `verilex plan` and `verilex check` exit `0` whatever they report. Read stdout.
 - `verilex runs` sorts by run id, so two runs in the same second are out of time order. Use the id a command printed.
 - Edits to `$S/tally` (words, claims, `config.yaml`, the tally feature map) change stamps, versions or cause drift. Restore them before the next recipe.
+- Concurrent runs need their output in a file (`> "$S/x.out" 2>&1 &`), and only quick runs may be `wait`ed for in the call that started them. Kill a run only through `$S/bin/verilex` in `/proc/<pid>/exe`, never by name.
+- Skipped steps rely on the ledger's own copy of the evidence, under `<ledger>/evidence/`, not on the run's directory.
 - The tally words prove claims, so a feature-map edit causes drift when it changes anything outside code spans in a sub-feature's text (the `Sub-features` entry and the step that opens with its id): an id, a requirement sentence, other prose (dated sentences and run history included) or anything inside a fenced block (backtick or `~~~`, or a block right after the step). Inline command edits and text outside every sub-feature flag nothing. Re-mapping a claim's sources or pinning new prose makes its admitted words drift-suspect until they are admitted again, and another claim covers a sentence only through a word a curator admitted (see [claims.md](features/claims.md)).
 
 ## Helpers
@@ -93,4 +97,7 @@ All live in `.cursor/skills/verify-verilex/scripts/` and are executable.
 | `"$S/vx" LABEL CMD...` | run one command in the session and keep its transcript (wraps `capture SESSION LABEL CMD...`) |
 | `admit-all SESSION` | baseline for skip, plan and `--continue`: two green runs of `store-open \| item-stored apple \| item-listed apple`, then `propose` and `admit` for all three words; prints `admitted words: 3`. Run it once per session. |
 | `snapshot SESSION` | read-only sha256 of every file in `$S/tally`, `$S/tickets` and `$S/config`; diff two snapshots to prove nothing changed |
-| `cleanup SESSION` | tear down kept instances and the session, keep evidence |
+| `hold-word SESSION [--remove]` | install (or remove) `store-held`, a probe word that holds its run until `touch "$S/hold/<run>.go"`, so several runs are in flight at once |
+| `ledger-audit LEDGER HOME...` | audit a ledger against the run records of the homes that wrote it, without verilex code: prints `proven`, `passes`, `lost`, `forged`, `damaged` and `unowned` counts; exits 1 on any lost, forged or damaged pass |
+| `reseal PASS FIELD=VALUE...` | rewrite fields of a ledger pass under the name its new content earns, as another writer of a shared ledger would; prints the new path |
+| `cleanup SESSION` | tear down kept instances of every state home and the session, keep evidence |

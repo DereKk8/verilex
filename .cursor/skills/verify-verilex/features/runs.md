@@ -6,6 +6,7 @@
 
 - `runs-list` prints `<run>  <verdict>  cleanup=<state>  <chain>` for every recorded run.
 - `runs-cleanup-state` shows `done`, `kept`, `continued` and `none`.
+- `runs-liveness` shows a run without a verdict as `running` while its process lives and `died` once it is gone.
 - `runs-refused-absent` shows that refused commands record no run.
 
 ## How to get to it (user POV)
@@ -23,6 +24,7 @@ Preconditions:
 - **Done, second view.** Run `"$S/vx" runs-record python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["cleanup"], r["chain"])' "$S/home/tally/runs/<A>/run.json"`. It prints `green done store-open | item-stored apple`.
 - **Kept and continued.** Use [continue.md](continue.md) `continue-handover`: the kept run shows `cleanup=continued` and the continuing run `cleanup=kept`.
 - **None.** Use [run.md](run.md) `run-skip`: the skipped run shows `cleanup=none`.
+- **Liveness.** Use [parallel.md](parallel.md) `parallel-own-instance` (`running  cleanup=pending` while held) and `parallel-dead-run` (`died`).
 - **Refused absent.** Run `"$S/vx" runs-refused verilex run 'item-stored apple | store-open'`, then `"$S/vx" runs-after-refused verilex runs`. The list is unchanged.
 
 ## Gotchas

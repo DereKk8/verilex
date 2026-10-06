@@ -39,8 +39,13 @@ func TestMain(m *testing.M) {
 
 func product(t *testing.T) string {
 	t.Helper()
-	root := filepath.Join(t.TempDir(), "tally")
-	err := filepath.WalkDir("fixtures/tally", func(path string, d fs.DirEntry, err error) error {
+	// macOS temp dirs sit behind a symlink (/var -> /private/var) and verilex reports resolved paths.
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(base, "tally")
+	err = filepath.WalkDir("fixtures/tally", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

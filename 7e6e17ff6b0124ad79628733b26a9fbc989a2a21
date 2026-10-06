@@ -1,0 +1,249 @@
+{
+  "version": 1,
+  "summary": "Each run owns its instance for its process life, and stateless instances share one ledger of immutable, self-checking passes through VERILEX_LEDGER.",
+  "files": [
+    {
+      "path": "internal/runner/runner.go",
+      "summary": "Gives each run a unique id and a lock it holds while it lives, and refuses a losing --continue before anything starts.",
+      "annotations": [
+        {
+          "newRange": [
+            63,
+            88
+          ],
+          "summary": "reserve creates the run directory with an exclusive Mkdir under a 6-byte random id, and Refused marks a run that must leave no record.",
+          "rationale": "Run ids label the instance a run launches, so two concurrent runs must never share one. The old 3-byte suffix and MkdirAll let two runs in one second collide silently. Six bytes also keep runs from different state homes apart in a shared ledger. Proven by TestConcurrentRunsEachDriveOnlyTheirOwnInstance and verify-verilex parallel.md (session LmBsD0). A collision retry is not exercised by any test, because it needs a forced id.",
+          "author": "fm/verilex-shared-ledger"
+        },
+        {
+          "newRange": [
+            99,
+            103
+          ],
+          "summary": "Execute removes the new run's directory and returns Refused when handOver refuses the kept instance.",
+          "rationale": "Behavior change: a losing --continue used to record an inconclusive run. Because nothing was launched and no word ran, the run now leaves nothing in verilex runs. Proven by TestKeptInstanceGoesToExactlyOneContinuingRun and the parallel.md one-taker step with 6 concurrent --continue runs.",
+          "author": "fm/verilex-shared-ledger"
+        },
+        {
+          "newRange": [
+            135,
+            140
+          ],
+          "summary": "handOver takes the kept run through Claim, so a run that is still going or already continued is refused before any word runs.",
+          "rationale": "Claim reads the record under an exclusive lock, so exactly one concurrent --continue wins. The loser prints either 'was continued by' or 'in use by another verilex command', depending on timing; both are refusals.",
+          "author": "fm/verilex-shared-ledger"
+        },
+        {
+          "newRange": [
+            213,
+            214
+          ],
+          "summary": "entry records the claim version the word proved and the run that launched the instance it drove.",
+          "rationale": "The ledger gate refuses a pass whose Owner differs from its Run, so only a run that launched its own instance can record a pass. A continued run drives another run's instance, so its results stay in history and never become passes.",
+          "author": "fm/verilex-shared-ledger"
+        }
+      ]
+    },
+    {
+      "path": "internal/runner/plan.go",
+      "summary": "Owns hold, the single rule for when a command may read, tear down or take over a recorded run.",
+      "annotations": [
+        {
+          "newRange": [
+            118,
+            165
+          ],
+          "summary": "hold refuses a run that is still pending and busy at once, and waits up to 500 ms for any other short holder.",
+          "rationale": "A busy lock on a pending record means the run's own process lives, so waiting would not help. Readers take a shared lock, so concurrent plans never refuse each other; the first version used exclusive probes and 12 concurrent plans refused each other. A killed process releases its flock, so cleanup still reaches a dead run. Proven by the parallel_test.go tests and parallel.md dead-run and plan steps.",
+          "author": "fm/verilex-shared-ledger"
+        }
+      ]
+    },
+    {
+      "path": "internal/runner/execute.go",
+      "summary": "Replaces the blocking lock with non-blocking shared or exclusive flocks and a liveness probe.",
+      "annotations": [
+        {
+          "newRange": [
+            101,
+            111
+          ],
+          "summary": "locked reports a live run when a shared non-blocking flock on run.lock fails with EWOULDBLOCK.",
+          "rationale": "The probe opens without O_CREATE, so a missing lock file reads as not running and never creates state. A shared probe can also conflict with a brief exclusive holder such as cleanup, so verilex runs may show running for that instant; it never shows died for a live run.",
+          "author": "fm/verilex-shared-ledger"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/cli.go",
+      "summary": "Wires the refusal, the died status and the cleanup claim into the commands.",
+      "annotations": [
+        {
+          "newRange": [
+            72,
+            73
+          ],
+          "summary": "verilex runs shows died for a run with no verdict whose process no longer holds its lock.",
+          "rationale": "Behavior change: a killed run used to show running forever. Proven by TestCleanupTearsDownTheInstanceOfARunThatDied and parallel.md dead-run step (session LmBsD0).",
+          "author": "fm/verilex-shared-ledger"
+        },
+        {
+          "newRange": [
+            342,
+            347
+          ],
+          "summary": "cleanup takes the run through Claim and holds it until teardown ends.",
+          "rationale": "Behavior change: cleanup now refuses a run that is still going, because tearing down a live run's instance would break that run. Cleanup of one run never touches another run's store, which parallel.md cleanup-isolated proves.",
+          "author": "fm/verilex-shared-ledger"
+        }
+      ]
+    },
+    {
+      "path": "internal/runner/record.go",
+      "summary": "Owns where the ledger lives.",
+      "annotations": [
+        {
+          "newRange": [
+            86,
+            97
+          ],
+          "summary": "LedgerDir returns VERILEX_LEDGER joined with the project name, or <state home>/<project>/ledger when unset.",
+          "rationale": "Behavior change: the old runs/ledger.json is no longer read, so the first run after upgrading runs live. The path is made absolute so a relative VERILEX_LEDGER means the same directory for every word's working directory.",
+          "author": "fm/verilex-shared-ledger"
+        }
+      ]
+    },
+    {
+      "path": "internal/ledger/ledger.go",
+      "summary": "Keeps the pass rules shared with --continue history and drops the single-file store.",
+      "annotations": [
+        {
+          "newRange": [
+            67,
+            81
+          ],
+          "summary": "fresh owns the date rules: unreadable, dated in the future, or 7 days old or older.",
+          "rationale": "Both Proves (instance history) and the shared store call fresh, so one owner decides expiry. A future date is refused because a forged young date would otherwise outlive the 7-day limit.",
+          "author": "fm/verilex-shared-ledger"
+        },
+        {
+          "oldRange": [
+            159,
+            231
+          ],
+          "summary": "The single ledger.json store with its lock is removed in favor of store.go.",
+          "rationale": "docs/ledger-placement.md measured that one shared file keeps one entry per step, so two branches overwrite each other's passes even under the lock. The directory store keeps every pass side by side.",
+          "author": "fm/verilex-shared-ledger"
+        }
+      ]
+    },
+    {
+      "path": "internal/ledger/store.go",
+      "summary": "New directory ledger: one immutable file per pass named by stamp and content digest, plus a copy of its evidence.",
+      "annotations": [
+        {
+          "newRange": [
+            103,
+            158
+          ],
+          "summary": "find opens only the passes whose name carries the current stamp, and reads other passes only to explain what changed.",
+          "rationale": "The first version read every pass in a slot, so plan time grew with history. With the stamp filter, plan took 8, 10 and 27 ms with 0, 1,000 and 10,000 other passes (docs/ledger-placement.md). The newest standing pass wins; when none stands, the newest refused pass gives the reason.",
+          "author": "fm/verilex-shared-ledger"
+        },
+        {
+          "newRange": [
+            253,
+            296
+          ],
+          "summary": "add refuses a non-green, unstamped, unowned or wrong-claim-version result and evidence that misses the contract, then copies evidence and publishes the pass.",
+          "rationale": "The reader repeats every check, because another writer of the ledger can bypass add. Evidence is copied before the pass file appears, so a reader never sees a pass without evidence. Proven by TestRecordRefusesWhatMayNotBecomeAPass and ledger.md refusal steps (session TRsE8o). A consistent forgery by someone with write access still stands, as the placement doc states.",
+          "author": "fm/verilex-shared-ledger"
+        },
+        {
+          "newRange": [
+            307,
+            328
+          ],
+          "summary": "prune removes a written slot's passes 7 days old or older, then their evidence, and leaves damaged files alone.",
+          "rationale": "Only slots a run writes are pruned, so recording stays cheap. A reader racing a prune finds the pass gone and runs live, which is the safe side. Proven by the expired-pass test in plan_test.go and ledger.md age-out step.",
+          "author": "fm/verilex-shared-ledger"
+        }
+      ]
+    },
+    {
+      "path": "tests/parallel_test.go",
+      "summary": "Behavior tests for PER-247 on the tally sample product, using a word that holds until released.",
+      "annotations": [
+        {
+          "newRange": [
+            149,
+            195
+          ],
+          "summary": "The one-taker test races concurrent --continue runs and 12 concurrent plans on one kept instance.",
+          "rationale": "Exactly one --continue must win, every loser must leave no run, and every plan must answer. Passed under go test -race ./....",
+          "author": "fm/verilex-shared-ledger"
+        }
+      ]
+    },
+    {
+      "path": "tests/ledger_test.go",
+      "summary": "Behavior tests for PER-248: shared ledger across stateless instances and each refusal a reader makes.",
+      "annotations": [
+        {
+          "newRange": [
+            166,
+            221
+          ],
+          "summary": "Each case tampers with one recorded pass as another writer would, then checks that plan names the refusal.",
+          "rationale": "The cases cover damage, wrong owner, wrong claim version, contract miss, changed evidence and missing evidence. Each was also driven through the CLI in ledger.md, and a mutation run of the gate checks failed these tests.",
+          "author": "fm/verilex-shared-ledger"
+        }
+      ]
+    },
+    {
+      "path": "docs/ledger-placement.md",
+      "summary": "Decision record for where the shared ledger lives, with the measurements PER-248 asked for.",
+      "annotations": [
+        {
+          "newRange": [
+            1,
+            86
+          ],
+          "summary": "The record chooses a directory of immutable passes placed by VERILEX_LEDGER, rejects a single in-repo file and defers a service.",
+          "rationale": "All figures come from docs/ledger-placement/measure on one Linux machine with no network, so a hosted git remote or service adds a round trip that is not measured. The trust table shows a consistent forgery stands, so the trust boundary is write access in every placement.",
+          "author": "fm/verilex-shared-ledger"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/scripts/ledger-audit",
+      "summary": "Independent auditor that matches every pass in a ledger against the run records that should have produced it.",
+      "annotations": [
+        {
+          "newRange": [
+            1,
+            71
+          ],
+          "summary": "ledger-audit counts proven steps, passes, lost, forged, damaged and unowned entries without importing verilex code.",
+          "rationale": "Because it re-derives digests and ownership on its own, it proves 'no lost or forged entry' without trusting the code under test. It counts a pruned pass as lost, so run it before any age-out step. The script starts under bash and runs its Python from a heredoc, so the shellcheck step of scripts/ci lint covers it; reseal follows the same pattern.",
+          "author": "fm/verilex-shared-ledger"
+        }
+      ]
+    },
+    {
+      "path": "tests/run_test.go",
+      "summary": "Test helper that starts verilex in the background, built on main's command helper.",
+      "annotations": [
+        {
+          "newRange": [
+            85,
+            107
+          ],
+          "summary": "start builds its command through command(), so background runs get the same isolated state, stores and config home as verilex().",
+          "rationale": "Rebasing onto run tickets (#10) brought command(), which owns the test environment including XDG_CONFIG_HOME. start reuses it instead of copying the environment rules, so parallel tests never read the operator's profiles. Verified by go test -race ./... and scripts/ci test.",
+          "author": "fm/verilex-shared-ledger"
+        }
+      ]
+    }
+  ]
+}

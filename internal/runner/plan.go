@@ -58,9 +58,9 @@ func (p Plan) Skipped() bool { return p.Rerun == "" }
 // (ledger.Continue). It runs nothing. An error refuses the chain before anything starts.
 func Decide(project dictionary.Project, steps []dictionary.Step, opts Options) (Plan, error) {
 	p := Plan{Continues: opts.Continue, Ticket: opts.Ticket, stamps: stamp.Chain(project, steps)}
-	labels := make([]string, len(steps))
+	labels, claims := make([]string, len(steps)), make([]string, len(steps))
 	for i, step := range steps {
-		labels[i] = step.Label()
+		labels[i], claims[i] = step.Label(), step.Word.Proves()
 	}
 	var err error
 	switch {
@@ -78,7 +78,7 @@ func Decide(project dictionary.Project, steps []dictionary.Step, opts Options) (
 	case opts.Fresh:
 		p.Rerun = "--fresh asked for a live run"
 	default:
-		if p.entries, p.Rerun = ledger.At(RunsDir(project)).Reuse(labels, p.stamps); p.Rerun != "" {
+		if p.entries, p.Rerun = ledger.At(LedgerDir(project)).Reuse(labels, claims, p.stamps); p.Rerun != "" {
 			p.entries = nil
 		}
 	}

@@ -48,34 +48,29 @@ func skips(id string, labels ...string) string {
 	return text
 }
 
-// age rewrites when every result in a JSON file was recorded: the ledger's entries, or a kept
-// run's instance history.
+// age rewrites when every result was recorded: each pass in a ledger directory, resealed as a
+// writer that bypasses verilex would, or the history in a kept run's run.json.
 func age(t *testing.T, path string, by time.Duration) {
 	t.Helper()
+	at := time.Now().Add(-by).UTC().Format(time.RFC3339)
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		for _, p := range passes(t, path) {
+			reseal(t, p, func(fields map[string]any) { fields["recorded"] = at })
+		}
+		return
+	}
 	var doc map[string]any
 	if err := json.Unmarshal([]byte(read(t, path)), &doc); err != nil {
 		t.Fatal(err)
 	}
-	at := time.Now().Add(-by).UTC().Format(time.RFC3339)
-	switch entries := doc["entries"].(type) {
-	case map[string]any:
-		for _, entry := range entries {
-			entry.(map[string]any)["recorded"] = at
-		}
-	default:
-		for _, entry := range doc["history"].([]any) {
-			entry.(map[string]any)["recorded"] = at
-		}
+	for _, entry := range doc["history"].([]any) {
+		entry.(map[string]any)["recorded"] = at
 	}
 	data, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
 	write(t, path, string(data), 0600)
-}
-
-func ledgerPath(root string) string {
-	return filepath.Join(filepath.Dir(root), "state", "tally", "runs", "ledger.json")
 }
 
 // Rule: plan runs the same skip decision as run and runs nothing. A change no stamp covers, such
@@ -122,16 +117,31 @@ func TestWordScriptChangeRunsLive(t *testing.T) {
 func TestExpiredResultRunsLive(t *testing.T) {
 	root := curated(t)
 	first := green(t, root, nil, chain)
-	age(t, ledgerPath(root), 6*24*time.Hour)
+	age(t, ledgerDir(root), 6*24*time.Hour)
 	equal(t, plan(t, root, chain).stdout, "plan: skip 3, run 0\n"+skips(first.Run, "store-open", "item-stored apple", "item-listed apple"))
 
-	age(t, ledgerPath(root), 8*24*time.Hour)
+	age(t, ledgerDir(root), 8*24*time.Hour)
+	expired := passes(t, ledgerDir(root))
 	reason := "store-open: the green result from run " + first.Run + " expired (8d old; results stand 7d)"
 	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; "+reason+"\n")
 	record := green(t, root, nil, chain)
 	equal(t, record.Rerun, reason)
 	ranLive(t, record)
 	equal(t, green(t, root, nil, chain).Skipped, true)
+	// Recording the new passes dropped the expired ones and their evidence.
+	runsOf := []string{}
+	for _, p := range passes(t, ledgerDir(root)) {
+		runsOf = append(runsOf, p.fields["run"].(string))
+	}
+	equal(t, runsOf, []string{record.Run, record.Run, record.Run})
+	for _, p := range expired {
+		if _, err := os.Stat(p.path); !os.IsNotExist(err) {
+			t.Fatalf("expired pass %s is still on record: %v", p.path, err)
+		}
+		if _, err := os.Stat(p.evidence()); !os.IsNotExist(err) {
+			t.Fatalf("evidence of expired pass %s is still on record: %v", p.path, err)
+		}
+	}
 
 	// An instance kept longer than that proves nothing either, and its effects stay in place,
 	// so continuing it is refused.

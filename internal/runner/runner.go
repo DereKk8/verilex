@@ -121,7 +121,7 @@ func (r *Run) Execute(p Plan, opts Options) (Record, error) {
 		return r.record, saveErr
 	}
 	// A ledger that misses a result only costs a later re-run, so a failed write never changes the verdict.
-	_ = ledger.At(RunsDir(r.project)).Record(r.proven(p.stamps))
+	_ = ledger.At(LedgerDir(r.project)).Record(r.proven(p.stamps))
 	return r.record, err
 }
 
@@ -210,8 +210,8 @@ func (r *Run) settle(before []stamp.Stamp, base int) {
 
 func (r *Run) entry(i int, word WordRecord, s stamp.Stamp) ledger.Entry {
 	return ledger.Entry{
-		Label: r.steps[i].Label(), Verdict: word.Verdict, Stamp: s.Digest, Components: s.Components,
-		Run: r.record.Run, Evidence: word.Evidence, Observation: word.Observation, Recorded: now(),
+		Label: r.steps[i].Label(), Verdict: word.Verdict, Stamp: s.Digest, Components: s.Components, Claim: r.steps[i].Word.Proves(),
+		Run: r.record.Run, Owner: r.record.owner(), Evidence: word.Evidence, Observation: word.Observation, Recorded: now(),
 	}
 }
 

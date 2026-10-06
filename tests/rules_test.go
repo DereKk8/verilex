@@ -177,7 +177,11 @@ func TestUnchangedChainIsSkippedCitingThePastRun(t *testing.T) {
 	equal(t, second.Cleanup, "none")
 	for i, word := range second.Words {
 		equal(t, word.ReliesOn, first.Run)
-		equal(t, word.Evidence, first.Words[i].Evidence)
+		// The ledger keeps its own copy of the evidence each pass relies on.
+		if !strings.HasPrefix(word.Evidence, ledgerDir(root)+string(filepath.Separator)) {
+			t.Fatalf("%s relies on evidence outside the ledger: %s", word.Word, word.Evidence)
+		}
+		equal(t, read(t, filepath.Join(word.Evidence, "stdout")), read(t, filepath.Join(first.Words[i].Evidence, "stdout")))
 		equal(t, word.Stamp, first.Words[i].Stamp)
 	}
 	if _, err := os.Stat(filepath.Join(second.Dir, "frame-launch")); !os.IsNotExist(err) {
@@ -246,19 +250,15 @@ func TestAnyChangedStampComponentForcesRerun(t *testing.T) {
 		{"longer chain", func(t *testing.T, root string) map[string]string { return nil },
 			chain + " | item-stored pear", "item-stored pear: no green result on record"},
 		{"evidence gone", func(t *testing.T, root string) map[string]string {
-			runs, _ := filepath.Glob(filepath.Join(filepath.Dir(root), "state", "tally", "runs", "*", "02-item-stored"))
-			if len(runs) != 1 {
-				t.Fatalf("evidence: %v", runs)
-			}
-			if err := os.RemoveAll(runs[0]); err != nil {
+			if err := os.RemoveAll(passFor(t, ledgerDir(root), "item-stored apple").evidence()); err != nil {
 				t.Fatal(err)
 			}
 			return nil
 		}, chain, "item-stored apple: evidence from run %s is gone"},
-		{"unreadable ledger", func(t *testing.T, root string) map[string]string {
-			write(t, filepath.Join(filepath.Dir(root), "state", "tally", "runs", "ledger.json"), "{not json", 0600)
+		{"damaged pass", func(t *testing.T, root string) map[string]string {
+			write(t, passFor(t, ledgerDir(root), "store-open").path, "{not json", 0600)
 			return nil
-		}, chain, "the ledger is unreadable: invalid character 'n' looking for beginning of object key string"},
+		}, chain, "store-open: a pass on record is damaged: its content does not match its digest"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -316,7 +316,7 @@ func TestUpstreamRerunForcesDependentRerun(t *testing.T) {
 	t.Run("upstream re-runs with an unchanged stamp", func(t *testing.T) {
 		root := product(t)
 		first := green(t, root, nil, chain)
-		if err := os.RemoveAll(first.Words[0].Evidence); err != nil {
+		if err := os.RemoveAll(passFor(t, ledgerDir(root), "store-open").evidence()); err != nil {
 			t.Fatal(err)
 		}
 		_, record := runJSON(t, root, nil, chain)

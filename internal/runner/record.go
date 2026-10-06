@@ -83,6 +83,18 @@ func RunsDir(project dictionary.Project) string {
 	return filepath.Join(StateHome(), project.Name, "runs")
 }
 
+// LedgerDir is where the project's ledger of passes lives: under VERILEX_LEDGER when it is set,
+// so every instance pointed at one directory shares one ledger, and under the state home otherwise.
+func LedgerDir(project dictionary.Project) string {
+	if shared := os.Getenv("VERILEX_LEDGER"); shared != "" {
+		if abs, err := filepath.Abs(shared); err == nil {
+			shared = abs
+		}
+		return filepath.Join(shared, project.Name)
+	}
+	return filepath.Join(StateHome(), project.Name, "ledger")
+}
+
 func Save(dir string, record *Record) error {
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {

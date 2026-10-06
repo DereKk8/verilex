@@ -486,7 +486,7 @@ func splitShell(s string) ([]string, error) {
 		}
 		if c == '\\' && quote != '\'' {
 			if i+1 == len(runes) {
-				return nil, fmt.Errorf("No escaped character")
+				return nil, fmt.Errorf("no escaped character")
 			}
 			i++
 			next := runes[i]
@@ -522,7 +522,7 @@ func splitShell(s string) ([]string, error) {
 		active = true
 	}
 	if quote != 0 {
-		return nil, fmt.Errorf("No closing quotation")
+		return nil, fmt.Errorf("no closing quotation")
 	}
 	if active {
 		result = append(result, token.String())

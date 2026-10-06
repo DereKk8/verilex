@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# The blocking checks. CI calls each step; run with no argument to run them all.
+# usage: scripts/ci [lint|mod|vuln|test|build|smoke ...]
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+lint() {
+  unformatted=$(gofmt -l .)
+  [ -z "$unformatted" ] || { echo "unformatted files (run gofmt -w .):"; echo "$unformatted"; return 1; }
+  go vet ./...
+  go tool staticcheck ./...
+  go tool actionlint
+  shellcheck .cursor/skills/verify-verilex/scripts/* scripts/ci scripts/smoke
+}
+mod() {
+  go mod verify
+  go mod tidy -diff || { echo "go.mod or go.sum is stale (run go mod tidy)"; return 1; }
+}
+vuln() { go tool govulncheck ./...; }
+test_() {
+  # tests/ builds verilex itself; the instrumented binary writes coverage to GOCOVERDIR, which go test would override
+  cover="${COVER_OUT:-$(mktemp -d)}"
+  rm -rf "$cover" && mkdir -p "$cover"
+  # shellcheck disable=SC2046
+  go test -race $(go list ./... | grep -v '/tests$')
+  go test -race -c -o "$cover/tests.test" ./tests
+  (cd tests && GOFLAGS="${GOFLAGS:-} -cover" GOCOVERDIR="$cover" "$cover/tests.test")
+  go tool covdata percent -i="$cover"
+}
+build() { go build -o /dev/null ./cmd/verilex; }
+smoke() { scripts/smoke; }
+
+steps=("$@"); [ $# -gt 0 ] || steps=(lint mod vuln test build smoke)
+for step in "${steps[@]}"; do
+  echo "== $step"
+  case "$step" in
+    lint|mod|vuln|build|smoke) "$step" ;;
+    test) test_ ;;
+    *) echo "unknown step: $step" >&2; exit 2 ;;
+  esac
+done

@@ -4,15 +4,39 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: "17 5 * * *"
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Every step is a scripts/ci step: run `scripts/ci` locally to reproduce the whole blocking set.
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: scripts/ci lint mod
+
+  vuln:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: scripts/ci vuln
+
+  # Keeps the name `test` so the existing required check still matches until the ruleset requires `ci`.
   test:
     name: test
     runs-on: ubuntu-latest
@@ -22,10 +46,53 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: gofmt
+      - run: scripts/ci test build smoke | tee ci.log
+        shell: bash
+      - name: coverage
+        if: always()
         run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then echo "unformatted files:"; echo "$unformatted"; exit 1; fi
-      - run: go vet ./...
-      - run: go test -race ./...
-      - run: go build -o /dev/null ./cmd/verilex
+          { echo '### Coverage (black-box tests, per package)'; echo '```'; grep 'coverage:' ci.log | sed 's|github.com/DereKk8/verilex/||' || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  test-macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: scripts/ci test build
+
+  # The only required check: passes only when every job above succeeded.
+  ci:
+    if: always()
+    needs: [lint, vuln, test, test-macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || exit 1; done
+
+  # A red main or nightly run opens one tracking issue; later red runs add a comment.
+  notify:
+    if: failure() && github.event_name != 'pull_request'
+    needs: [ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          title="ci red on main"
+          body="ci failed on main ($EVENT, $SHA): $RUN_URL"
+          n=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$n" ]; then gh issue comment "$n" --body "$body"; else gh issue create --title "$title" --body "$body"; fi

@@ -58,7 +58,7 @@ func New(project dictionary.Project, chain string, steps []dictionary.Step) (*Ru
 // instance launches nothing; otherwise the chain runs inside the trust frame, on a fresh instance
 // or on the kept one the plan continues, and the steps the plan skips reuse their proof.
 func (r *Run) Execute(p Plan, opts Options) (Record, error) {
-	r.record.Rerun, r.keep = p.Rerun, opts.Keep
+	r.record.Rerun, r.record.Ticket, r.keep = p.Rerun, opts.Ticket, opts.Keep
 	if p.kept == nil && p.Skipped() {
 		return r.reuse(p.entries, p.stamps)
 	}

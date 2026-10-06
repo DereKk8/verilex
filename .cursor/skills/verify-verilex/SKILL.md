@@ -1,6 +1,6 @@
 ---
 name: verify-verilex
-description: "Drive the verilex CLI as its users do, against a disposable copy of the tally sample product with an isolated VERILEX_HOME; use when proving verilex behavior (run, plan, --continue, words, claims, runs, cleanup, new, propose, admit, gap, check, the three verdicts and quiet output) on a fresh or a given verilex build."
+description: "Drive the verilex CLI as its users do, against a disposable copy of the tally sample product with an isolated VERILEX_HOME; use when proving verilex behavior (run, plan, --continue, run tickets and profiles, words, claims, runs, cleanup, new, propose, admit, gap, check, the three verdicts and quiet output) on a fresh or a given verilex build."
 ---
 
 # Verify verilex
@@ -26,6 +26,7 @@ With `--bin`, a path that is not an executable file exits `2` and creates no ses
 | `$S/tally/` | the scratch product; every command runs from here |
 | `$S/home/` | `VERILEX_HOME` for the session: runs, ledger, proposals |
 | `$S/stores/` | tally stores (instances); `TALLY_STORES` points here |
+| `$S/config/` | `XDG_CONFIG_HOME` for the session: user profiles live in `$S/config/verilex/profiles.yaml` |
 | `$S/vx` | the session's capture helper (see Drive) |
 | `$S/session`, `$S/owner` | session identity, binary source and sha256 |
 
@@ -37,7 +38,7 @@ Launch builds no server: verilex is a short-lived CLI, so each command is its ow
 .cursor/skills/verify-verilex/scripts/doctor "$S"
 ```
 
-Read-only. It prints `doctor: ok` and the binary source, sha256, `vcs.revision` and `vcs.modified`, kept store count and evidence path. It prints `doctor: FAIL <reason>` and exits 1 when the session is not ours, the binary changed since launch or does not answer `--help`, `VERILEX_HOME` is not inside the session, the product is not tally, `python3` is missing, or files under `~/.local/state/verilex/tally` changed since launch (something escaped `VERILEX_HOME`). Run it first, and again whenever a result looks off. Never drive a session the doctor fails or that this run did not launch.
+Read-only. It prints `doctor: ok` and the binary source, sha256, `vcs.revision` and `vcs.modified`, kept store count and evidence path. It prints `doctor: FAIL <reason>` and exits 1 when the session is not ours, the binary changed since launch or does not answer `--help`, `VERILEX_HOME` is not inside the session, `$S/config` is missing, the product is not tally, `python3` is missing, or files under `~/.local/state/verilex/tally` changed since launch (something escaped `VERILEX_HOME`). Run it first, and again whenever a result looks off. Never drive a session the doctor fails or that this run did not launch.
 
 ## Drive
 
@@ -46,7 +47,7 @@ Read-only. It prints `doctor: ok` and the binary source, sha256, `vcs.revision` 
 "$S/vx" <label> <any read-only command>      # a second observation
 ```
 
-`vx` runs the command from `$S/tally` with `VERILEX_HOME=$S/home`, `TALLY_STORES=$S/stores` and `$S/bin` first on `PATH`, so `verilex` is the pinned binary. Extra environment passes through: `TALLY_DEFECT=drop-adds "$S/vx" ...`. It prints the command, stdout, stderr (prefixed `stderr| `) and `exit N  evidence: <dir>`, and exits with the command's code. Labels are short kebab-case names for the proof step. Relative paths resolve in `$S/tally`, so pass absolute paths for anything else: verdict files, `--project`, and repository files as `"$PWD/tests/..."`. `vx` adds `$ command` and `exit N` lines to its stdout, so read `<evidence>/NNN-<label>/stdout` when a step needs to parse JSON. Write file commands in recipes as `command rm`, `command cp` and `command mv`: some interactive shells alias them to prompting forms (`rm -I`), which silently skip the change in a non-interactive call. The feature files hold the exact commands per feature.
+`vx` runs the command from `$S/tally` with `VERILEX_HOME=$S/home`, `TALLY_STORES=$S/stores`, `XDG_CONFIG_HOME=$S/config` and `$S/bin` first on `PATH`, so `verilex` is the pinned binary. Extra environment passes through: `TALLY_DEFECT=drop-adds "$S/vx" ...`. It prints the command, stdout, stderr (prefixed `stderr| `) and `exit N  evidence: <dir>`, and exits with the command's code. Labels are short kebab-case names for the proof step. Relative paths resolve in `$S/tally`, so pass absolute paths for anything else: verdict files, `--project`, and repository files as `"$PWD/tests/..."`. `vx` adds `$ command` and `exit N` lines to its stdout, so read `<evidence>/NNN-<label>/stdout` when a step needs to parse JSON. Write file commands in recipes as `command rm`, `command cp` and `command mv`: some interactive shells alias them to prompting forms (`rm -I`), which silently skip the change in a non-interactive call. The feature files hold the exact commands per feature.
 
 ## Evidence
 

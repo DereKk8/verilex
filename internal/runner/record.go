@@ -8,6 +8,7 @@ import (
 
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/ledger"
+	"github.com/DereKk8/verilex/internal/ticket"
 	"github.com/DereKk8/verilex/internal/verdict"
 )
 
@@ -48,6 +49,8 @@ type Record struct {
 	Dir      string `json:"dir"`
 	Started  string `json:"started"`
 	Instance any    `json:"instance"`
+	// Ticket is the resolved run ticket this run was given, if any.
+	Ticket *ticket.Ticket `json:"ticket,omitempty"`
 	// Owner is the run that launched the instance, when this run continues another's.
 	Owner string `json:"owner,omitempty"`
 	// Continues names the kept run whose instance this run drives; ContinuedBy, on that kept

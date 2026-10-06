@@ -9,6 +9,7 @@ import (
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/ledger"
 	"github.com/DereKk8/verilex/internal/stamp"
+	"github.com/DereKk8/verilex/internal/ticket"
 )
 
 // Options shape one run.
@@ -20,6 +21,9 @@ type Options struct {
 	Fresh bool
 	// Continue names a kept run whose instance this run drives instead of launching its own.
 	Continue string
+	// Ticket is the run's resolved ticket, carried into the plan and the run record. It never
+	// changes what runs or what is skipped.
+	Ticket *ticket.Ticket
 }
 
 // Plan is the skip decision for one chain: `verilex plan` prints it and `verilex run` carries it
@@ -31,6 +35,8 @@ type Plan struct {
 	Skip []Skip `json:"steps"`
 	// Rerun is the first reason a step runs live; empty when every step is skipped.
 	Rerun string `json:"rerun,omitempty"`
+	// Ticket is the resolved run ticket, when one was given.
+	Ticket *ticket.Ticket `json:"ticket,omitempty"`
 
 	stamps  []stamp.Stamp
 	entries []ledger.Entry
@@ -51,7 +57,7 @@ func (p Plan) Skipped() bool { return p.Rerun == "" }
 // nothing (ledger.Reuse); on a kept instance it skips the prefix that instance already proves
 // (ledger.Continue). It runs nothing. An error refuses the chain before anything starts.
 func Decide(project dictionary.Project, steps []dictionary.Step, opts Options) (Plan, error) {
-	p := Plan{Continues: opts.Continue, stamps: stamp.Chain(project, steps)}
+	p := Plan{Continues: opts.Continue, Ticket: opts.Ticket, stamps: stamp.Chain(project, steps)}
 	labels := make([]string, len(steps))
 	for i, step := range steps {
 		labels[i] = step.Label()

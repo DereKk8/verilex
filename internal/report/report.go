@@ -4,10 +4,12 @@ package report
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/runner"
+	"github.com/DereKk8/verilex/internal/ticket"
 	"github.com/DereKk8/verilex/internal/verdict"
 )
 
@@ -175,4 +177,26 @@ func oneLine(text string) string {
 		text = string(runes[:maxCause-1]) + "…"
 	}
 	return text
+}
+
+// Ticket prints a resolved run ticket, one field per line, each resolved field with the level
+// that set it.
+func Ticket(t ticket.Ticket, out io.Writer) {
+	tokens := ""
+	if t.TokenBudget > 0 {
+		tokens = strconv.Itoa(t.TokenBudget)
+	}
+	for _, field := range []struct{ name, value string }{
+		{"intent", oneLine(t.Intent)}, {"diff", t.Diff}, {"profile", t.Profile}, {"harness", t.Harness}, {"model", t.Model},
+		{"effort", t.Effort}, {"token_budget", tokens}, {"time_budget", t.TimeBudget},
+	} {
+		if field.value == "" {
+			continue
+		}
+		fmt.Fprintf(out, "%s: %s", field.name, field.value)
+		if from := t.From[field.name]; from != "" {
+			fmt.Fprintf(out, "  from %s", from)
+		}
+		fmt.Fprintln(out)
+	}
 }

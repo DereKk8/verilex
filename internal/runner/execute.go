@@ -3,6 +3,7 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -71,14 +72,21 @@ func execute(argv []string, evidence string, env []string, timeout int, stdin st
 	return code, nil
 }
 
-// lock holds an exclusive advisory lock on path until the returned function runs.
-func lock(path string) (func(), error) {
+// errBusy means another verilex process holds a run's lock.
+var errBusy = errors.New("busy")
+
+// tryLock takes an exclusive advisory lock on path without waiting; it returns errBusy while
+// another process holds it. The kernel drops the lock when the holder's process ends.
+func tryLock(path string) (func(), error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}
-	if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, errBusy
+		}
 		return nil, err
 	}
 	return func() { f.Close() }, nil

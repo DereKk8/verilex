@@ -32,7 +32,7 @@ The core is Go; frame steps and words can use any language installed on the prod
 | `verilex words` | Lists the dictionary with each word's promise, claim, `requires`, `provides` and lifecycle status |
 | `verilex claims [--json]` | Lists each claim's current version, the words that prove it, and why it needs review |
 | `verilex runs` | Lists this project's runs and whether each instance was cleaned up |
-| `verilex cleanup <run>` | Tears down an instance kept with `--keep` |
+| `verilex cleanup <run>` | Tears down an instance kept with `--keep`, or left behind by a run whose process died; refuses a run that is still going |
 | `verilex new <word> --implements <ref>` | Scaffolds a provisional word that implements a feature-map section |
 | `verilex propose <word>` | Builds a curator packet for a word used in at least two runs |
 | `verilex admit <word> --verdict <file>` | Records an outside curator's `admit` or `reject` verdict |
@@ -57,9 +57,9 @@ A word reports `pass`, `fail` or `blocked` (see the word contract); verilex judg
 
 ```
 $ verilex run 'store-open | item-stored apple | item-listed apple'
-red: 1 green, 1 red, 1 not run; run 1767225600-a1b2c3
+red: 1 green, 1 red, 1 not run; run 1767225600-a1b2c3d4e5f6
   red  item-stored apple: tally said 'added apple' but store.json lacks apple
-    evidence: ~/.local/state/verilex/tally/runs/1767225600-a1b2c3/02-item-stored
+    evidence: ~/.local/state/verilex/tally/runs/1767225600-a1b2c3d4e5f6/02-item-stored
     verify skill: verify-tally/features/items.md#item-add
 ```
 
@@ -92,6 +92,14 @@ Every run goes through the project's frame, and no word can opt out of it:
    Workstation and environment trouble is `inconclusive`, never `red`.
 5. **Cleanup** always runs, tears down only what the run started, and verilex then confirms the evidence survived.
 
+### Parallel runs
+
+Many runs may target one product at once, from one machine or from many stateless instances, and no two of them share a mutable instance. Each run gets an id no other run holds (`<epoch>-<12 hex digits>`) and passes it to every frame step and word as `VERILEX_RUN`. Launch labels the instance it creates with that id, the doctor refuses an instance that does not carry it before any word runs, and cleanup removes only what carries it. A run holds its instance for as long as its process lives:
+
+- `verilex cleanup <run>` and `verilex run --continue <run>` refuse a run that is still going, before anything starts: `verilex: refused: <run> is still running and owns its instance; wait until it finishes`.
+- A kept instance goes to exactly one continuing run. Every other attempt to take it over is refused and records no run.
+- A run whose process died holds nothing, so `verilex cleanup <run>` tears down the instance it left behind.
+
 ## Proof stamps and skipping
 
 Every word result carries a proof stamp: a fingerprint of everything the result depended on.
@@ -107,7 +115,7 @@ After a run that is not inconclusive, verilex records each green word in a ledge
 
 ```
 $ verilex run 'store-open | item-stored apple | item-listed apple'
-green: 3 green, skipped: stamps match run 1767225600-a1b2c3; run 1767225900-d4e5f6
+green: 3 green, skipped: stamps match run 1767225600-a1b2c3d4e5f6; run 1767225900-d4e5f6a7b8c9
 ```
 
 Anything missing or unclear runs the chain live: a word without `inputs` or with an empty `inputs` list, an input that is missing, an unreadable ledger, evidence that is gone, a green result 7 days old or older, a stamp that changed while the run was going. A **provisional** or **drift-suspect** word, or one whose admission record cannot be read, also runs the chain live, however well its stamp matches: its results are still recorded, but none is trusted until the word is admitted and unchanged. Skipping is all or nothing, because each run starts from a fresh instance: a word that has to run needs the effects of every word before it, and every word after it depends on its new result. `--keep` and `--fresh` always run live. `--json` names the first reason a chain ran live in `rerun`, for example `item-listed apple: provisional; only admitted words are skipped`.
@@ -121,9 +129,9 @@ A stamp covers only what it lists. A word that reads anything else (another file
 ```
 $ verilex plan 'store-open | item-stored apple | item-listed apple'
 plan: skip 3, run 0
-  skip  store-open  relies on run 1767225600-a1b2c3
-  skip  item-stored apple  relies on run 1767225600-a1b2c3
-  skip  item-listed apple  relies on run 1767225600-a1b2c3
+  skip  store-open  relies on run 1767225600-a1b2c3d4e5f6
+  skip  item-stored apple  relies on run 1767225600-a1b2c3d4e5f6
+  skip  item-listed apple  relies on run 1767225600-a1b2c3d4e5f6
 
 $ verilex plan 'store-open | item-stored apple | item-listed apple'
 plan: skip 0, run 3; item-listed apple: word changed
@@ -140,16 +148,16 @@ A refused chain is refused by `plan` too, with the same message and exit code `2
 3. It runs the remaining words and cleans the instance up, unless `--keep` is given again.
 
 ```
-$ verilex run --continue 1767225600-a1b2c3 --keep 'store-open | item-stored apple | item-listed apple'
-green: 3 green, continued 1767225600-a1b2c3, 2 skipped: proven on its instance by run 1767225600-a1b2c3; run 1767225900-d4e5f6
-kept: tear down with `verilex cleanup 1767225900-d4e5f6`
+$ verilex run --continue 1767225600-a1b2c3d4e5f6 --keep 'store-open | item-stored apple | item-listed apple'
+green: 3 green, continued 1767225600-a1b2c3d4e5f6, 2 skipped: proven on its instance by run 1767225600-a1b2c3d4e5f6; run 1767225900-d4e5f6a7b8c9
+kept: tear down with `verilex cleanup 1767225900-d4e5f6a7b8c9`
 ```
 
 A word that changes the instance is not safe to run twice, so `--continue` never runs one on top of effects the chain before it would not have built. When the first word that must run live would follow history that still holds a word that changes state (because that word itself changed, is held, or its result expired), `--continue` refuses before anything starts and asks for a fresh run:
 
 ```
-$ verilex run --continue 1767225600-a1b2c3 'store-open | item-stored apple | item-listed apple'
-verilex: refused: item-stored apple: word changed; the kept instance already holds the effects of item-stored apple from run 1767225600-a1b2c3, and a word that changes state never runs twice or out of order on one instance: run without --continue
+$ verilex run --continue 1767225600-a1b2c3d4e5f6 'store-open | item-stored apple | item-listed apple'
+verilex: refused: item-stored apple: word changed; the kept instance already holds the effects of item-stored apple from run 1767225600-a1b2c3d4e5f6, and a word that changes state never runs twice or out of order on one instance: run without --continue
 ```
 
 Only words whose contract declares `read_only: true` are passed over in that history: they observe the instance and never change it, so a changed read-only word runs again on the kept instance, as above. A change to the frame (including `refresh` itself), to shared word files, to verilex or to an input changes every stamp, so it always ends in that refusal. `--fresh` cannot be combined with `--continue`.

@@ -31,6 +31,9 @@ func Human(record runner.Record, out io.Writer) {
 			fmt.Fprintf(out, ", %d skipped: proven on its instance by %s", n, reliedOn(record))
 		}
 	}
+	if record.Warning != "" {
+		fmt.Fprintf(out, ", with %s", record.Warning)
+	}
 	fmt.Fprintf(out, "; run %s\n", record.Run)
 	labels := []string{}
 	step := func(v verdict.Verdict, label, cause, evidence string) {
@@ -38,7 +41,10 @@ func Human(record runner.Record, out io.Writer) {
 		if cause = OneLine(cause); cause != "" {
 			label += ": " + cause
 		}
-		fmt.Fprintf(out, "  %s  %s\n    evidence: %s\n", v, label, evidence)
+		fmt.Fprintf(out, "  %s  %s\n", v, label)
+		if evidence != "" {
+			fmt.Fprintf(out, "    evidence: %s\n", evidence)
+		}
 	}
 	frames := map[string]runner.Frame{}
 	for _, f := range record.Frame {
@@ -54,20 +60,41 @@ func Human(record runner.Record, out io.Writer) {
 	frame("launch")
 	frame("refresh")
 	frame("doctor")
-	for _, word := range record.Words {
-		if word.Verdict == verdict.Green {
-			continue
+	claimed := false
+	if len(record.Claims) > 0 {
+		for _, claim := range record.Claims {
+			if claim.Verdict == verdict.Green {
+				continue
+			}
+			claimed = true
+			step(claim.Verdict, claim.Claim, claim.Got, claim.Evidence)
+			if claim.Expected != "" {
+				fmt.Fprintf(out, "    expected: %s\n    got: %s\n", claim.Expected, claim.Got)
+			}
+			if claim.Next != "" {
+				fmt.Fprintf(out, "    next: %s\n", claim.Next)
+			}
 		}
-		cause := ""
-		if dictionary.Truthy(word.Reason) {
-			cause = fmt.Sprint(word.Reason)
+	} else {
+		for _, word := range record.Words {
+			if word.Verdict == verdict.Green {
+				continue
+			}
+			cause := ""
+			if dictionary.Truthy(word.Reason) {
+				cause = fmt.Sprint(word.Reason)
+			}
+			step(word.Verdict, strings.Join(append([]string{word.Word}, word.Args...), " "), cause, word.Evidence)
+			fmt.Fprintf(out, "    verify skill: %s\n", strings.Join(word.Implements, ", "))
 		}
-		step(word.Verdict, strings.Join(append([]string{word.Word}, word.Args...), " "), cause, word.Evidence)
-		fmt.Fprintf(out, "    verify skill: %s\n", strings.Join(word.Implements, ", "))
 	}
+	for _, missed := range record.Uncovered {
+		fmt.Fprintf(out, "  uncovered  %s\n    next: %s\n", missed.Claim, missed.Next)
+	}
+	Gaps(record.Gaps, out)
 	frame("doctor-after-failure")
 	frame("cleanup")
-	if v != verdict.Green && record.Reason != nil && *record.Reason != "" && !explained(*record.Reason, labels) {
+	if v != verdict.Green && !claimed && record.Reason != nil && *record.Reason != "" && !explained(*record.Reason, labels) {
 		fmt.Fprintf(out, "  cause: %s\n", OneLine(*record.Reason))
 	}
 	if record.Cleanup == "kept" {
@@ -199,5 +226,18 @@ func Ticket(t ticket.Ticket, out io.Writer) {
 			fmt.Fprintf(out, "  from %s", from)
 		}
 		fmt.Fprintln(out)
+	}
+}
+
+// Gaps prints what a diff touched that no claim verdict proves, one line each.
+func Gaps(gaps runner.Gaps, out io.Writer) {
+	for _, change := range gaps.Unmapped {
+		fmt.Fprintf(out, "  unmapped  %s: no word depends on it; check the path or key, or verify it with the product verify skill\n", change)
+	}
+	for _, name := range gaps.Unclaimed {
+		fmt.Fprintf(out, "  unclaimed  %s: proves no claim; verify it with the product verify skill\n", name)
+	}
+	for _, name := range gaps.Unrun {
+		fmt.Fprintf(out, "  unrun  %s: proves a claim this chain proves through another word; run a chain that uses it\n", name)
 	}
 }

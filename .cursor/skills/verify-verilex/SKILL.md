@@ -1,6 +1,6 @@
 ---
 name: verify-verilex
-description: "Drive the verilex CLI as its users do, against a disposable copy of the tally sample product with an isolated VERILEX_HOME; use when proving verilex behavior (run, plan, --continue, run tickets and profiles, words, claims, onboard, index, runs, cleanup, new, propose, admit, gap, check, the three verdicts, quiet output, parallel runs and the shared ledger across stateless instances) on a fresh or a given verilex build."
+description: "Drive the verilex CLI as its users do, against a disposable copy of the tally sample product with an isolated VERILEX_HOME; use when proving verilex behavior (run, plan, claim plans, --continue, run tickets and profiles, words, claims, onboard, index, runs, cleanup, new, propose, admit, gap, check, the three verdicts, missed-claim warnings, quiet output, parallel runs and the shared ledger across stateless instances) on a fresh or a given verilex build."
 ---
 
 # Verify verilex

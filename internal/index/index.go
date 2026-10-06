@@ -134,6 +134,12 @@ func Build(p dictionary.Project) (Index, error) {
 	return ix, nil
 }
 
+// Words returns the product's words. GroupOf names the claim a claim is grouped under.
+func (ix Index) Words() []dictionary.Word { return slices.Clone(ix.words) }
+
+// GroupOf names the claim a claim is grouped under: itself unless onboarding made it an alias.
+func (ix Index) GroupOf(name string) string { return ix.groupOf(name) }
+
 // groupOf names the claim a claim is grouped under: itself unless onboarding made it an alias.
 func (ix Index) groupOf(name string) string {
 	if group, ok := ix.group[name]; ok {

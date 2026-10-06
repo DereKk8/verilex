@@ -34,10 +34,10 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 
 ## Features
 
-- [Verdicts and exit codes](verdicts.md) - green, red and inconclusive, the honesty rules, and environment trouble never reported as red.
+- [Verdicts and exit codes](verdicts.md) - green, red and inconclusive, the honesty rules, environment trouble never reported as red, the missed-claim warning and the failing link.
 - [Quiet output](output.md) - verdict first, failures only, evidence by reference.
 - [Run a chain](run.md) - `verilex run` live, refused, `--keep`, `--fresh`, `--json`, and stamp-based skipping.
-- [Plan](plan.md) - `verilex plan`, the same skip decision without running, including `--continue` and `--json`.
+- [Plan](plan.md) - `verilex plan`, the same skip decision without running, including `--continue`, `--json`, and a claim plan for derived claims, named claims and a diff.
 - [Continue a kept instance](continue.md) - `verilex run --continue`: proven prefix skipped, refresh and doctor, refusals.
 - [Run tickets](tickets.md) - `verilex ticket`, `run --ticket` and `plan --ticket`: precedence, named profiles, refusals naming the field, and concurrent runs that share no ticket state.
 - [Words](words.md) - `verilex words`: the dictionary with lifecycle status.

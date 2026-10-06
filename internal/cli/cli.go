@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
+	"github.com/DereKk8/verilex/internal/index"
 	"github.com/DereKk8/verilex/internal/lifecycle"
 	"github.com/DereKk8/verilex/internal/report"
 	"github.com/DereKk8/verilex/internal/runner"
@@ -23,7 +24,7 @@ const usage = "usage: verilex [-h] [--project PROJECT] {run,plan,ticket,words,cl
 
 type options struct {
 	project, command, operand, verdict, from, ticket, intent, sameAs string
-	implements, changed, operands                                    []string
+	implements, changed, operands, claims, named                     []string
 	keep, fresh, json, distinct                                      bool
 }
 
@@ -69,6 +70,14 @@ func Main(argv []string, out, stderr io.Writer) int {
 		if err != nil {
 			return refuse(err)
 		}
+		type runRow struct {
+			Run     string `json:"run"`
+			Verdict string `json:"verdict"`
+			Warning string `json:"warning,omitempty"`
+			Cleanup string `json:"cleanup"`
+			Chain   string `json:"chain"`
+		}
+		rows := []runRow{}
 		for _, record := range records {
 			status := "running"
 			if record.Verdict != nil {
@@ -76,7 +85,20 @@ func Main(argv []string, out, stderr io.Writer) int {
 			} else if !runner.Running(project, record.Run) {
 				status = "died"
 			}
-			fmt.Fprintf(out, "%s  %s  cleanup=%s  %s\n", record.Run, status, record.Cleanup, record.Chain)
+			rows = append(rows, runRow{record.Run, status, record.Warning, record.Cleanup, record.Chain})
+		}
+		if args.json {
+			if err = encode(out, rows); err != nil {
+				return refuse(err)
+			}
+			return 0
+		}
+		for _, row := range rows {
+			fmt.Fprintf(out, "%s  %s  cleanup=%s  %s", row.Run, row.Verdict, row.Cleanup, row.Chain)
+			if row.Warning != "" {
+				fmt.Fprintf(out, "  warning: %s", row.Warning)
+			}
+			fmt.Fprintln(out)
 		}
 		return 0
 	case "cleanup":
@@ -124,6 +146,9 @@ func Main(argv []string, out, stderr io.Writer) int {
 		}
 		return 0
 	}
+	if (args.command == "plan" || args.command == "run") && args.operand == "" {
+		return claimSurface(project, words, args, resolved, out, stderr, refuse)
+	}
 	steps, err := dictionary.ParseChain(args.operand, words)
 	if err != nil {
 		return refuse(err)
@@ -132,6 +157,13 @@ func Main(argv []string, out, stderr io.Writer) int {
 		return refuse(err)
 	}
 	opts := runner.Options{Keep: args.keep, Fresh: args.fresh, Continue: args.from, Ticket: resolved}
+	if len(args.changed) > 0 {
+		ix, err := index.Build(project)
+		if err != nil {
+			return refuse(err)
+		}
+		opts.ForceLive = ix.ForcedLive(project, steps, args.changed)
+	}
 	plan, err := runner.Decide(project, steps, opts)
 	if err != nil {
 		return refuse(err)
@@ -153,6 +185,11 @@ func Main(argv []string, out, stderr io.Writer) int {
 	record, runErr := run.Execute(plan, opts)
 	if refused := (runner.Refused{}); errors.As(runErr, &refused) {
 		return refuse(refused.Err)
+	}
+	if len(args.changed) > 0 {
+		if err = coverChain(project, steps, &record, args.changed); err != nil {
+			return refuse(err)
+		}
 	}
 	if args.json {
 		if err = encode(out, record); err != nil {
@@ -189,13 +226,13 @@ type command struct {
 var optional = map[string][]string{"index": {"claim", "word"}}
 
 var commands = map[string]command{
-	"run":     {"chain", "[--keep] [--fresh] [--continue RUN] [--ticket FILE] [--json] chain", "run a chain of words, e.g. 'a | b X | c'", []string{"--keep", "--fresh", "--json"}, []string{"--continue", "--ticket"}},
-	"plan":    {"chain", "[--continue RUN] [--ticket FILE] [--json] chain", "show whether a chain would be skipped or run live, running nothing", []string{"--json"}, []string{"--continue", "--ticket"}},
+	"run":     {"chain", "[--keep] [--fresh] [--continue RUN] [--ticket FILE] [--claim CLAIM ...] [--named CLAIM ...] [--changed CHANGE ...] [--json] [chain]", "run a chain, or the chain planned from claims and a diff", []string{"--keep", "--fresh", "--json"}, []string{"--continue", "--ticket", "--claim", "--named", "--changed"}},
+	"plan":    {"chain", "[--continue RUN] [--ticket FILE] [--claim CLAIM ...] [--named CLAIM ...] [--changed CHANGE ...] [--json] [chain]", "show whether a chain would be skipped, or plan claims and a diff, running nothing", []string{"--json"}, []string{"--continue", "--ticket", "--claim", "--named", "--changed"}},
 	"ticket":  {"file", "[--json] file", "validate a run ticket and resolve its profile and defaults", []string{"--json"}, nil},
 	"words":   {"", "", "list the dictionary and each word's lifecycle status", nil, nil},
 	"claims":  {"", "[--json]", "list each claim's current version, the words that prove it, and any review it needs", []string{"--json"}, nil},
 	"index":   {"", "[--intent TEXT | --changed FILE ...] [--json] [claim [word]]", "show the product's active claims, one claim's words, or one word's run details; or look claims up by intent or by changed files", []string{"--json"}, []string{"--intent", "--changed"}},
-	"runs":    {"", "", "list this project's runs and any instance still alive", nil, nil},
+	"runs":    {"", "[--json]", "list this project's runs and any instance still alive", []string{"--json"}, nil},
 	"cleanup": {"run", "run", "tear down a kept run's instance", nil, nil},
 	"new":     {"word", "--implements REF [--implements REF ...] word", "scaffold a provisional word", nil, []string{"--implements"}},
 	"onboard": {"word", "[--same-as CLAIM | --distinct] [--json] word", "onboard a word that proves a claim: group it under its claim, gate its correctness, record the decision; or answer its open grouping question", []string{"--distinct", "--json"}, []string{"--same-as"}},
@@ -275,6 +312,10 @@ func parse(argv []string) (options, bool, error) {
 				o.implements = append(o.implements, value)
 			case "--changed":
 				o.changed = append(o.changed, value)
+			case "--claim":
+				o.claims = append(o.claims, value)
+			case "--named":
+				o.named = append(o.named, value)
 			case "--intent":
 				o.intent = value
 			case "--same-as":
@@ -295,6 +336,21 @@ func parse(argv []string) (options, bool, error) {
 			return o, false, fmt.Errorf("unrecognized arguments: %s", arg)
 		}
 		pos = append(pos, arg)
+	}
+	if o.command == "plan" || o.command == "run" {
+		if len(pos) > 1 {
+			return o, false, fmt.Errorf("unrecognized arguments: %s", strings.Join(pos[1:], " "))
+		}
+		if len(pos) == 1 {
+			o.operand = pos[0]
+		}
+		if o.operand != "" && (len(o.claims) > 0 || len(o.named) > 0) {
+			return o, false, fmt.Errorf("pass a chain, or claims and a diff, not both")
+		}
+		if o.operand == "" && len(o.claims) == 0 && len(o.named) == 0 && len(o.changed) == 0 {
+			return o, false, fmt.Errorf("the following arguments are required: %s", spec.operand)
+		}
+		return o, false, nil
 	}
 	if names := optional[o.command]; len(names) > 0 {
 		if len(pos) > len(names) {
@@ -363,7 +419,9 @@ var flagHelp = map[string]string{
 	"--implements": "--implements REF  the feature-map section the word implements, <skill>/<file>#<section>; repeatable",
 	"--verdict":    "--verdict FILE    the curator's verdict JSON for the proposed packet",
 	"--intent":     "--intent TEXT     find the claims that prove what TEXT describes",
-	"--changed":    "--changed FILE    a touched file: list the claims that depend on it and the chains that must re-run; repeatable",
+	"--changed":    "--changed CHANGE  a diff entry: a file path, or config:<key>, image:<pin>, runbook:<ref>; repeatable",
+	"--claim":      "--claim CLAIM     a claim derived from the intent; repeatable; named claims do not limit these",
+	"--named":      "--named CLAIM     a claim the plan must include; repeatable; a floor, never a ceiling",
 	"--same-as":    "--same-as CLAIM   answer an undecided word: its claim says the same as the grouped CLAIM",
 	"--distinct":   "--distinct  answer an undecided word: its claim stays a claim of its own",
 }

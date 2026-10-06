@@ -7,6 +7,9 @@ entry: cli
 read_only: true
 inputs: [bin/tally]
 env: [TALLY_DEFECT, TALLY_SIMULATE_LOCK]
+depends:
+  config_keys: [tally.list]
+  images: [ghcr.io/example/list:1]
 ---
 
 The listing a user reads back.

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -17,6 +18,68 @@ type Frame struct {
 	Exit     *int   `json:"exit"`
 	Evidence string `json:"evidence"`
 	Leak     string `json:"leak,omitempty"`
+}
+
+// ClaimRunFormat is the claim-run JSON contract. A different value is a breaking change.
+const ClaimRunFormat = "verilex-claim-run-1"
+
+// Request is the claim-plan input this run was given. An empty list means the caller passed none.
+type Request struct {
+	Claims  []string `json:"claims"`
+	Named   []string `json:"named"`
+	Changed []string `json:"changed"`
+}
+
+// Gaps is what a diff touched that no claim verdict of the run proves. Each entry is counted in
+// the verdict's warning, as an uncovered claim is.
+type Gaps struct {
+	// Unmapped are diff entries, as given, that hit no word and no claim: a typo, or a change
+	// nothing in .verilex depends on.
+	Unmapped []string `json:"unmapped,omitempty"`
+	// Unclaimed are touched words outside the chain that prove no claim.
+	Unclaimed []string `json:"unclaimed,omitempty"`
+	// Unrun are touched words outside the chain whose claim the chain proves through another word.
+	Unrun []string `json:"unrun,omitempty"`
+}
+
+// Phrases counts each kind of gap for a warning, in a fixed order.
+func (g Gaps) Phrases() []string {
+	var phrases []string
+	for _, kind := range []struct {
+		n         int
+		one, many string
+	}{
+		{len(g.Unmapped), "change no word covers", "changes no word covers"},
+		{len(g.Unclaimed), "touched word with no claim", "touched words with no claim"},
+		{len(g.Unrun), "touched word not run", "touched words not run"},
+	} {
+		if kind.n == 1 {
+			phrases = append(phrases, "1 "+kind.one)
+		} else if kind.n > 1 {
+			phrases = append(phrases, fmt.Sprintf("%d %s", kind.n, kind.many))
+		}
+	}
+	return phrases
+}
+
+// Uncovered is a touched claim this run did not prove, and the command that would prove it.
+type Uncovered struct {
+	Claim string `json:"claim"`
+	Next  string `json:"next"`
+}
+
+// ClaimReport is one claim's verdict. Expected and Got are the failing link, set only when the
+// claim is not green. Next is the command that retries it.
+type ClaimReport struct {
+	Claim    string          `json:"claim"`
+	Proves   string          `json:"proves,omitempty"`
+	Word     string          `json:"word"`
+	Step     string          `json:"step"`
+	Verdict  verdict.Verdict `json:"verdict"`
+	Evidence string          `json:"evidence,omitempty"`
+	Expected string          `json:"expected,omitempty"`
+	Got      string          `json:"got,omitempty"`
+	Next     string          `json:"next,omitempty"`
 }
 
 type WordRecord struct {
@@ -59,16 +122,29 @@ type Record struct {
 	ContinuedBy string `json:"continued_by,omitempty"`
 	// History lists, in order, every word that has driven a kept instance, across the runs that
 	// continued it; `verilex run --continue` decides from it what the instance already proves.
-	History      []ledger.Entry   `json:"history,omitempty"`
-	Frame        []Frame          `json:"frame"`
-	Words        []WordRecord     `json:"words"`
-	Verdict      *verdict.Verdict `json:"verdict"`
-	Reason       *string          `json:"reason"`
-	Skipped      bool             `json:"skipped,omitempty"`
-	Rerun        string           `json:"rerun,omitempty"`
-	Cleanup      string           `json:"cleanup"`
-	EvidenceKept *bool            `json:"evidence_kept,omitempty"`
-	Finished     string           `json:"finished,omitempty"`
+	History []ledger.Entry   `json:"history,omitempty"`
+	Frame   []Frame          `json:"frame"`
+	Words   []WordRecord     `json:"words"`
+	Verdict *verdict.Verdict `json:"verdict"`
+	Reason  *string          `json:"reason"`
+	Skipped bool             `json:"skipped,omitempty"`
+	Rerun   string           `json:"rerun,omitempty"`
+	// Format, Requested and Touched are set on a claim-plan run so a launcher can see what was
+	// asked without trusting the agent. Format is verilex-claim-run-1.
+	Format    string   `json:"format,omitempty"`
+	Requested *Request `json:"requested,omitempty"`
+	Touched   []string `json:"touched,omitempty"`
+	Gaps
+	// Warning, Uncovered and Claims are set when this run was given a diff or a claim plan.
+	// Warning is empty when every touched claim was proved. Uncovered names touched claims this
+	// run did not prove, each with the next command that would prove it. Claims is one verdict
+	// per claim the chain proved or failed. All three are absent on a chain run given no diff.
+	Warning      string        `json:"warning,omitempty"`
+	Uncovered    []Uncovered   `json:"uncovered,omitempty"`
+	Claims       []ClaimReport `json:"claims,omitempty"`
+	Cleanup      string        `json:"cleanup"`
+	EvidenceKept *bool         `json:"evidence_kept,omitempty"`
+	Finished     string        `json:"finished,omitempty"`
 }
 
 func StateHome() string {

@@ -25,6 +25,10 @@ type Options struct {
 	// Ticket is the run's resolved ticket, carried into the plan and the run record. It never
 	// changes what runs or what is skipped.
 	Ticket *ticket.Ticket
+	// ForceLive runs the chain live even when every stamp matches, and is the reason recorded.
+	// A claim plan sets it when a diff hits a dependency the stamp does not fingerprint, so a
+	// matching stamp cannot report a false green.
+	ForceLive string
 }
 
 // Plan is the skip decision for one chain: `verilex plan` prints it and `verilex run` carries it
@@ -67,6 +71,8 @@ func Decide(project dictionary.Project, steps []dictionary.Step, opts Options) (
 	switch {
 	case opts.Continue != "" && opts.Fresh:
 		return p, errors.New("--fresh would run every word again on the kept instance; run without --continue")
+	case opts.Continue != "" && opts.ForceLive != "":
+		return p, fmt.Errorf("%s; a kept instance cannot be reused for it: run without --continue", opts.ForceLive)
 	case opts.Continue != "":
 		if p.kept, err = Kept(project, opts.Continue); err != nil {
 			return p, err
@@ -78,6 +84,8 @@ func Decide(project dictionary.Project, steps []dictionary.Step, opts Options) (
 		p.Rerun = "--keep needs a live instance"
 	case opts.Fresh:
 		p.Rerun = "--fresh asked for a live run"
+	case opts.ForceLive != "":
+		p.Rerun = opts.ForceLive
 	default:
 		if p.entries, p.Rerun = ledger.At(LedgerDir(project)).Reuse(labels, claims, p.stamps); p.Rerun != "" {
 			p.entries = nil

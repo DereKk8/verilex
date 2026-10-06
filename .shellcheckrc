@@ -1,0 +1,2 @@
+# A && B || C is used on side-effect-free tests, where C is only the error exit.
+disable=SC2015

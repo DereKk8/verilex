@@ -1,0 +1,10 @@
+{"version":1,"summary":"Rebuilds CI as parallel jobs that call scripts/ci steps, gated by one aggregating job.",
+"files":[
+{"path":".github/workflows/ci.yml","summary":"Splits CI into lint, vuln, test, test-macos, a gate job and a failure notifier.","annotations":[
+{"newRange":[49,98],"summary":"The ci job fails unless every needed job succeeded, and notify opens one issue when main or the nightly run is red.","rationale":"A skipped or cancelled job counts as failure because only 'success' passes, so the gate cannot pass by accident. The test job keeps its old name so the current required check still matches until the ruleset requires ci. Verified on this PR: all jobs green. Not verified: a deliberately red run, and the notify job (it only runs on main and schedule).","author":"fm/verilex-ci-hardening"}]},
+{"path":"scripts/ci","summary":"Single local and CI entrypoint for the blocking steps.","annotations":[
+{"newRange":[22,31],"summary":"test_ builds the black-box tests as a binary and runs it with an instrumented verilex to collect coverage.","rationale":"go test sets GOCOVERDIR itself when -cover is active, so the instrumented binary built inside tests/ would never write coverage. Running the compiled test binary avoids that. Verified locally: per-package coverage prints for 12 packages.","author":"fm/verilex-ci-hardening"}]},
+{"path":"tests/run_test.go","summary":"Resolves temp dir symlinks so macOS paths match what verilex reports.","annotations":[
+{"newRange":[42,47],"summary":"product() resolves the temp dir with EvalSymlinks before copying the fixture.","rationale":"macOS maps /var to /private/var and verilex reports resolved paths, so four tests failed on macOS only. Verified: test-macos is green on this PR.","author":"fm/verilex-ci-hardening"}]},
+{"path":"internal/dictionary/dictionary.go","summary":"Lowercases two error strings that staticcheck ST1005 flagged.","annotations":[]}
+]}

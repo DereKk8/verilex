@@ -57,17 +57,6 @@ func planClaims(t *testing.T, root string, args ...string) claimPlan {
 	return plan
 }
 
-func claimNames(plan claimPlan) []string {
-	names := []string{}
-	for _, skip := range plan.Skip {
-		names = append(names, skip.Claim)
-	}
-	for _, live := range plan.Run {
-		names = append(names, live.Claim)
-	}
-	return names
-}
-
 // Rule: with no intent the plan is the diff-affected claim set, in dependency order, and a
 // standing pass is cited by the fingerprints that prove it.
 func TestNoIntentPlanIsTheDiff(t *testing.T) {

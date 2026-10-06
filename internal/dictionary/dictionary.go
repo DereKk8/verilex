@@ -27,6 +27,15 @@ var ErrNoProject = errors.New("no .verilex/config.yaml")
 // WordName is the shape of a word: letters or digits in any script, then '.', '_' or '-'.
 var WordName = regexp.MustCompile(`^[\pL\pN][\pL\pN._-]*$`)
 
+// Deps is a word's declared diff footprint: paths, config keys, image pins and runbook refs.
+// Inputs, the word directory and claim sources count as dependencies even when Deps is empty.
+type Deps struct {
+	Paths      []string
+	ConfigKeys []string
+	Images     []string
+	Runbook    []string
+}
+
 type Project struct {
 	Root, Name     string
 	SecretPatterns []*regexp2.Regexp
@@ -46,6 +55,10 @@ type Word struct {
 	InputsDeclared bool
 	// Env names the environment variables whose values the word's result depends on.
 	Env []string
+	// Depends names diff entries that touch this word beyond its inputs and claim sources:
+	// paths, config keys, image pins and runbook section refs. A diff that hits one of them
+	// touches the claim the word proves.
+	Depends Deps
 	// ReadOnly declares that the word only observes the instance and never changes it, so it
 	// may run on a kept instance whatever ran there before. A read-only word provides no states.
 	ReadOnly bool
@@ -201,6 +214,9 @@ func loadWord(path string, claims map[string]Claim) (Word, error) {
 			return Word{}, fmt.Errorf("%s: 'env' entry %s is not a variable name", file, quote(name))
 		}
 	}
+	if w.Depends, err = parseDepends(file, meta["depends"]); err != nil {
+		return Word{}, err
+	}
 	if raw, ok := meta["read_only"]; ok {
 		if w.ReadOnly, ok = raw.(bool); !ok {
 			return Word{}, fmt.Errorf("%s: 'read_only' must be true or false", file)
@@ -254,6 +270,69 @@ func loadWord(path string, claims map[string]Claim) (Word, error) {
 		}
 	}
 	return w, nil
+}
+
+func parseDepends(file string, raw any) (Deps, error) {
+	if raw == nil {
+		return Deps{}, nil
+	}
+	m, ok := stringMap(raw)
+	if !ok {
+		return Deps{}, fmt.Errorf("%s: 'depends' must be a mapping", file)
+	}
+	known := map[string]bool{"paths": true, "config_keys": true, "images": true, "runbook": true}
+	for key := range m {
+		if !known[key] {
+			return Deps{}, fmt.Errorf("%s: unknown depends field %s", file, quote(key))
+		}
+	}
+	var d Deps
+	var err error
+	if d.Paths, err = depList(file, "paths", m["paths"]); err != nil {
+		return Deps{}, err
+	}
+	if d.ConfigKeys, err = depList(file, "config_keys", m["config_keys"]); err != nil {
+		return Deps{}, err
+	}
+	if d.Images, err = depList(file, "images", m["images"]); err != nil {
+		return Deps{}, err
+	}
+	if d.Runbook, err = depList(file, "runbook", m["runbook"]); err != nil {
+		return Deps{}, err
+	}
+	return d, nil
+}
+
+func depList(file, field string, raw any) ([]string, error) {
+	list, err := stringsList(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: 'depends.%s' must be a list of strings", file, field)
+	}
+	for _, item := range list {
+		if strings.TrimSpace(item) == "" {
+			return nil, fmt.Errorf("%s: 'depends.%s' entries must be non-empty", file, field)
+		}
+	}
+	return list, nil
+}
+
+func stringMap(raw any) (map[string]any, bool) {
+	if m, ok := raw.(map[string]any); ok {
+		return m, true
+	}
+	rawMap, ok := raw.(map[any]any)
+	if !ok {
+		return nil, false
+	}
+	m := make(map[string]any, len(rawMap))
+	for key, value := range rawMap {
+		name, ok := key.(string)
+		if !ok {
+			return nil, false
+		}
+		m[name] = value
+	}
+	return m, true
 }
 
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)

@@ -2,15 +2,11 @@ package index
 
 import (
 	"maps"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
-	"github.com/DereKk8/verilex/internal/featuremap"
-	"github.com/DereKk8/verilex/internal/grouping"
-	"github.com/DereKk8/verilex/internal/lifecycle"
 	"github.com/DereKk8/verilex/internal/runner"
 )
 
@@ -39,80 +35,11 @@ type Rerun struct {
 // and the grouping file. The chains are those onboarding proved the covered words on and those
 // this product ran with them; each gets the skip decision `verilex plan` makes, from the same code.
 func (ix Index) Changed(p dictionary.Project, touched []string) (Change, error) {
-	change := Change{Files: []string{}, Claims: []Claim{}, Chains: []Rerun{}}
-	paths := make([]string, 0, len(touched))
-	for _, file := range touched {
-		path := resolve(file)
-		paths = append(paths, path)
-		if rel, err := filepath.Rel(p.Root, path); err == nil && !strings.HasPrefix(rel, "..") {
-			path = rel
-		}
-		change.Files = append(change.Files, filepath.ToSlash(path))
-	}
-	covers := func(deps []string) bool {
-		return slices.ContainsFunc(paths, func(path string) bool {
-			return slices.ContainsFunc(deps, func(dep string) bool { return path == dep || strings.HasPrefix(path, dep+string(filepath.Separator)) })
-		})
-	}
-	wordsDir := filepath.Join(p.Dir(), "words")
-	shared := []string{filepath.Join(p.Dir(), "config.yaml"), filepath.Join(p.Dir(), "frame")}
-	if entries, err := os.ReadDir(wordsDir); err == nil {
-		for _, entry := range entries {
-			if _, err := os.Stat(filepath.Join(wordsDir, entry.Name(), "word.md")); err != nil {
-				shared = append(shared, filepath.Join(wordsDir, entry.Name()))
-			}
-		}
-	}
-	claimDeps := map[string][]string{}
-	for name, c := range ix.claims {
-		deps := []string{c.Path}
-		for _, source := range c.Sources {
-			root, dirs := lifecycle.SourceRoot(p, source)
-			if anchor, err := featuremap.Pin(root, dirs, featuremap.Source{Ref: source.Ref, Requirements: source.Requirements, Prose: source.Prose, Covered: source.Covered}); err == nil && anchor.File != "" {
-				deps = append(deps, filepath.Join(root, anchor.File))
-			}
-		}
-		claimDeps[name] = deps
-	}
-	covered := map[string]bool{}
-	claims := map[string]bool{}
-	for name, deps := range claimDeps {
-		if covers(deps) {
-			claims[ix.groupOf(name)] = true
-		}
-	}
-	for _, w := range ix.words {
-		deps := append(slices.Clone(shared), w.Path)
-		for _, input := range w.Inputs {
-			if !filepath.IsAbs(input) {
-				input = filepath.Join(p.Root, input)
-			}
-			deps = append(deps, filepath.Clean(input))
-		}
-		if w.Claim != nil {
-			deps = append(deps, filepath.Join(p.Dir(), "grouping.yaml"))
-			deps = append(deps, claimDeps[w.Claim.Name]...)
-			// A word grouped under another claim is judged against that claim too, so its claim
-			// file and sources are the word's as well.
-			if d, ok := ix.g.Sound(w.Name); ok && d.Pin() == w.Proves() && grouping.Name(d.Claim) != w.Claim.Name {
-				deps = append(deps, claimDeps[grouping.Name(d.Claim)]...)
-			}
-		} else {
-			for _, ref := range w.Implements {
-				if section, err := featuremap.Resolve(p.Root, p.SkillDirs, ref); err == nil {
-					deps = append(deps, filepath.Join(p.Root, section.File))
-				}
-			}
-		}
-		if covers(deps) {
-			covered[w.Name] = true
-			if w.Claim != nil {
-				claims[ix.groupOf(w.Claim.Name)] = true
-			}
-		}
-	}
+	hit := ix.touchOf(p, touched)
+	change := Change{Files: hit.files, Claims: []Claim{}, Chains: []Rerun{}}
+	covered := hit.covered
 	for _, c := range ix.Claims {
-		if claims[c.Claim] {
+		if hit.claims[c.Claim] {
 			change.Claims = append(change.Claims, c)
 		}
 	}

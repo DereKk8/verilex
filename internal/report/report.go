@@ -31,6 +31,9 @@ func Human(record runner.Record, out io.Writer) {
 			fmt.Fprintf(out, ", %d skipped: proven on its instance by %s", n, reliedOn(record))
 		}
 	}
+	if record.Warning != "" {
+		fmt.Fprintf(out, ", with %s", record.Warning)
+	}
 	fmt.Fprintf(out, "; run %s\n", record.Run)
 	labels := []string{}
 	step := func(v verdict.Verdict, label, cause, evidence string) {
@@ -54,16 +57,34 @@ func Human(record runner.Record, out io.Writer) {
 	frame("launch")
 	frame("refresh")
 	frame("doctor")
-	for _, word := range record.Words {
-		if word.Verdict == verdict.Green {
-			continue
+	if len(record.Claims) > 0 {
+		for _, claim := range record.Claims {
+			if claim.Verdict == verdict.Green {
+				continue
+			}
+			step(claim.Verdict, claim.Claim, claim.Got, claim.Evidence)
+			if claim.Expected != "" || claim.Got != "" {
+				fmt.Fprintf(out, "    expected: %s\n    got: %s\n", claim.Expected, claim.Got)
+			}
+			if claim.Next != "" {
+				fmt.Fprintf(out, "    next: %s\n", claim.Next)
+			}
 		}
-		cause := ""
-		if dictionary.Truthy(word.Reason) {
-			cause = fmt.Sprint(word.Reason)
+	} else {
+		for _, word := range record.Words {
+			if word.Verdict == verdict.Green {
+				continue
+			}
+			cause := ""
+			if dictionary.Truthy(word.Reason) {
+				cause = fmt.Sprint(word.Reason)
+			}
+			step(word.Verdict, strings.Join(append([]string{word.Word}, word.Args...), " "), cause, word.Evidence)
+			fmt.Fprintf(out, "    verify skill: %s\n", strings.Join(word.Implements, ", "))
 		}
-		step(word.Verdict, strings.Join(append([]string{word.Word}, word.Args...), " "), cause, word.Evidence)
-		fmt.Fprintf(out, "    verify skill: %s\n", strings.Join(word.Implements, ", "))
+	}
+	for _, missed := range record.Uncovered {
+		fmt.Fprintf(out, "  uncovered  %s\n    next: %s\n", missed.Claim, missed.Next)
 	}
 	frame("doctor-after-failure")
 	frame("cleanup")

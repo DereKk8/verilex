@@ -1,0 +1,20 @@
+---
+name: verilex
+description: Drive verilex to prove claims from an intent and a diff. Use when a product has .verilex and a change should be verified by recorded claims. Fall back to the product verify skill when verilex has no claim for the moment.
+---
+
+# verilex
+
+You are the brain. verilex is the hands. It does not pick claims and it does not judge meaning.
+
+Reach for verilex when the product has `.verilex/` and the change should be proved by recorded claims. Fall back to the product's verify skill when a lookup returns no claim, a word is missing, or you must drive the product by hand.
+
+No intent means prove nothing this change touched broke.
+
+1. `verilex index --intent '<intent>'` and `verilex index --changed <change>`. A change is a path, `config:<key>`, `image:<pin>` or `runbook:<ref>`.
+2. Derive claims from both lookups. Named claims are a floor, never a ceiling. Pass them with `--named`. Do not treat a named list as the whole job.
+3. `verilex plan --claim <derived> --named <named> --changed <change>`. With no intent, omit `--claim`.
+4. Read skip (fingerprints), run, order, chain and unpicked. Run `chain` with the same `--claim`, `--named` and `--changed` flags. Do not run only the `run` list.
+5. If the plan lists `unpicked`, or the verdict says `touched claim not covered`, add those claims with `--claim` and run again before you accept the result.
+
+The command output is the rest of the contract.

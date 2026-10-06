@@ -19,6 +19,26 @@ type Frame struct {
 	Leak     string `json:"leak,omitempty"`
 }
 
+// Uncovered is a touched claim this run did not prove, and the command that would prove it.
+type Uncovered struct {
+	Claim string `json:"claim"`
+	Next  string `json:"next"`
+}
+
+// ClaimReport is one claim's verdict. Expected and Got are the failing link, set only when the
+// claim is not green. Next is the command that retries it.
+type ClaimReport struct {
+	Claim    string          `json:"claim"`
+	Proves   string          `json:"proves,omitempty"`
+	Word     string          `json:"word"`
+	Step     string          `json:"step"`
+	Verdict  verdict.Verdict `json:"verdict"`
+	Evidence string          `json:"evidence,omitempty"`
+	Expected string          `json:"expected,omitempty"`
+	Got      string          `json:"got,omitempty"`
+	Next     string          `json:"next,omitempty"`
+}
+
 type WordRecord struct {
 	Word       string   `json:"word"`
 	Args       []string `json:"args"`
@@ -59,16 +79,23 @@ type Record struct {
 	ContinuedBy string `json:"continued_by,omitempty"`
 	// History lists, in order, every word that has driven a kept instance, across the runs that
 	// continued it; `verilex run --continue` decides from it what the instance already proves.
-	History      []ledger.Entry   `json:"history,omitempty"`
-	Frame        []Frame          `json:"frame"`
-	Words        []WordRecord     `json:"words"`
-	Verdict      *verdict.Verdict `json:"verdict"`
-	Reason       *string          `json:"reason"`
-	Skipped      bool             `json:"skipped,omitempty"`
-	Rerun        string           `json:"rerun,omitempty"`
-	Cleanup      string           `json:"cleanup"`
-	EvidenceKept *bool            `json:"evidence_kept,omitempty"`
-	Finished     string           `json:"finished,omitempty"`
+	History []ledger.Entry   `json:"history,omitempty"`
+	Frame   []Frame          `json:"frame"`
+	Words   []WordRecord     `json:"words"`
+	Verdict *verdict.Verdict `json:"verdict"`
+	Reason  *string          `json:"reason"`
+	Skipped bool             `json:"skipped,omitempty"`
+	Rerun   string           `json:"rerun,omitempty"`
+	// Warning, Uncovered and Claims are set when this run was given a diff or a claim plan.
+	// Warning is empty when every touched claim was proved. Uncovered names touched claims this
+	// run did not prove, each with the next command that would prove it. Claims is one verdict
+	// per claim the chain proved or failed. All three are absent on a chain run given no diff.
+	Warning      string        `json:"warning,omitempty"`
+	Uncovered    []Uncovered   `json:"uncovered,omitempty"`
+	Claims       []ClaimReport `json:"claims,omitempty"`
+	Cleanup      string        `json:"cleanup"`
+	EvidenceKept *bool         `json:"evidence_kept,omitempty"`
+	Finished     string        `json:"finished,omitempty"`
 }
 
 func StateHome() string {

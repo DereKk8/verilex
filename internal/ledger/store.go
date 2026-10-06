@@ -97,6 +97,16 @@ func (s Store) Reuse(labels, claims []string, stamps []stamp.Stamp) ([]Entry, st
 	return entries, ""
 }
 
+// Proof returns the newest pass that stands for a step stamped st which proved claim, or why
+// none does. It is the same check Reuse makes for one step, including age-out. A step whose
+// word is provisional or drift-suspect still needs its caller to honor st.Hold: Proof does not.
+func (s Store) Proof(st stamp.Stamp, claim string) (Entry, string, error) {
+	if st.Unclear != "" {
+		return Entry{}, st.Unclear, nil
+	}
+	return s.find(st, claim, time.Now())
+}
+
 // find returns the newest pass that stands for a step stamped st, or why none does: why the
 // newest pass with that stamp cannot stand, or else what changed since the newest pass in the
 // step's slot.

@@ -1,16 +1,18 @@
-#!/usr/bin/env python3
-"""verify-verilex Helper: audit a verilex ledger against the run records that wrote it, without verilex code.
-
-usage: ledger-audit LEDGER HOME [HOME...]
-  LEDGER  the project's ledger directory, e.g. "$S/ledger/tally" or "$S/home/tally/ledger"
-  HOME    every VERILEX_HOME whose runs recorded into it, e.g. "$S"/instances/*
-
-A pass is intact when its file content hashes to the digest in its name. It is matched when a
-run record in one of the homes holds a green live step with the same run, label and stamp, and
-the pass's copy of the evidence holds the same result object (stdout). A proven step is a green
-live step of a run that was neither inconclusive nor a continuation. lost counts proven steps
-with no pass; forged counts intact passes that match no proven step.
-"""
+#!/usr/bin/env bash
+# verify-verilex Helper: audit a verilex ledger against the run records that wrote it, without verilex code.
+#
+# usage: ledger-audit LEDGER HOME [HOME...]
+#   LEDGER  the project's ledger directory, e.g. "$S/ledger/tally" or "$S/home/tally/ledger"
+#   HOME    every VERILEX_HOME whose runs recorded into it, e.g. "$S"/instances/*
+#
+# A pass is intact when its file content hashes to the digest in its name. It is matched when a
+# run record in one of the homes holds a green live step with the same run, label and stamp, and
+# the pass's copy of the evidence holds the same result object (stdout). A proven step is a green
+# live step of a run that was neither inconclusive nor a continuation. lost counts proven steps
+# with no pass; forged counts intact passes that match no proven step.
+set -euo pipefail
+[ $# -ge 2 ] || { echo "usage: ledger-audit LEDGER HOME [HOME...]" >&2; exit 2; }
+exec python3 - "$@" <<'PY'
 import collections
 import glob
 import hashlib
@@ -19,8 +21,6 @@ import os
 import re
 import sys
 
-if len(sys.argv) < 3:
-    sys.exit(__doc__.strip())
 ledger, homes = sys.argv[1], sys.argv[2:]
 name_re = re.compile(r"^([0-9a-f]{64})\.([0-9a-f]{64})\.json$")
 
@@ -68,3 +68,4 @@ for key in sorted(set(proven) - seen):
 print("  ".join(f"{k}: {counts[k]}" for k in ("proven", "passes", "intact", "matched", "lost", "forged", "damaged", "unowned")))
 print("passes per slot:", " ".join(str(n) for n in sorted(slots.values())))
 sys.exit(1 if counts["lost"] or counts["forged"] or counts["damaged"] else 0)
+PY

@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "summary": "Adds verilex onboard, which admits claim words through mechanical checks and planted-defect trials and returns ambiguous grouping to the calling agent, plus the generated three-tier verilex index.",
+  "files": [
+    {
+      "path": "internal/grouping/grouping.go",
+      "summary": "Owns the sealed grouping file and the one deterministic reading of which claim is grouped under which.",
+      "annotations": [
+        {
+          "newRange": [
+            220,
+            300
+          ],
+          "summary": "Holds, Groups, Grouped and Open count a decision only while its word pins what it judged and every claim version it names is current.",
+          "rationale": "A new claim version is a new meaning, so an old answer or match must not place the new version; such a claim falls back to the mechanical match and the agent is asked again. Decisions are read in word order, so the result depends only on the records. TestAnswerForAnOldClaimVersionDoesNotCarryOver and TestDecisionOfARemovedWordPlacesNothing cover both directions and a removed word.",
+          "author": "fm/verilex-onboarding"
+        }
+      ]
+    },
+    {
+      "path": "internal/onboarding/onboarding.go",
+      "summary": "Owns the onboarding pipeline from usefulness through the sealed grouping decision.",
+      "annotations": [
+        {
+          "newRange": [
+            369,
+            410
+          ],
+          "summary": "candidates adds the open questions of an undecided grouped claim as ambiguous candidates for every later word of that claim, and snapshots what it read.",
+          "rationale": "Each later word of the claim is compared with the pending claim's words, so a later --same-as moves only words that behaved like them.",
+          "author": "fm/verilex-onboarding"
+        },
+        {
+          "newRange": [
+            447,
+            456
+          ],
+          "summary": "record refuses to write when the groups or open questions it decided on changed under the grouping lock.",
+          "rationale": "Another onboarding or answer can change the grouping between the trials and the write, so a decision recorded then would rest on a grouping that no longer exists. The word is then onboarded again. No test forces this race; the concurrent-answer race is covered by TestConcurrentAnswersApplyOnce.",
+          "author": "fm/verilex-onboarding"
+        },
+        {
+          "newRange": [
+            518,
+            585
+          ],
+          "summary": "settle checks and applies one agent answer inside grouping.Update, moving every word of the claim and keeping pending claims that belong to the target claim's open question.",
+          "rationale": "Checks on a snapshot taken before the lock let a second concurrent answer index a cleared Pending list and panic; now it gets the normal refusal. Keeping pending entries lets a claim moved under a still-undecided claim follow that claim's answer. TestConcurrentAnswersApplyOnce and TestClaimMovedUnderAnUndecidedClaimFollowsItsAnswer verify both.",
+          "author": "fm/verilex-onboarding"
+        }
+      ]
+    },
+    {
+      "path": "internal/index/changed.go",
+      "summary": "Implements the model-free change lookup that reuses plan's skip decision.",
+      "annotations": [
+        {
+          "newRange": [
+            93,
+            99
+          ],
+          "summary": "Changed adds the grouped claim's file and sources to the dependencies of a word grouped under another claim.",
+          "rationale": "Drift checks judge an alias word against its grouped claim, so plan re-runs that word's chains after the grouped claim changes. Without this dependency the lookup omitted those chains. TestChangeLookupFollowsAliasWordsToTheirGroupedClaim covers both a planted-defect addition and a new version. PER-245 can take this lookup as plan's diff input later; it is not built here.",
+          "author": "fm/verilex-onboarding"
+        }
+      ]
+    },
+    {
+      "path": "internal/index/index.go",
+      "summary": "Builds the three index tiers from the claims, words and grouping file.",
+      "annotations": [
+        {
+          "newRange": [
+            110,
+            120
+          ],
+          "summary": "Build counts a word as active or dormant only while its decision holds.",
+          "rationale": "A re-pinned word, a word whose claim moved to a new version, and an alias grouped under an old version were never onboarded for what they pin now, so tier 1 must not call their claim active. TestRepinnedWordIsNotActiveUnderItsNewClaim and TestClaimWithANewVersionIsNotActive verify this.",
+          "author": "fm/verilex-onboarding"
+        }
+      ]
+    },
+    {
+      "path": "internal/lifecycle/lifecycle.go",
+      "summary": "Derives admission, drift and requirement coverage for claim words from the grouping decision.",
+      "annotations": [
+        {
+          "newRange": [
+            142,
+            146
+          ],
+          "summary": "Curated requires a sound onboarding decision that pins the current claim with unchanged sources and an unchanged word digest.",
+          "rationale": "Only onboarding admits claim words now, so requirement coverage follows the decision, keyed by repository and sub-feature. The claims.md Onboarded word covers step and tests/claims_test.go verify it. The seal is an unkeyed checksum, so a deliberate forgery is not caught; the README says so, and a keyed seal needs a design decision.",
+          "author": "fm/verilex-onboarding"
+        }
+      ]
+    },
+    {
+      "path": "internal/stamp/stamp.go",
+      "summary": "Adds the onboarding seal to a claim word's proof stamp.",
+      "annotations": [
+        {
+          "newRange": [
+            156,
+            164
+          ],
+          "summary": "The word admission component holds the decision seal, so onboarding or a hand edit makes the next run live.",
+          "rationale": "A curator admission already worked this way for words without a claim. If the grouping file cannot be read, the reason is unclear, so the chain runs live. Verified by the onboard.md Stamp step.",
+          "author": "fm/verilex-onboarding"
+        }
+      ]
+    },
+    {
+      "path": "internal/curation/admit.go",
+      "summary": "Keeps propose and admit for words without a claim only.",
+      "annotations": [
+        {
+          "newRange": [
+            54,
+            64
+          ],
+          "summary": "Admit refuses a word that proves a claim and points to verilex onboard instead.",
+          "rationale": "A second admission path would let a curator skip the planted-defect gate. The propose.md and admit.md recipes show that curator flows for words without a claim are unchanged.",
+          "author": "fm/verilex-onboarding"
+        }
+      ]
+    }
+  ]
+}

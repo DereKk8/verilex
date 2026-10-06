@@ -14,15 +14,16 @@ import (
 	"github.com/DereKk8/verilex/internal/lifecycle"
 	"github.com/DereKk8/verilex/internal/report"
 	"github.com/DereKk8/verilex/internal/runner"
+	"github.com/DereKk8/verilex/internal/ticket"
 	"github.com/DereKk8/verilex/internal/verdict"
 )
 
-const usage = "usage: verilex [-h] [--project PROJECT] {run,plan,words,claims,runs,cleanup,new,propose,admit,gap,check} ...\n"
+const usage = "usage: verilex [-h] [--project PROJECT] {run,plan,ticket,words,claims,runs,cleanup,new,propose,admit,gap,check} ...\n"
 
 type options struct {
-	project, command, operand, verdict, from string
-	implements                               []string
-	keep, fresh, json                        bool
+	project, command, operand, verdict, from, ticket string
+	implements                                       []string
+	keep, fresh, json                                bool
 }
 
 func Main(argv []string, out, stderr io.Writer) int {
@@ -75,6 +76,26 @@ func Main(argv []string, out, stderr io.Writer) int {
 		return cleanup(project, args.operand, out, refuse)
 	case "claims":
 		return claims(project, args.json, out, refuse)
+	case "ticket":
+		args.ticket = args.operand
+	}
+	var resolved *ticket.Ticket
+	if args.ticket != "" {
+		t, err := ticket.Resolve(args.ticket, ticket.Sources{Project: ticket.ProjectFile(project.Dir()), User: ticket.UserFile()})
+		if err != nil {
+			return refuse(err)
+		}
+		resolved = &t
+	}
+	if args.command == "ticket" {
+		if args.json {
+			if err = encode(out, resolved); err != nil {
+				return refuse(err)
+			}
+		} else {
+			report.Ticket(*resolved, out)
+		}
+		return 0
 	}
 	words, err := lifecycle.LoadWords(project)
 	if err != nil {
@@ -103,7 +124,7 @@ func Main(argv []string, out, stderr io.Writer) int {
 	if err = dictionary.CheckOrder(steps); err != nil {
 		return refuse(err)
 	}
-	opts := runner.Options{Keep: args.keep, Fresh: args.fresh, Continue: args.from}
+	opts := runner.Options{Keep: args.keep, Fresh: args.fresh, Continue: args.from, Ticket: resolved}
 	plan, err := runner.Decide(project, steps, opts)
 	if err != nil {
 		return refuse(err)
@@ -155,8 +176,9 @@ type command struct {
 }
 
 var commands = map[string]command{
-	"run":     {"chain", "[--keep] [--fresh] [--continue RUN] [--json] chain", "run a chain of words, e.g. 'a | b X | c'", []string{"--keep", "--fresh", "--json"}, []string{"--continue"}},
-	"plan":    {"chain", "[--continue RUN] [--json] chain", "show whether a chain would be skipped or run live, running nothing", []string{"--json"}, []string{"--continue"}},
+	"run":     {"chain", "[--keep] [--fresh] [--continue RUN] [--ticket FILE] [--json] chain", "run a chain of words, e.g. 'a | b X | c'", []string{"--keep", "--fresh", "--json"}, []string{"--continue", "--ticket"}},
+	"plan":    {"chain", "[--continue RUN] [--ticket FILE] [--json] chain", "show whether a chain would be skipped or run live, running nothing", []string{"--json"}, []string{"--continue", "--ticket"}},
+	"ticket":  {"file", "[--json] file", "validate a run ticket and resolve its profile and defaults", []string{"--json"}, nil},
 	"words":   {"", "", "list the dictionary and each word's lifecycle status", nil, nil},
 	"claims":  {"", "[--json]", "list each claim's current version, the words that prove it, and any review it needs", []string{"--json"}, nil},
 	"runs":    {"", "", "list this project's runs and any instance still alive", nil, nil},
@@ -168,7 +190,7 @@ var commands = map[string]command{
 	"check":   {"", "", "report admitted words whose files, claim or feature-map sections changed (drift-suspect)", nil, nil},
 }
 
-var order = []string{"run", "plan", "words", "claims", "runs", "cleanup", "new", "propose", "admit", "gap", "check"}
+var order = []string{"run", "plan", "ticket", "words", "claims", "runs", "cleanup", "new", "propose", "admit", "gap", "check"}
 
 func parse(argv []string) (options, bool, error) {
 	cwd, err := os.Getwd()
@@ -237,6 +259,11 @@ func parse(argv []string) (options, bool, error) {
 				o.implements = append(o.implements, value)
 			case "--continue":
 				o.from = value
+			case "--ticket":
+				if value == "" {
+					return o, false, fmt.Errorf("argument --ticket: expected a ticket file")
+				}
+				o.ticket = value
 			default:
 				o.verdict = value
 			}
@@ -300,6 +327,7 @@ var flagHelp = map[string]string{
 	"--fresh":      "--fresh     run live even when every proof stamp matches",
 	"--json":       "--json      print the complete record as JSON",
 	"--continue":   "--continue RUN    use the instance RUN kept: run refreshes it, asks the doctor, then runs only the words it does not already prove",
+	"--ticket":     "--ticket FILE     the run ticket: intent or diff, profile, harness, model, effort and budgets; see `verilex ticket`",
 	"--implements": "--implements REF  the feature-map section the word implements, <skill>/<file>#<section>; repeatable",
 	"--verdict":    "--verdict FILE    the curator's verdict JSON for the proposed packet",
 }

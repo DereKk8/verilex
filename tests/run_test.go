@@ -78,20 +78,7 @@ type output struct {
 
 func verilex(t *testing.T, root string, env map[string]string, args ...string) output {
 	t.Helper()
-	cmd := exec.Command(binary, args...)
-	cmd.Dir = root
-	for _, value := range os.Environ() {
-		if !strings.HasPrefix(value, "TALLY_") && !strings.HasPrefix(value, "VERILEX_") {
-			cmd.Env = append(cmd.Env, value)
-		}
-	}
-	cmd.Env = append(cmd.Env, "VERILEX_HOME="+filepath.Join(filepath.Dir(root), "state"), "TALLY_STORES="+filepath.Join(filepath.Dir(root), "stores"))
-	for key, value := range env {
-		cmd.Env = append(cmd.Env, key+"="+value)
-	}
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd, stdout, stderr := command(root, env, args...)
 	err := cmd.Run()
 	code := 0
 	if err != nil {
@@ -102,6 +89,25 @@ func verilex(t *testing.T, root string, env map[string]string, args ...string) o
 		}
 	}
 	return output{code, stdout.String(), stderr.String()}
+}
+
+// command prepares the CLI in a product checkout with the test's isolated state, stores and config home.
+func command(root string, env map[string]string, args ...string) (*exec.Cmd, *strings.Builder, *strings.Builder) {
+	cmd := exec.Command(binary, args...)
+	cmd.Dir = root
+	for _, value := range os.Environ() {
+		if !strings.HasPrefix(value, "TALLY_") && !strings.HasPrefix(value, "VERILEX_") && !strings.HasPrefix(value, "XDG_CONFIG_HOME=") {
+			cmd.Env = append(cmd.Env, value)
+		}
+	}
+	// The user's own profiles never reach a test: each product gets its own config home.
+	cmd.Env = append(cmd.Env, "VERILEX_HOME="+filepath.Join(filepath.Dir(root), "state"), "TALLY_STORES="+filepath.Join(filepath.Dir(root), "stores"), "XDG_CONFIG_HOME="+filepath.Join(filepath.Dir(root), "config"))
+	for key, value := range env {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
+	stdout, stderr := &strings.Builder{}, &strings.Builder{}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	return cmd, stdout, stderr
 }
 
 func lastRun(t *testing.T, root string) runner.Record {

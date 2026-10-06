@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# verify-verilex Helper: print the sha256 of every file in the session's product, tickets and config home.
+# usage: snapshot SESSION   (read-only; diff two snapshots to prove nothing changed)
+set -euo pipefail
+S="${1:?usage: snapshot SESSION}"
+[ -f "$S/session" ] && [ -f "$S/owner" ] || { echo "snapshot: $S is not a verify-verilex session" >&2; exit 2; }
+cd "$S"
+dirs=(tally)
+for dir in tickets config; do [ -d "$dir" ] && dirs+=("$dir"); done
+find "${dirs[@]}" -type f -print0 | sort -z | xargs -0 sha256sum

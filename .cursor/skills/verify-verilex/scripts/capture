@@ -15,7 +15,7 @@ echo "$line" > "$dir/command"
 env | grep -E '^(TALLY_|VERILEX_)' | grep -v '^VERILEX_HOME=' > "$dir/env" || true
 (
   cd "$S/tally" || exit 2
-  export VERILEX_HOME="$S/home" TALLY_STORES="$S/stores" PATH="$S/bin:$PATH"
+  export VERILEX_HOME="$S/home" TALLY_STORES="$S/stores" XDG_CONFIG_HOME="$S/config" PATH="$S/bin:$PATH"
   "$@"
 ) > "$dir/stdout" 2> "$dir/stderr"
 code=$?

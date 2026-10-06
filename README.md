@@ -10,7 +10,7 @@ A **word** is a reusable, executable piece that drives the product through a sur
 
 verilex holds execution only. The project's verification skill (a [pstack](https://github.com/cursor/plugins/tree/main/pstack)-style `verify-*` skill with its feature map) keeps the meaning: what a feature is, how a user reaches it, what proves it and its traps. A **claim** pins one piece of that meaning for verilex: what is true once a word passes, and the evidence that proves it. Every word proves a claim (or, in older projects, points straight at feature-map entries), and verilex never replaces the skill. When a word is not green, verilex prints the entries behind it so the agent can continue by hand.
 
-This slice holds the chain runner, its trust frame, the three verdicts, quiet output, stamp-based skipping, `verilex plan`, live reuse of a kept instance (`verilex run --continue`), claims, and the word lifecycle (invention and curation).
+This slice holds the chain runner, its trust frame, the three verdicts, quiet output, stamp-based skipping, `verilex plan`, live reuse of a kept instance (`verilex run --continue`), claims, run tickets, and the word lifecycle (invention and curation).
 
 ## Install
 
@@ -25,9 +25,10 @@ The core is Go; frame steps and words can use any language installed on the prod
 
 | Command | Does |
 |---|---|
-| `verilex run '<chain>' [--keep] [--fresh] [--json]` | Plans the chain, skips it when every proof stamp matches and every word is admitted, else launches an owned instance, runs each word, cleans up |
-| `verilex plan '<chain>' [--continue <run>] [--json]` | Runs nothing; prints whether the chain would be skipped or run live, the run each skipped step relies on, and the first reason it must run live |
+| `verilex run '<chain>' [--keep] [--fresh] [--ticket <file>] [--json]` | Plans the chain, skips it when every proof stamp matches and every word is admitted, else launches an owned instance, runs each word, cleans up |
+| `verilex plan '<chain>' [--continue <run>] [--ticket <file>] [--json]` | Runs nothing; prints whether the chain would be skipped or run live, the run each skipped step relies on, and the first reason it must run live |
 | `verilex run --continue <run> '<chain>' [--keep] [--json]` | Takes over the instance `<run>` kept: `refresh`, doctor, then runs only the words that instance does not already prove |
+| `verilex ticket <file> [--json]` | Validates a run ticket and prints each field with the level it came from |
 | `verilex words` | Lists the dictionary with each word's promise, claim, `requires`, `provides` and lifecycle status |
 | `verilex claims [--json]` | Lists each claim's current version, the words that prove it, and why it needs review |
 | `verilex runs` | Lists this project's runs and whether each instance was cleaned up |
@@ -227,6 +228,63 @@ item-added@18e2db0cee8f  A named item is in the store.
 
 Inline commands, layout and another sub-feature's text ask for nothing. An edit inside a fenced block of the sub-feature does, and so does a run-history line: verilex cannot tell a dated rule from history, so it asks. A requirement sentence that another claim maps in the same sub-feature is covered there, but only while a curator has admitted one of that claim's words for its current version and sources. A claim without a word, a word that never ran or only ran, and a source added after the word was admitted cover nothing: only the curator's admission says that the word exercises the sentence. Sources are not part of the claim's identity. When the reviewer judges that the claim still says the same, they map it to the new sentences or pin the new prose: the version stays, and the uses recorded for it still count toward `propose`. The curator judged the claim's admitted words against the old sources, though, so each becomes drift-suspect (`admitted before claim item-added's sources changed; propose it again`) and runs live until it is proposed and admitted again. The sources are also part of the proof stamp, so even a restored mapping runs live once. A sentence outside the sub-feature never clears a review. When the claim's meaning changed, the reviewer changes its identity instead, which makes a new version.
 
+## Run tickets
+
+A run ticket fixes everything about one verification run: what it is meant to prove and which brain (harness, model and effort) drives it. Many independent runs can each choose their own brain without editing a shared file. verilex carries and validates the ticket and never acts on its brain fields: it launches no harness and calls no model. A companion launcher reads the resolved ticket and starts the harness.
+
+```yaml
+intent: prove a renamed item keeps its count   # what the run is meant to prove
+diff: main...HEAD          # the change to verify, as a git revision or range; a ticket names intent, diff or both
+profile: deep-verify       # a named profile, optional
+harness: claude-code       # optional when a lower level sets it
+model: claude-opus-5-5
+effort: high               # minimal, low, medium, high, xhigh or max
+token_budget: 400000       # optional, a positive whole number
+time_budget: 45m           # optional, a positive duration such as 30m or 1h30m
+```
+
+Each of `harness`, `model`, `effort`, `token_budget` and `time_budget` comes from the first level that sets it:
+
+1. the ticket;
+2. its named profile;
+3. the project default, in `.verilex/profiles.yaml`;
+4. the user default, in `$XDG_CONFIG_HOME/verilex/profiles.yaml` (by default `~/.config/verilex/profiles.yaml`);
+5. the built-in, which sets only `effort: medium`.
+
+A profiles file holds `defaults` (any of those fields, plus a default `profile`) and named `profiles`:
+
+```yaml
+defaults:
+  profile: quick-verify
+  harness: claude-code
+profiles:
+  quick-verify: {model: claude-haiku-4-5, effort: low, time_budget: 10m}
+  deep-verify: {model: claude-opus-5-5, effort: xhigh, token_budget: 400000}
+```
+
+The profile is the ticket's `profile`, else the project default's, else the user default's. A project profile replaces a user profile of the same name as a whole. A resolved ticket must name a harness and a model.
+
+`verilex ticket <file>` prints the resolved ticket, each field with the level it came from; `--json` prints it whole, with `from` naming each level:
+
+```
+$ verilex ticket deep.yaml
+intent: prove a renamed item keeps its count
+profile: deep-verify  from ticket
+harness: claude-code  from user default
+model: claude-opus-5-5  from project profile deep-verify
+effort: xhigh  from project profile deep-verify
+token_budget: 400000  from project profile deep-verify
+```
+
+`verilex run --ticket <file>` and `verilex plan --ticket <file>` resolve the ticket before anything starts, and refuse an invalid one with exit code `2`, naming the file and the field:
+
+```
+$ verilex run --ticket deep.yaml 'store-open | item-stored apple'
+verilex: refused: ticket deep.yaml: effort: "turbo" is not one of minimal, low, medium, high, xhigh, max
+```
+
+A run records its resolved ticket in its own run record (`ticket` in `--json` and `run.json`), and a plan prints it in `--json`. verilex only reads the ticket and profiles files and writes nothing shared for a ticket, so concurrent runs with different tickets never conflict. The ticket never changes what runs or what is skipped: it is not part of any proof stamp, and `.verilex/profiles.yaml` is not either.
+
 ## The word lifecycle
 
 A word is **provisional** until an outside curator admits it. verilex never calls a model and never edits a verify skill.
@@ -262,6 +320,7 @@ A word without a claim names feature-map sections in `implements`. Such a refere
   words/<word>/run     the executable word
   words/<word>/admission.json  written by `verilex admit`; absent while the word is provisional
   claims/<claim>.yaml  a claim (see Claims)
+  profiles.yaml        run ticket defaults and named profiles, optional (see Run tickets)
   gaps/                notes from `verilex gap` for the verify skill's owner
 ```
 

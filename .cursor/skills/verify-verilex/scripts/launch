@@ -19,7 +19,7 @@ tmp="${TMPDIR:-/tmp}"
 S="$(mktemp -d "$tmp/verify-verilex.XXXXXX")"
 id="$(basename "$S")"
 evidence="$tmp/verify-verilex-evidence/$id"
-mkdir -p "$S/bin" "$S/home" "$S/stores" "$evidence"
+mkdir -p "$S/bin" "$S/home" "$S/stores" "$S/config" "$evidence"
 if [ -n "$bin" ]; then
   source_desc="$(cd "$(dirname "$bin")" && pwd -P)/$(basename "$bin")"
   cp "$bin" "$S/bin/verilex"

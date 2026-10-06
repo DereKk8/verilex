@@ -457,6 +457,7 @@ func TestChainWithDriftSuspectWordIsNeverSkipped(t *testing.T) {
 	}
 	write(t, items, strings.ReplaceAll(original, "`item-add`", "`item-put`"), 0644)
 	record := green(t, root, nil, chain)
+	renamed := record
 	equal(t, record.Rerun, "item-stored apple: drift-suspect: claim item-added needs review: "+itemAdd+": sub-feature item-add is gone")
 	ranLive(t, record)
 
@@ -471,13 +472,12 @@ func TestChainWithDriftSuspectWordIsNeverSkipped(t *testing.T) {
 	contains(t, record.Rerun, "item-listed apple: lifecycle status unreadable: ")
 	ranLive(t, record)
 
-	// Restoring the record lifts the hold. The record is part of the word's stamp, and the
-	// ledger now holds results proven under the unreadable one, so the chain runs once more.
+	// Restoring the record lifts the hold. The record is part of the word's stamp, so the stamps
+	// are again those of the passes recorded before it became unreadable, and those still stand.
 	write(t, admission, saved, 0644)
 	record = green(t, root, nil, chain)
-	equal(t, record.Rerun, "item-listed apple: word changed")
-	ranLive(t, record)
-	equal(t, green(t, root, nil, chain).Skipped, true)
+	equal(t, record.Skipped, true)
+	equal(t, record.Words[2].ReliesOn, renamed.Run)
 }
 
 // Rule: a use is a green or red step in a live run that was itself green or red. Inconclusive

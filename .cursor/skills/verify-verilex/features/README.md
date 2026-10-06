@@ -49,3 +49,5 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Gap](gap.md) - `verilex gap`: note a product moment the feature map lacks.
 - [Check](check.md) - `verilex check`: report drift-suspect admitted words.
 - [Claims](claims.md) - `verilex claims`: claim versions, stale pins, review of changed, moved and unmapped requirements and of changed prose, drift after a remap, coverage only through admitted words, and pinned rules.
+- [Parallel runs](parallel.md) - concurrent runs each own an instance; cleanup and `--continue` refuse a run still going; one taker per kept instance; a run that died.
+- [Shared ledger](ledger.md) - stateless instances share passes through `VERILEX_LEDGER`; concurrent recording with none lost or forged; refusal of unowned, off-contract, other-version and damaged passes; age-out.

@@ -83,8 +83,28 @@ type output struct {
 
 func verilex(t *testing.T, root string, env map[string]string, args ...string) output {
 	t.Helper()
+	return start(t, root, env, args...).wait(t)
+}
+
+// process is a verilex command started in the background.
+type process struct {
+	cmd            *exec.Cmd
+	stdout, stderr *strings.Builder
+}
+
+// start runs verilex in root without waiting for it, so tests can drive several at once.
+func start(t *testing.T, root string, env map[string]string, args ...string) *process {
+	t.Helper()
 	cmd, stdout, stderr := command(root, env, args...)
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	return &process{cmd, stdout, stderr}
+}
+
+func (p *process) wait(t *testing.T) output {
+	t.Helper()
+	err := p.cmd.Wait()
 	code := 0
 	if err != nil {
 		if e, ok := err.(*exec.ExitError); ok {
@@ -93,7 +113,7 @@ func verilex(t *testing.T, root string, env map[string]string, args ...string) o
 			t.Fatal(err)
 		}
 	}
-	return output{code, stdout.String(), stderr.String()}
+	return output{code, p.stdout.String(), p.stderr.String()}
 }
 
 // command prepares the CLI in a product checkout with the test's isolated state, stores and config home.

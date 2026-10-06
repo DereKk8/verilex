@@ -1,9 +1,9 @@
-// Package ledger owns the record of green word results and the decision to reuse them.
+// Package ledger owns the record of green word results and the decision to reuse them: the
+// shared ledger of passes every verilex instance reads and writes (see Store), and the history
+// of a kept instance.
 package ledger
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,65 +13,28 @@ import (
 	"github.com/DereKk8/verilex/internal/verdict"
 )
 
-const version = 1
-
 // MaxAge is how long a recorded green result stands as proof; an older one is never reused.
 const MaxAge = 7 * 24 * time.Hour
 
 // Entry is one word result and the stamp it was proven under. The ledger holds only green
 // entries; a kept instance's history holds every word that drove it, whatever its verdict.
 type Entry struct {
-	Label       string            `json:"label"`
-	Verdict     verdict.Verdict   `json:"verdict"`
-	Stamp       string            `json:"stamp"`
-	Components  map[string]string `json:"components"`
-	Run         string            `json:"run"`
-	Evidence    string            `json:"evidence"`
-	Observation any               `json:"observation"`
-	Recorded    string            `json:"recorded"`
+	Label      string            `json:"label"`
+	Verdict    verdict.Verdict   `json:"verdict"`
+	Stamp      string            `json:"stamp"`
+	Components map[string]string `json:"components"`
+	// Claim is the claim version the word proved, <claim>@<version>; empty for a word without one.
+	Claim string `json:"claim,omitempty"`
+	// Run recorded the result; Owner is the run that launched the instance it drove.
+	Run         string `json:"run"`
+	Owner       string `json:"owner,omitempty"`
+	Evidence    string `json:"evidence"`
+	Observation any    `json:"observation"`
+	Recorded    string `json:"recorded"`
 	// Slot and ReadOnly are kept only in an instance's history: where in its chain the word
 	// ran, and whether its contract declared that it never changes the instance.
 	Slot     string `json:"slot,omitempty"`
 	ReadOnly bool   `json:"read_only,omitempty"`
-}
-
-type document struct {
-	Version int              `json:"version"`
-	Entries map[string]Entry `json:"entries"`
-}
-
-// Ledger is a project's file of green results, keyed by stamp slot.
-type Ledger struct{ path string }
-
-// At opens the ledger kept in dir.
-func At(dir string) Ledger { return Ledger{filepath.Join(dir, "ledger.json")} }
-
-// Reuse returns a recorded green entry for every step when each step's stamp matches one exactly,
-// its evidence still exists, it is younger than MaxAge and no step is held (its word provisional
-// or drift-suspect). Otherwise it returns why the chain has to run.
-// Reuse is all or nothing: every run launches a fresh instance, so a step that runs needs the
-// effects of every step before it, and every step after it depends on its new result.
-func (l Ledger) Reuse(labels []string, stamps []stamp.Stamp) ([]Entry, string) {
-	doc, err := l.read(lockShared)
-	if err != nil {
-		return nil, "the ledger is unreadable: " + err.Error()
-	}
-	now := time.Now()
-	entries := make([]Entry, 0, len(stamps))
-	for i, s := range stamps {
-		if s.Unclear != "" {
-			return nil, labels[i] + ": " + s.Unclear
-		}
-		entry, ok := doc.Entries[s.Slot]
-		if !ok {
-			return nil, labels[i] + ": no green result on record"
-		}
-		if why := Proves(entry, s, now); why != "" {
-			return nil, labels[i] + ": " + why
-		}
-		entries = append(entries, entry)
-	}
-	return entries, ""
 }
 
 // Proves says why entry cannot stand for a step stamped s, or "" when it can: the entry is
@@ -92,17 +55,26 @@ func Proves(entry Entry, s stamp.Stamp, now time.Time) string {
 	if info, err := os.Stat(filepath.Join(entry.Evidence, "stdout")); err != nil || info.IsDir() {
 		return "evidence from run " + entry.Run + " is gone"
 	}
-	recorded, err := time.Parse(time.RFC3339, entry.Recorded)
-	switch {
-	case err != nil:
-		return "the result from run " + entry.Run + " has no readable date"
-	case recorded.After(now.Add(time.Minute)):
-		return "the result from run " + entry.Run + " is dated in the future"
-	case now.Sub(recorded) >= MaxAge:
-		return fmt.Sprintf("the green result from run %s expired (%dd old; results stand 7d)", entry.Run, int(now.Sub(recorded).Hours()/24))
+	if why := fresh(entry.Run, entry.Recorded, now); why != "" {
+		return why
 	}
 	if s.Hold != "" {
 		return s.Hold
+	}
+	return ""
+}
+
+// fresh says why a result recorded by run at recorded no longer stands: it has no readable date,
+// is dated in the future, or is MaxAge old or older. It is "" while the result stands.
+func fresh(run, recorded string, now time.Time) string {
+	at, err := time.Parse(time.RFC3339, recorded)
+	switch {
+	case err != nil:
+		return "the result from run " + run + " has no readable date"
+	case at.After(now.Add(time.Minute)):
+		return "the result from run " + run + " is dated in the future"
+	case now.Sub(at) >= MaxAge:
+		return fmt.Sprintf("the green result from run %s expired (%dd old; results stand 7d)", run, int(now.Sub(at).Hours()/24))
 	}
 	return ""
 }
@@ -155,77 +127,4 @@ func Continue(history []Entry, labels []string, stamps []stamp.Stamp) (reused []
 		return reused, rerun, nil
 	}
 	return reused, "", nil
-}
-
-// Record stores green entries by slot, replacing what each slot held.
-func (l Ledger) Record(entries map[string]Entry) error {
-	if len(entries) == 0 {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(l.path), 0700); err != nil {
-		return err
-	}
-	unlock, err := lock(l.path+".lock", lockExclusive)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	doc, err := load(l.path)
-	if err != nil {
-		// An unreadable ledger proves nothing; start a fresh one rather than keep guessing.
-		doc = document{Version: version, Entries: map[string]Entry{}}
-	}
-	for slot, entry := range entries {
-		doc.Entries[slot] = entry
-	}
-	data, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(l.path), "ledger-*.tmp")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err = tmp.Write(append(data, '\n')); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err = tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), l.path)
-}
-
-func (l Ledger) read(mode int) (document, error) {
-	if _, err := os.Stat(filepath.Dir(l.path)); errors.Is(err, os.ErrNotExist) {
-		return document{Version: version, Entries: map[string]Entry{}}, nil
-	}
-	unlock, err := lock(l.path+".lock", mode)
-	if err != nil {
-		return document{}, err
-	}
-	defer unlock()
-	return load(l.path)
-}
-
-func load(path string) (document, error) {
-	doc := document{Version: version, Entries: map[string]Entry{}}
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return doc, nil
-	}
-	if err != nil {
-		return doc, err
-	}
-	if err = json.Unmarshal(data, &doc); err != nil {
-		return doc, err
-	}
-	if doc.Version != version {
-		return document{Version: version, Entries: map[string]Entry{}}, errors.New("unknown ledger version")
-	}
-	if doc.Entries == nil {
-		doc.Entries = map[string]Entry{}
-	}
-	return doc, nil
 }

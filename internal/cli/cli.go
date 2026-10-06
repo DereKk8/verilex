@@ -3,6 +3,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -68,6 +69,8 @@ func Main(argv []string, out, stderr io.Writer) int {
 			status := "running"
 			if record.Verdict != nil {
 				status = string(*record.Verdict)
+			} else if !runner.Running(project, record.Run) {
+				status = "died"
 			}
 			fmt.Fprintf(out, "%s  %s  cleanup=%s  %s\n", record.Run, status, record.Cleanup, record.Chain)
 		}
@@ -144,6 +147,9 @@ func Main(argv []string, out, stderr io.Writer) int {
 		return refuse(err)
 	}
 	record, runErr := run.Execute(plan, opts)
+	if refused := (runner.Refused{}); errors.As(runErr, &refused) {
+		return refuse(refused.Err)
+	}
 	if args.json {
 		if err = encode(out, record); err != nil {
 			return refuse(err)
@@ -333,16 +339,12 @@ var flagHelp = map[string]string{
 }
 
 func cleanup(project dictionary.Project, id string, out io.Writer, refuse func(error) int) int {
-	dir := filepath.Join(runner.RunsDir(project), id)
-	path := filepath.Join(dir, "run.json")
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
-		return refuse(fmt.Errorf("%s is not a run of %s", id, project.Name))
-	}
-	record, err := runner.ReadRecord(path)
+	record, release, err := runner.Claim(project, id)
 	if err != nil {
 		return refuse(err)
 	}
+	defer release()
+	dir := filepath.Join(runner.RunsDir(project), id)
 	if record.Cleanup == "done" {
 		fmt.Fprintf(out, "verilex: %s was already cleaned up\n", id)
 		return 0

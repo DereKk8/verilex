@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# verify-verilex Helper: rewrite fields of a ledger pass under the name its new content earns.
+# usage: reseal PASS FIELD=VALUE [FIELD=VALUE...]
+# It plays another writer of a shared ledger (a tool or a person that bypasses verilex): VALUE is
+# read as JSON when it parses, else as a string. It removes PASS and prints the new path.
+set -euo pipefail
+[ $# -ge 2 ] || { echo "usage: reseal PASS FIELD=VALUE [FIELD=VALUE...]" >&2; exit 2; }
+exec python3 - "$@" <<'PY'
+import hashlib
+import json
+import os
+import sys
+
+path = sys.argv[1]
+fields = json.load(open(path))
+for change in sys.argv[2:]:
+    key, _, value = change.partition("=")
+    try:
+        fields[key] = json.loads(value)
+    except ValueError:
+        fields[key] = value
+data = (json.dumps(fields, indent=2) + "\n").encode()
+new = os.path.join(os.path.dirname(path), f"{fields['stamp']}.{hashlib.sha256(data).hexdigest()}.json")
+os.remove(path)
+with open(new, "wb") as out:
+    out.write(data)
+print(new)
+PY

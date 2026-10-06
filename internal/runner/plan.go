@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/ledger"
@@ -58,9 +59,9 @@ func (p Plan) Skipped() bool { return p.Rerun == "" }
 // (ledger.Continue). It runs nothing. An error refuses the chain before anything starts.
 func Decide(project dictionary.Project, steps []dictionary.Step, opts Options) (Plan, error) {
 	p := Plan{Continues: opts.Continue, Ticket: opts.Ticket, stamps: stamp.Chain(project, steps)}
-	labels := make([]string, len(steps))
+	labels, claims := make([]string, len(steps)), make([]string, len(steps))
 	for i, step := range steps {
-		labels[i] = step.Label()
+		labels[i], claims[i] = step.Label(), step.Word.Proves()
 	}
 	var err error
 	switch {
@@ -78,7 +79,7 @@ func Decide(project dictionary.Project, steps []dictionary.Step, opts Options) (
 	case opts.Fresh:
 		p.Rerun = "--fresh asked for a live run"
 	default:
-		if p.entries, p.Rerun = ledger.At(RunsDir(project)).Reuse(labels, p.stamps); p.Rerun != "" {
+		if p.entries, p.Rerun = ledger.At(LedgerDir(project)).Reuse(labels, claims, p.stamps); p.Rerun != "" {
 			p.entries = nil
 		}
 	}
@@ -94,15 +95,12 @@ func Decide(project dictionary.Project, steps []dictionary.Step, opts Options) (
 
 // Kept loads a run whose instance is still alive, so another run may continue it.
 func Kept(project dictionary.Project, id string) (*Record, error) {
-	path := filepath.Join(RunsDir(project), id, "run.json")
-	info, err := os.Stat(path)
-	if id == "" || filepath.Base(id) != id || id == "." || id == ".." || err != nil || info.IsDir() {
-		return nil, fmt.Errorf("%s is not a run of %s", id, project.Name)
-	}
-	record, err := ReadRecord(path)
-	switch {
-	case err != nil:
+	record, release, err := hold(project, id, shared)
+	if err != nil {
 		return nil, err
+	}
+	release()
+	switch {
 	case record.Cleanup == "continued":
 		return nil, fmt.Errorf("%s was continued by %s; continue that run instead", id, record.ContinuedBy)
 	case record.Cleanup != "kept":
@@ -115,6 +113,54 @@ func Kept(project dictionary.Project, id string) (*Record, error) {
 		return nil, fmt.Errorf("missing executable frame step %s; --continue needs it", project.Frame("refresh"))
 	}
 	return &record, nil
+}
+
+// Claim takes hold of a recorded run, so that this process alone may act on its instance: tear
+// it down or take it over. It refuses while the run's own process lives, and while another
+// command tears its instance down. A run whose process died holds nothing, so its instance can
+// still be torn down. release lets go.
+func Claim(project dictionary.Project, id string) (record Record, release func(), err error) {
+	return hold(project, id, exclusive)
+}
+
+// Running reports whether a recorded run's process still lives.
+func Running(project dictionary.Project, id string) bool {
+	return locked(filepath.Join(RunsDir(project), id, "run.lock"))
+}
+
+// holdWait is how long a command waits for another that holds a finished run only briefly:
+// one reading it, or one taking its instance over.
+const holdWait = 500 * time.Millisecond
+
+// hold locks a recorded run in mode and reads its record under the lock. A run that is still
+// going is refused at once; another holder is waited for up to holdWait, so commands that only
+// read a run never refuse one another.
+func hold(project dictionary.Project, id string, mode int) (record Record, release func(), err error) {
+	dir := filepath.Join(RunsDir(project), id)
+	info, err := os.Stat(filepath.Join(dir, "run.json"))
+	if id == "" || filepath.Base(id) != id || id == "." || id == ".." || err != nil || info.IsDir() {
+		return record, nil, fmt.Errorf("%s is not a run of %s", id, project.Name)
+	}
+	for deadline := time.Now().Add(holdWait); ; time.Sleep(10 * time.Millisecond) {
+		release, err = tryLock(filepath.Join(dir, "run.lock"), mode)
+		if !errors.Is(err, errBusy) {
+			break
+		}
+		if current, readErr := ReadRecord(filepath.Join(dir, "run.json")); readErr == nil && current.Cleanup == "pending" {
+			return record, nil, fmt.Errorf("%s is still running and owns its instance; wait until it finishes", id)
+		}
+		if time.Now().After(deadline) {
+			return record, nil, fmt.Errorf("%s's instance is in use by another verilex command; try again once it finishes", id)
+		}
+	}
+	if err != nil {
+		return record, nil, err
+	}
+	if record, err = ReadRecord(filepath.Join(dir, "run.json")); err != nil {
+		release()
+		return record, nil, err
+	}
+	return record, release, nil
 }
 
 // live returns the words a run drove itself, leaving out results it reused.

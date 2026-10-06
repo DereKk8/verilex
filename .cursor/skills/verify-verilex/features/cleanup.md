@@ -1,6 +1,6 @@
 # Cleanup
 
-`verilex cleanup <run>` tears down the instance a `--keep` run left alive, through the project's `cleanup` frame step. It is safe to repeat, explains runs that launched nothing, and refuses unknown runs and runs another run took over.
+`verilex cleanup <run>` tears down the instance a `--keep` run left alive, through the project's `cleanup` frame step. It is safe to repeat, explains runs that launched nothing, and refuses unknown runs, runs that are still going and runs another run took over. A run whose process died can still be cleaned up.
 
 ## Sub-features
 
@@ -9,6 +9,8 @@
 - `cleanup-none` reports that a skipped run launched nothing.
 - `cleanup-refused-unknown` refuses an id that is not a run of the project.
 - `cleanup-refused-continued` points at the run that took the instance over.
+- `cleanup-refused-running` refuses a run that is still going, before touching its instance.
+- `cleanup-dead-run` tears down the instance of a run whose process died.
 
 ## How to get to it (user POV)
 
@@ -27,6 +29,8 @@ Preconditions:
 - **Unknown.** Run `"$S/vx" cl-unknown verilex cleanup 123-nope`. Stderr `verilex: refused: 123-nope is not a run of tally`, exit `2`.
 - **None.** Use [run.md](run.md) `run-skip`: `verilex cleanup <skipped run>` prints `verilex: <run> launched nothing; it relied on stamps`.
 - **Continued.** Use [continue.md](continue.md) `continue-handover`: `refused: <KEPT> was continued by <C>; clean up that run instead`.
+- **Running.** Use [parallel.md](parallel.md) `parallel-refuse-running`: `refused: <A> is still running and owns its instance; wait until it finishes`.
+- **Dead run.** Use [parallel.md](parallel.md) `parallel-dead-run`: `cleanup: done` for a run shown as `died`.
 
 ## Gotchas
 

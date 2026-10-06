@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# verify-verilex Helper: audit a verilex ledger against the run records that wrote it, without verilex code.
+#
+# usage: ledger-audit LEDGER HOME [HOME...]
+#   LEDGER  the project's ledger directory, e.g. "$S/ledger/tally" or "$S/home/tally/ledger"
+#   HOME    every VERILEX_HOME whose runs recorded into it, e.g. "$S"/instances/*
+#
+# A pass is intact when its file content hashes to the digest in its name. It is matched when a
+# run record in one of the homes holds a green live step with the same run, label and stamp, and
+# the pass's copy of the evidence holds the same result object (stdout). A proven step is a green
+# live step of a run that was neither inconclusive nor a continuation. lost counts proven steps
+# with no pass; forged counts intact passes that match no proven step.
+set -euo pipefail
+[ $# -ge 2 ] || { echo "usage: ledger-audit LEDGER HOME [HOME...]" >&2; exit 2; }
+exec python3 - "$@" <<'PY'
+import collections
+import glob
+import hashlib
+import json
+import os
+import re
+import sys
+
+ledger, homes = sys.argv[1], sys.argv[2:]
+name_re = re.compile(r"^([0-9a-f]{64})\.([0-9a-f]{64})\.json$")
+
+proven = {}
+for home in homes:
+    for path in glob.glob(os.path.join(home, "tally", "runs", "*", "run.json")):
+        record = json.load(open(path))
+        if record.get("verdict") in (None, "inconclusive") or record.get("continues"):
+            continue
+        for word in record.get("words", []):
+            if word.get("verdict") != "green" or word.get("relies_on") or not word.get("stamp"):
+                continue
+            label = " ".join([word["word"], *word.get("args", [])])
+            stdout = open(os.path.join(word["evidence"], "stdout"), "rb").read()
+            proven[(record["run"], label, word["stamp"])] = stdout
+
+counts = collections.Counter()
+slots = collections.Counter()
+seen = set()
+for path in sorted(glob.glob(os.path.join(ledger, "passes", "*", "*.json"))):
+    counts["passes"] += 1
+    m = name_re.match(os.path.basename(path))
+    data = open(path, "rb").read()
+    if not m or hashlib.sha256(data).hexdigest() != m.group(2):
+        counts["damaged"] += 1
+        continue
+    counts["intact"] += 1
+    p = json.loads(data)
+    slots[os.path.basename(os.path.dirname(path))] += 1
+    key = (p["run"], p["label"], p["stamp"])
+    copy = os.path.join(ledger, p["evidence"], "stdout")
+    stdout = open(copy, "rb").read() if os.path.isfile(copy) else None
+    if p["owner"] != p["run"]:
+        counts["unowned"] += 1
+    if key in proven and stdout == proven[key] and m.group(1) == p["stamp"]:
+        counts["matched"] += 1
+        seen.add(key)
+    else:
+        counts["forged"] += 1
+        print("forged:", path)
+counts["proven"] = len(proven)
+counts["lost"] = len(set(proven) - seen)
+for key in sorted(set(proven) - seen):
+    print("lost:", *key)
+print("  ".join(f"{k}: {counts[k]}" for k in ("proven", "passes", "intact", "matched", "lost", "forged", "damaged", "unowned")))
+print("passes per slot:", " ".join(str(n) for n in sorted(slots.values())))
+sys.exit(1 if counts["lost"] or counts["forged"] or counts["damaged"] else 0)
+PY

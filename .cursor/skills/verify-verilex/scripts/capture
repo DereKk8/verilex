@@ -1,21 +1,31 @@
 #!/usr/bin/env bash
 # verify-verilex Drive: run one command inside a session and keep its transcript as evidence.
-# usage: capture SESSION LABEL CMD [ARG...]   (launch writes SESSION/vx, which fills in SESSION)
+# usage: [VX_INSTANCE=NAME] capture SESSION LABEL CMD [ARG...]   (launch writes SESSION/vx, which fills in SESSION)
 set -uo pipefail
 S="${1:?usage: capture SESSION LABEL CMD [ARG...]}"; label="${2:?missing LABEL}"; shift 2
 [ $# -gt 0 ] || { echo "capture: missing CMD" >&2; exit 2; }
 [ -f "$S/session" ] && [ -f "$S/owner" ] || { echo "capture: $S is not a verify-verilex session" >&2; exit 2; }
 evidence="$(sed -n 's/^evidence=//p' "$S/session")"
+# mkdir without -p claims the directory, so concurrent calls never share one. Calls started at
+# once may carry the same number under different labels.
 n=$(( $(find "$evidence" -mindepth 1 -maxdepth 1 -type d | wc -l) + 1 ))
-dir="$evidence/$(printf '%03d' "$n")-$label"
-mkdir -p "$dir"
+until dir="$evidence/$(printf '%03d' "$n")-$label" && mkdir "$dir" 2>/dev/null; do
+  [ -d "$evidence" ] || { echo "capture: evidence directory $evidence is gone" >&2; exit 2; }
+  n=$((n + 1))
+done
 q() { case "$1" in ''|*[!A-Za-z0-9_./=:@%+,-]*) printf "'%s'" "${1//\'/\'\\\'\'}" ;; *) printf %s "$1" ;; esac; }
 line=""; for arg in "$@"; do line+="${line:+ }$(q "$arg")"; done
 echo "$line" > "$dir/command"
-env | grep -E '^(TALLY_|VERILEX_)' | grep -v '^VERILEX_HOME=' > "$dir/env" || true
+env | grep -E '^(TALLY_|VERILEX_|VX_)' | grep -v '^VERILEX_HOME=' > "$dir/env" || true
+# VX_INSTANCE=<name> plays a stateless instance: a state home of its own under $S/instances.
+home="$S/home"
+if [ -n "${VX_INSTANCE:-}" ]; then
+  case "$VX_INSTANCE" in *[!A-Za-z0-9_-]*) echo "capture: VX_INSTANCE must be a plain name" >&2; exit 2 ;; esac
+  home="$S/instances/$VX_INSTANCE"
+fi
 (
   cd "$S/tally" || exit 2
-  export VERILEX_HOME="$S/home" TALLY_STORES="$S/stores" XDG_CONFIG_HOME="$S/config" PATH="$S/bin:$PATH"
+  export VERILEX_HOME="$home" TALLY_STORES="$S/stores" XDG_CONFIG_HOME="$S/config" PATH="$S/bin:$PATH"
   "$@"
 ) > "$dir/stdout" 2> "$dir/stderr"
 code=$?

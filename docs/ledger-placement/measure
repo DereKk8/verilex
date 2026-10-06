@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+# Measure where the shared ledger should live, on concurrent stateless runs of the tally sample
+# product. Each stateless instance is a verilex process with a state home of its own.
+#
+# usage: docs/ledger-placement/measure [WORKDIR]   (from the repository root; needs go, git, python3)
+#
+#  1. directory  - the ledger this branch ships: VERILEX_LEDGER on a directory all instances share.
+#  2. branches   - two concurrent "branches" (different stamps for one chain) recording into today's
+#                  single ledger.json (main) and into the directory ledger.
+#  3. in-repo    - each instance a git clone that commits its ledger and pushes, pulling with
+#                  rebase until the push lands: today's ledger.json against the directory format.
+#  4. service    - a minimal in-memory HTTP ledger service (service.go) on loopback, against the
+#                  directory ledger's own record and read calls under the same load (store.go).
+#  5. scale      - the skip decision with 0, 1000 and 10000 other passes in one slot.
+#  6. trust      - which changes to a pass a reader refuses, and which it cannot tell apart.
+set -euo pipefail
+repo="$(git rev-parse --show-toplevel)"
+audit="$repo/.cursor/skills/verify-verilex/scripts/ledger-audit"
+W="${1:-$(mktemp -d "${TMPDIR:-/tmp}/ledger-placement.XXXXXX")}"
+mkdir -p "$W/bin" "$W/main"
+echo "workdir: $W"
+(cd "$repo" && go build -o "$W/bin/new" ./cmd/verilex)
+git -C "$repo" archive "$(git -C "$repo" merge-base HEAD origin/main)" | tar -x -C "$W/main"
+(cd "$W/main" && go build -o "$W/bin/old" ./cmd/verilex)
+echo "new: working tree at $(git -C "$repo" rev-parse --short HEAD)  old: $(git -C "$repo" rev-parse --short "$(git -C "$repo" merge-base HEAD origin/main)") (main)"
+
+ms() { python3 -c "import sys; print(round((float(sys.argv[2]) - float(sys.argv[1])) * 1000))" "$1" "$2"; }
+now() { date +%s.%N; }
+
+# product BIN DIR: a copy of tally whose three words a curator admitted, through the CLI.
+product() {
+  local bin=$1 dir=$2 chain='store-open | item-stored apple | item-listed apple'
+  cp -R "$repo/tests/fixtures/tally" "$dir"
+  mkdir -p "$dir.stores" "$dir.verdicts"
+  local env=(VERILEX_HOME="$dir.admit" TALLY_STORES="$dir.stores")
+  (cd "$dir" && env "${env[@]}" "$bin" run "$chain" >/dev/null && env "${env[@]}" "$bin" run "$chain" >/dev/null)
+  for word in store-open item-stored item-listed; do
+    local packet
+    packet=$(cd "$dir" && env "${env[@]}" "$bin" propose "$word" | sed -n 's/^proposed [^:]*: packet \([0-9a-f]*\) .*/\1/p')
+    printf '{"word": "%s", "packet": "%s", "verdict": "admit", "curator": "measure", "reason": "baseline"}\n' "$word" "$packet" > "$dir.verdicts/$word.json"
+    (cd "$dir" && env "${env[@]}" "$bin" admit "$word" --verdict "$dir.verdicts/$word.json" >/dev/null)
+  done
+}
+
+# median_plan DIR N ENV...: the median wall time of N `verilex plan` calls, in ms.
+median_plan() {
+  local dir=$1 n=$2; shift 2
+  local times=()
+  for _ in $(seq "$n"); do
+    local t0 t1; t0=$(now)
+    (cd "$dir" && env "$@" "$W/bin/new" plan 'store-open | item-stored f1 | item-listed f1' >/dev/null)
+    t1=$(now); times+=("$(ms "$t0" "$t1")")
+  done
+  printf '%s\n' "${times[@]}" | sort -n | sed -n "$(( (n + 1) / 2 ))p"
+}
+
+echo
+echo "## 1. directory ledger shared by concurrent stateless instances"
+product "$W/bin/new" "$W/p1"
+for n in 1 4 16 32; do
+  d="$W/m1/n$n"; mkdir -p "$d"
+  t0=$(now)
+  for i in $(seq "$n"); do
+    (cd "$W/p1" && VERILEX_HOME="$d/home$i" VERILEX_LEDGER="$d/ledger" TALLY_STORES="$W/p1.stores" "$W/bin/new" run "store-open | item-stored f$i | item-listed f$i" > "$d/out$i" 2>&1) &
+  done
+  wait
+  t1=$(now)
+  greens=$(grep -l '^green: 3 green; run' "$d"/out* | wc -l)
+  result=$("$audit" "$d/ledger/tally" "$d"/home* | head -1 || true)
+  plan=$(median_plan "$W/p1" 9 VERILEX_HOME="$d/fresh" VERILEX_LEDGER="$d/ledger")
+  skip=$(cd "$W/p1" && VERILEX_HOME="$d/fresh" VERILEX_LEDGER="$d/ledger" "$W/bin/new" plan 'store-open | item-stored f1 | item-listed f1' | head -1)
+  echo "n=$n: $greens/$n green in $(ms "$t0" "$t1")ms; $result; fresh instance: '$skip', plan median ${plan}ms"
+done
+bytes=$(du -sb "$W/m1/n32/ledger/tally/passes" | cut -f1); passes=$(find "$W/m1/n32/ledger/tally/passes" -name '*.json' | wc -l)
+ebytes=$(du -sb "$W/m1/n32/ledger/tally/evidence" | cut -f1)
+echo "cost: $((bytes / passes)) bytes of pass file and $((ebytes / passes)) bytes of evidence per pass (du, 4 KiB blocks for directories)"
+
+echo
+echo "## 2. two concurrent branches recording the same chain"
+product "$W/bin/old" "$W/p2old"
+product "$W/bin/new" "$W/p2new"
+for format in old new; do
+  d="$W/m2/$format"; mkdir -p "$d"
+  for i in 1 2 3 4 5 6 7 8; do
+    branch=a; extra=(); if [ $((i % 2)) -eq 0 ]; then branch=b; extra=(TALLY_DEFECT=none); fi
+    if [ "$format" = old ]; then home="$d/home"; else home="$d/home$i"; fi
+    (cd "$W/p2$format" && env VERILEX_HOME="$home" VERILEX_LEDGER="$d/ledger" TALLY_STORES="$W/p2$format.stores" "${extra[@]}" "$W/bin/$format" run 'store-open | item-stored apple | item-listed apple' > "$d/out$i" 2>&1) &
+  done
+  wait
+  if [ "$format" = old ]; then planhome="$d/home"; else planhome="$d/planner"; fi
+  a=$(cd "$W/p2$format" && VERILEX_HOME="$planhome" VERILEX_LEDGER="$d/ledger" "$W/bin/$format" plan 'store-open | item-stored apple | item-listed apple' | head -1)
+  b=$(cd "$W/p2$format" && VERILEX_HOME="$planhome" VERILEX_LEDGER="$d/ledger" TALLY_DEFECT=none "$W/bin/$format" plan 'store-open | item-stored apple | item-listed apple' | head -1)
+  label=$([ "$format" = old ] && echo "single ledger.json (main), one shared state home" || echo "directory ledger, one state home per instance")
+  echo "$label: branch a: '$a'; branch b: '$b'"
+done
+
+echo
+echo "## 3. in-repo: every instance commits its ledger and pushes"
+for format in old new; do
+  for n in 4 16; do
+    d="$W/m3/$format-n$n"; mkdir -p "$d/stores"
+    git init -q --bare "$d/remote.git"
+    git clone -q "$d/remote.git" "$d/seed" 2>/dev/null
+    product "$W/bin/$format" "$d/seed/tally"
+    rm -rf "$d/seed/tally.admit" "$d/seed/tally.stores" "$d/seed/tally.verdicts"
+    (cd "$d/seed" && git add -A && git -c user.name=m -c user.email=m@x commit -qm seed && git push -q origin HEAD:main 2>/dev/null)
+    git -C "$d/remote.git" gc -q
+    seeded=$(du -sb "$d/remote.git/objects" | cut -f1)
+    for i in $(seq "$n"); do git clone -q -b main "$d/remote.git" "$d/c$i" 2>/dev/null; done
+    t0=$(now)
+    for i in $(seq "$n"); do
+      (
+        cd "$d/c$i/tally"
+        if [ "$format" = old ]; then
+          VERILEX_HOME="$d/c$i/.state" TALLY_STORES="$d/stores" "$W/bin/old" run "store-open | item-stored f$i | item-listed f$i" >/dev/null
+          mkdir -p ../ledger && cp "$d/c$i/.state/tally/runs/ledger.json" ../ledger/ledger.json
+        else
+          VERILEX_HOME="$d/c$i/.state" VERILEX_LEDGER="$d/c$i/ledger" TALLY_STORES="$d/stores" "$W/bin/new" run "store-open | item-stored f$i | item-listed f$i" >/dev/null
+        fi
+        cd "$d/c$i"
+        git add ledger && git -c user.name=m -c user.email=m@x commit -qm "ledger $i"
+        attempts=1 conflicts=0
+        until git push -q origin HEAD:main 2>/dev/null; do
+          if ! git -c user.name=m -c user.email=m@x pull -q --rebase origin main >/dev/null 2>&1; then
+            conflicts=$((conflicts + 1))
+            git rebase --abort >/dev/null 2>&1 || true
+            # A merge of two ledger.json files needs a person; the pass is dropped instead.
+            git reset -q --hard origin/main
+            break
+          fi
+          attempts=$((attempts + 1))
+        done
+        echo "$attempts $conflicts" > "$d/push$i"
+      ) &
+    done
+    wait
+    t1=$(now)
+    # The instances are stateless: once they are gone, only what they pushed is left.
+    rm -rf "$d"/c*/.state
+    git clone -q -b main "$d/remote.git" "$d/check" 2>/dev/null
+    if [ "$format" = old ]; then
+      kept=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["entries"]))' "$d/check/ledger/ledger.json" 2>/dev/null || echo 0)
+      expected=$((2 * n + 1))
+    else
+      kept=$(find "$d/check/ledger/tally/passes" -name '*.json' | wc -l)
+      expected=$((3 * n))
+    fi
+    pushes=$(cat "$d"/push* | awk '{a+=$1; c+=$2} END {print a " pushes, " c " rebase conflicts"}')
+    git -C "$d/remote.git" gc -q
+    grown=$(( $(du -sb "$d/remote.git/objects" | cut -f1) - seeded ))
+    label=$([ "$format" = old ] && echo "ledger.json (main)" || echo "directory")
+    echo "$label n=$n: $pushes; $kept of $expected entries on main; $(ms "$t0" "$t1")ms; the repository grew ${grown} bytes packed ($((grown / kept)) per entry kept)"
+    if [ "$format" = new ]; then
+      skip=$(cd "$d/check/tally" && VERILEX_HOME="$d/check/.state" VERILEX_LEDGER="$d/check/ledger" "$W/bin/new" plan 'store-open | item-stored f1 | item-listed f1' | head -1)
+      echo "  a fresh clone of main plans: '$skip'"
+    else
+      skip=$(cd "$d/check/tally" && mkdir -p "$d/check/.state/tally/runs" && cp "$d/check/ledger/ledger.json" "$d/check/.state/tally/runs/" && VERILEX_HOME="$d/check/.state" "$W/bin/old" plan 'store-open | item-stored f1 | item-listed f1' | head -1)
+      echo "  a fresh clone of main plans: '$skip'"
+    fi
+  done
+done
+
+echo
+echo "## 4. a small service, against the directory ledger's own calls"
+pass=$(find "$W/m1/n32/ledger/tally/passes" -name '*.json' -print -quit)
+for n in 1 4 16 32; do
+  (cd "$repo/docs/ledger-placement" && go run service.go -n "$n" -pass "$pass")
+  mkdir -p "$W/m4/n$n" && (cd "$repo/docs/ledger-placement" && go run store.go -n "$n" -dir "$W/m4/n$n")
+done
+
+echo
+echo "## 5. scale: the skip decision with many other passes in one slot"
+d="$W/m5"; mkdir -p "$d"
+(cd "$W/p1" && VERILEX_HOME="$d/home" TALLY_STORES="$W/p1.stores" "$W/bin/new" run 'store-open | item-stored f1 | item-listed f1' >/dev/null)
+linked=$(find "$d/home/tally/ledger/evidence" -type f -links +1 | wc -l); all=$(find "$d/home/tally/ledger/evidence" -type f | wc -l)
+echo "default ledger: $linked of $all evidence files are hard links to the run's own files, so they take no extra space"
+slotdir=$(dirname "$(grep -rl '"label": "item-stored f1"' "$d/home/tally/ledger/passes")")
+for extra in 0 1000 10000; do
+  have=$(find "$slotdir" -name '*.json' | wc -l)
+  python3 - "$slotdir" $((extra + 1 - have)) <<'PY'
+import os, secrets, sys
+slot, n = sys.argv[1], int(sys.argv[2])
+src = next(os.path.join(slot, f) for f in os.listdir(slot) if f.endswith(".json"))
+data = open(src, "rb").read()
+for _ in range(max(n, 0)):
+    open(os.path.join(slot, f"{secrets.token_hex(32)}.{secrets.token_hex(32)}.json"), "wb").write(data)
+PY
+  plan=$(median_plan "$W/p1" 9 VERILEX_HOME="$d/home")
+  echo "$extra other passes in the slot: plan median ${plan}ms"
+done
+
+echo
+echo "## 6. trust: a reader re-checks every pass"
+d="$W/m6"; mkdir -p "$d"
+reseal="$repo/.cursor/skills/verify-verilex/scripts/reseal"
+attempt() {
+  local name=$1; shift
+  local fruit="t$RANDOM"
+  (cd "$W/p1" && VERILEX_HOME="$d/home" VERILEX_LEDGER="$d/ledger" TALLY_STORES="$W/p1.stores" "$W/bin/new" run "store-open | item-stored $fruit | item-listed $fruit" >/dev/null)
+  local pass evidence
+  pass=$(grep -rl "\"label\": \"item-stored $fruit\"" "$d/ledger/tally/passes")
+  evidence="$d/ledger/tally/$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["evidence"])' "$pass")"
+  "$@" "$pass" "$evidence"
+  local verdict
+  verdict=$(cd "$W/p1" && VERILEX_HOME="$d/home" VERILEX_LEDGER="$d/ledger" "$W/bin/new" plan "store-open | item-stored $fruit | item-listed $fruit" | head -1 | sed "s/$fruit/<item>/g")
+  echo "$name: $verdict"
+}
+edit_in_place() { sed -i 's/"recorded": "/"recorded": "2/' "$1"; }
+other_owner() { "$reseal" "$1" owner=1767225600-a1b2c3d4e5f6 >/dev/null; }
+other_claim() { "$reseal" "$1" claim=item-added@000000000000 >/dev/null; }
+younger() { "$reseal" "$1" recorded="$(date -u +%Y-%m-%dT%H:%M:%SZ)" >/dev/null; }
+no_observation() { rm "$2/stdout"; echo '{"verdict": "pass"}' > "$2/stdout"; "$reseal" "$1" result="$(sha256sum < "$2/stdout" | cut -d' ' -f1)" >/dev/null; }
+fake_observation() { rm "$2/stdout"; echo '{"verdict": "pass", "observation": "invented"}' > "$2/stdout"; "$reseal" "$1" result="$(sha256sum < "$2/stdout" | cut -d' ' -f1)" observation=invented >/dev/null; }
+attempt "edited in place" edit_in_place
+attempt "resealed with another owner" other_owner
+attempt "resealed with another claim version" other_claim
+attempt "resealed with evidence that misses the contract" no_observation
+attempt "resealed younger, everything else intact" younger
+attempt "resealed with invented evidence that meets the contract" fake_observation

@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -29,47 +31,79 @@ type Run struct {
 	record   Record
 	// keep is set when the instance outlives the run, which is when its history is recorded.
 	keep bool
+	// release lets go of the lock the run holds for as long as it lives (see Claim).
+	release func()
 }
 
+// New records a run under an id no other run of the project holds and keeps hold of it until
+// Execute returns: while it lives, no other verilex process may tear down or take over its instance.
 func New(project dictionary.Project, chain string, steps []dictionary.Step) (*Run, error) {
-	var suffix [3]byte
-	if _, err := rand.Read(suffix[:]); err != nil {
-		return nil, err
-	}
-	id := fmt.Sprintf("%d-%s", time.Now().Unix(), hex.EncodeToString(suffix[:]))
-	dir := filepath.Join(RunsDir(project), id)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, err
-	}
 	patterns, err := patterns(project)
 	if err != nil {
 		return nil, err
 	}
-	r := &Run{project: project, steps: steps, patterns: patterns, record: Record{
+	id, dir, err := reserve(RunsDir(project))
+	if err != nil {
+		return nil, err
+	}
+	release, err := tryLock(filepath.Join(dir, "run.lock"), exclusive)
+	if err != nil {
+		return nil, err
+	}
+	r := &Run{project: project, steps: steps, patterns: patterns, release: release, record: Record{
 		Run: id, Project: project.Name, Root: project.Root, Chain: chain, Steps: len(steps), Dir: dir, Started: now(), Frame: []Frame{}, Words: []WordRecord{}, Cleanup: "pending",
 	}}
 	if err := r.save(); err != nil {
+		release()
 		return nil, err
 	}
 	return r, nil
 }
 
+// reserve creates the directory of a new run under an id no other run of the project holds. The
+// id labels everything the run launches, so two runs never share one; its random part keeps
+// runs recorded under different state homes apart too.
+func reserve(runs string) (id, dir string, err error) {
+	if err = os.MkdirAll(runs, 0700); err != nil {
+		return "", "", err
+	}
+	for {
+		var suffix [6]byte
+		if _, err = rand.Read(suffix[:]); err != nil {
+			return "", "", err
+		}
+		id = fmt.Sprintf("%d-%s", time.Now().Unix(), hex.EncodeToString(suffix[:]))
+		dir = filepath.Join(runs, id)
+		if err = os.Mkdir(dir, 0700); !errors.Is(err, fs.ErrExist) {
+			return id, dir, err
+		}
+	}
+}
+
+// Refused stops a run before it starts anything: the run leaves no record behind.
+type Refused struct{ Err error }
+
+func (e Refused) Error() string { return e.Err.Error() }
+func (e Refused) Unwrap() error { return e.Err }
+
 // Execute carries out a plan made by Decide for this chain. A fully skipped plan on a fresh
 // instance launches nothing; otherwise the chain runs inside the trust frame, on a fresh instance
 // or on the kept one the plan continues, and the steps the plan skips reuse their proof.
 func (r *Run) Execute(p Plan, opts Options) (Record, error) {
+	defer r.release()
 	r.record.Rerun, r.record.Ticket, r.keep = p.Rerun, opts.Ticket, opts.Keep
 	if p.kept == nil && p.Skipped() {
 		return r.reuse(p.entries, p.stamps)
 	}
-	var err error
 	if p.kept != nil {
-		err = r.handOver(p.kept)
+		if err := r.handOver(p.kept); err != nil {
+			// Nothing ran and nothing was launched, so the run leaves no record.
+			os.RemoveAll(r.record.Dir)
+			return Record{}, Refused{err}
+		}
 	}
 	base := len(r.record.History)
-	if err == nil {
-		err = r.drive(p)
-	}
+	err := r.drive(p)
 	r.settle(p.stamps, base)
 	if err != nil {
 		r.stop(verdict.Inconclusive, err.Error())
@@ -87,24 +121,23 @@ func (r *Run) Execute(p Plan, opts Options) (Record, error) {
 		return r.record, saveErr
 	}
 	// A ledger that misses a result only costs a later re-run, so a failed write never changes the verdict.
-	_ = ledger.At(RunsDir(r.project)).Record(r.proven(p.stamps))
+	_ = ledger.At(LedgerDir(r.project)).Record(r.proven(p.stamps))
 	return r.record, err
 }
 
 // handOver makes this run the owner of a kept instance: from now on only this run may drive or
-// tear it down. The lock and the second read stop two runs from taking over the same instance.
+// tear it down. Claim and the second read under it let exactly one run take over an instance.
 func (r *Run) handOver(kept *Record) error {
-	unlock, err := lock(filepath.Join(kept.Dir, "run.lock"))
+	current, release, err := Claim(r.project, kept.Run)
 	if err != nil {
 		return err
 	}
-	defer unlock()
-	current, err := ReadRecord(filepath.Join(kept.Dir, "run.json"))
-	if err != nil {
-		return err
-	}
-	if current.Cleanup != "kept" {
-		return fmt.Errorf("%s no longer keeps its instance (cleanup=%s)", kept.Run, current.Cleanup)
+	defer release()
+	switch {
+	case current.Cleanup == "continued":
+		return fmt.Errorf("%s was continued by %s; continue that run instead", current.Run, current.ContinuedBy)
+	case current.Cleanup != "kept":
+		return fmt.Errorf("%s no longer keeps its instance (cleanup=%s)", current.Run, current.Cleanup)
 	}
 	r.record.Instance, r.record.Owner, r.record.Continues = current.Instance, current.owner(), current.Run
 	if r.keep {
@@ -177,8 +210,8 @@ func (r *Run) settle(before []stamp.Stamp, base int) {
 
 func (r *Run) entry(i int, word WordRecord, s stamp.Stamp) ledger.Entry {
 	return ledger.Entry{
-		Label: r.steps[i].Label(), Verdict: word.Verdict, Stamp: s.Digest, Components: s.Components,
-		Run: r.record.Run, Evidence: word.Evidence, Observation: word.Observation, Recorded: now(),
+		Label: r.steps[i].Label(), Verdict: word.Verdict, Stamp: s.Digest, Components: s.Components, Claim: r.steps[i].Word.Proves(),
+		Run: r.record.Run, Owner: r.record.owner(), Evidence: word.Evidence, Observation: word.Observation, Recorded: now(),
 	}
 }
 

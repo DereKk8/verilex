@@ -57,11 +57,13 @@ func Human(record runner.Record, out io.Writer) {
 	frame("launch")
 	frame("refresh")
 	frame("doctor")
+	claimed := false
 	if len(record.Claims) > 0 {
 		for _, claim := range record.Claims {
 			if claim.Verdict == verdict.Green {
 				continue
 			}
+			claimed = true
 			step(claim.Verdict, claim.Claim, claim.Got, claim.Evidence)
 			if claim.Expected != "" || claim.Got != "" {
 				fmt.Fprintf(out, "    expected: %s\n    got: %s\n", claim.Expected, claim.Got)
@@ -88,7 +90,7 @@ func Human(record runner.Record, out io.Writer) {
 	}
 	frame("doctor-after-failure")
 	frame("cleanup")
-	if v != verdict.Green && record.Reason != nil && *record.Reason != "" && !explained(*record.Reason, labels) {
+	if v != verdict.Green && !claimed && record.Reason != nil && *record.Reason != "" && !explained(*record.Reason, labels) {
 		fmt.Fprintf(out, "  cause: %s\n", OneLine(*record.Reason))
 	}
 	if record.Cleanup == "kept" {

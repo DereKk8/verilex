@@ -10,10 +10,13 @@ Every `verilex run` ends in one of three verdicts with a matching exit code: `gr
 - `verdict-inconclusive-frame` reports inconclusive and exits 2 when the frame doctor refuses the instance.
 - `verdict-honesty` turns unbacked reports into inconclusive: `pass` without an observation, `fail` without `preconditions_held`, an exit code that disagrees with the report, stdout that is not one result JSON object, and a secret pattern in evidence.
 - `verdict-secret-project` applies the project's own `secret_patterns` from `.verilex/config.yaml` to word evidence.
+- `verdict-uncovered` carries `with N touched claim(s) not covered` in the verdict line, in human and JSON, when the run's plan missed a touched claim.
+- `verdict-failing-link` names the claim, evidence path, `expected` against `got`, and the next command.
 
 ## How to get to it (user POV)
 
 - Run `verilex run '<chain>'` and read the first word of output and the exit code.
+- Run `verilex run --claim <claim> [--named <claim>] [--changed <change>]` to run a claim plan. The warning is on the first line.
 - Write a word's `run` that reports `pass`, `fail` or `blocked`, then run a chain that uses it.
 
 ## Driving it with vx
@@ -44,6 +47,9 @@ Preconditions:
 - **Project secret pattern.** Write `echo "ticket PROBE-1234" > "$VERILEX_EVIDENCE/note.txt"; echo '{"verdict": "pass", "observation": "wrote note.txt"}'` and run `"$S/vx" secret-control verilex run 'store-open | probe-word'`: `green: 2 green`. Then run `echo 'secret_patterns: ["PROBE-[0-9]{4}"]' >> "$S/tally/.verilex/config.yaml"` and `"$S/vx" secret-project verilex run 'store-open | probe-word'`: `inconclusive: 1 green, 1 inconclusive` with cause `secret pattern in evidence note.txt`, exit `2`. Restore with `sed -i '$d' "$S/tally/.verilex/config.yaml"` and confirm `"$S/vx" secret-config cat "$S/tally/.verilex/config.yaml"` prints only `project: tally`.
 - **Honesty, second view.** Run `"$S/vx" honesty-runs verilex runs`. Each probe run is listed with the verdict it printed.
 - **Restore.** Run `command rm -rf "$S/tally/.verilex/words/probe-word"`, then `"$S/vx" probe-restored ls "$S/tally/.verilex/words"`: `probe-word` is gone.
+- **Missed claim.** On an admitted baseline, run `"$S/vx" verdict-live verilex run 'store-open | item-stored apple | item-listed apple'` (run `<A>`). Then `"$S/vx" verdict-missed verilex run --claim store-opened --changed .verilex/words/item-listed/run`. The first line contains `green:` and `with 1 touched claim not covered`, then `uncovered  item-listed` and `next: verilex run --claim 'item-listed' --changed '.verilex/words/item-listed/run'`. Exit `0`.
+- **Missed claim, JSON.** Run `"$S/vx" verdict-missed-json verilex run --json --claim store-opened --changed .verilex/words/item-listed/run`. `warning` is `1 touched claim not covered` and `uncovered[0].claim` is `item-listed`. `verdict` is `green`.
+- **Failing link.** Run `TALLY_DEFECT=drop-adds "$S/vx" verdict-link verilex run --claim item-added`. Exit `1`. Stdout has `red  item-added:`, `expected: store.json lists NAME.`, `got: tally said 'added apple' but store.json lacks apple` and `next: verilex run --fresh --claim 'item-added'`.
 
 ## Gotchas
 
@@ -52,3 +58,4 @@ Preconditions:
 - Never write a token-shaped literal into a repository file. Build the fake token at runtime, as in the `secret` row.
 - `TALLY_ADOPT_STORE` is read only by the frame, so it is not in any word's stamp. Without `--fresh`, a matching ledger skips the chain and the doctor never runs.
 - `verdict-red` needs `TALLY_DEFECT`, which the tally words declare in `env`, so the red run is live even after an admitted green run.
+- A missed-claim warning does not change the exit code. Read the first line and, with `--json`, `warning` and `uncovered`.

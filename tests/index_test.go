@@ -236,6 +236,21 @@ func TestRepinnedWordIsNotActiveUnderItsNewClaim(t *testing.T) {
 	equal(t, verilex(t, root, nil, "index", "item-noted").stdout, noted+"  A named item is noted in the store.\n  entry: cli  requires: store  provides: item:{name}\n  item-stored <name>  (provisional)\n")
 }
 
+// Once a claim moves to a new version, no word was onboarded for it yet: tier 1 drops it, and its
+// stale word, like an alias word grouped under its old version, is provisional.
+func TestClaimWithANewVersionIsNotActive(t *testing.T) {
+	root := baseline(t)
+	alias := claimLike(t, root, "item-put-done", [2]string{"    - \"`added NAME` alone", "    - \"exit 0 alone does not prove the item was stored.\"\n    - \"`added NAME` alone"})
+	variant(t, root, "item-put", alias, storedRun(t, root))
+	onboard(t, root, "item-put")
+	tier1 := verilex(t, root, nil, "index").stdout
+	edit(t, claimFile(root, "item-added"), "sentence: A named item is in the store.", "sentence: A named item is removed from the store.")
+	removed := pinOf(t, root, "item-added")
+	equal(t, verilex(t, root, nil, "index").stdout, strings.NewReplacer("3 active", "2 active", "item-added  A named item is in the store.\n", "").Replace(tier1))
+	equal(t, verilex(t, root, nil, "index", "item-added").stdout, removed+"  A named item is removed from the store.\n  entry: cli  requires: store  provides: item:{name}\n  item-stored <name>  (provisional)\n")
+	contains(t, verilex(t, root, nil, "index", "item-put-done").stdout, "\n  item-put <name>  (provisional)\n")
+}
+
 func copyTree(t *testing.T, from, dir string) {
 	t.Helper()
 	paths := []string{}

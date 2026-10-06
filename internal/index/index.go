@@ -42,6 +42,7 @@ type Index struct {
 	words  []dictionary.Word
 	claims map[string]dictionary.Claim
 	g      grouping.Grouping
+	now    grouping.Pins
 	group  map[string]string
 }
 
@@ -83,7 +84,8 @@ func Build(p dictionary.Project) (Index, error) {
 	if ix.g, err = grouping.Load(p); err != nil {
 		return ix, err
 	}
-	ix.group = ix.g.Groups("")
+	ix.now = grouping.PinsOf(ix.claims, ix.words)
+	ix.group = ix.g.Groups("", ix.now)
 	entries := map[string]*Claim{}
 	for _, name := range slices.Sorted(maps.Keys(ix.claims)) {
 		if ix.groupOf(name) == name {
@@ -108,8 +110,9 @@ func Build(p dictionary.Project) (Index, error) {
 		if w.Claim.Name != entry.Claim {
 			word.Via = w.Claim.Name
 		}
-		// A decision counts only for the claim it judged: a word re-pinned since stays provisional.
-		if d, ok := ix.g.Sound(w.Name); ok && d.Pin() == w.Proves() {
+		// A decision counts only while it holds: a word re-pinned since, a word whose claim has a
+		// new version, or a word grouped under an old version stays provisional.
+		if d, ok := ix.g.Sound(w.Name); ok && d.Holds(w.Name, ix.now) {
 			word.State, word.Chain = Dormant, d.Chain
 			if _, used := d.Uses[p.Name]; used {
 				word.State = Active

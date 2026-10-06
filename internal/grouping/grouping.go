@@ -219,15 +219,43 @@ func (g Grouping) Sound(word string) (Decision, bool) {
 	return d, ok && Broken(word, d) == ""
 }
 
-// Groups maps each claim name a sound decision places to the name of the claim it is grouped
-// under: a grouped claim maps to itself, an alias to its grouped claim. Decisions are read in word
-// order, and the first to place a claim wins, so the map depends only on the file. except names a
-// word whose decision is left out, the one being onboarded.
-func (g Grouping) Groups(except string) map[string]string {
+// Pins is what the vocabulary pins now: each claim's current version and the claim version each
+// word that proves a claim names.
+type Pins struct {
+	Claims map[string]string
+	Words  map[string]string
+}
+
+// PinsOf reads the current pins of a project's claims and words.
+func PinsOf(claims map[string]dictionary.Claim, words []dictionary.Word) Pins {
+	now := Pins{Claims: map[string]string{}, Words: map[string]string{}}
+	for name, c := range claims {
+		now.Claims[name] = c.Pin()
+	}
+	for _, w := range words {
+		if w.Claim != nil {
+			now.Words[w.Name] = w.Proves()
+		}
+	}
+	return now
+}
+
+// Holds reports whether a word's decision still speaks for the vocabulary: the word exists and
+// pins the claim version the decision judged, and every claim version the decision names is
+// current. A claim whose version changed changed its meaning, so an old decision never places it.
+func (d Decision) Holds(word string, now Pins) bool {
+	return now.Words[word] == d.Pin() && now.Claims[Name(d.Claim)] == d.Claim && (d.Proves == "" || now.Claims[Name(d.Proves)] == d.Proves)
+}
+
+// Groups maps each claim name a sound decision that still holds places to the name of the claim
+// it is grouped under: a grouped claim maps to itself, an alias to its grouped claim. Decisions are
+// read in word order, and the first to place a claim wins, so the map depends only on the records.
+// except names a word whose decision is left out, the one being onboarded.
+func (g Grouping) Groups(except string, now Pins) map[string]string {
 	group := map[string]string{}
 	for _, word := range slices.Sorted(maps.Keys(g.Words)) {
 		d, ok := g.Sound(word)
-		if !ok || word == except {
+		if !ok || word == except || !d.Holds(word, now) {
 			continue
 		}
 		if _, placed := group[Name(d.Claim)]; !placed {
@@ -240,18 +268,30 @@ func (g Grouping) Groups(except string) map[string]string {
 	return group
 }
 
-// Open lists the grouping questions still open for a grouped claim: the claims, at the version
-// compared, that the words grouped under it may say the same as, sorted, each with the words
-// whose decisions leave it pending. except names a word whose decision is left out.
-func (g Grouping) Open(claim, except string) map[string][]string {
-	open := map[string][]string{}
+// Grouped lists, in word order, the words whose sound, holding decisions group them under a claim.
+func (g Grouping) Grouped(claim string, now Pins) []string {
+	words := []string{}
 	for _, word := range slices.Sorted(maps.Keys(g.Words)) {
-		d, ok := g.Sound(word)
-		if !ok || word == except || Name(d.Claim) != claim {
+		if d, ok := g.Sound(word); ok && Name(d.Claim) == claim && d.Holds(word, now) {
+			words = append(words, word)
+		}
+	}
+	return words
+}
+
+// Open lists the grouping questions still open for a grouped claim: each claim, at its current
+// version, that the words grouped under it may say the same as, with the words whose decisions
+// leave it pending. except names a word whose decision is left out.
+func (g Grouping) Open(claim, except string, now Pins) map[string][]string {
+	open := map[string][]string{}
+	for _, word := range g.Grouped(claim, now) {
+		if word == except {
 			continue
 		}
-		for _, pending := range d.Pending {
-			open[pending.Claim] = append(open[pending.Claim], word)
+		for _, pending := range g.Words[word].Pending {
+			if now.Claims[Name(pending.Claim)] == pending.Claim {
+				open[pending.Claim] = append(open[pending.Claim], word)
+			}
 		}
 	}
 	return open
@@ -291,8 +331,9 @@ func Save(p dictionary.Project, g Grouping) error {
 }
 
 // Update changes the grouping file under an exclusive lock, reading it afresh first, so two
-// onboardings of different words at once never lose each other's decision.
-func Update(p dictionary.Project, change func(*Grouping)) error {
+// onboardings at once never lose each other's decision. change decides on the fresh file; when it
+// returns an error, nothing is written.
+func Update(p dictionary.Project, change func(*Grouping) error) error {
 	unlock, err := lock(p.Dir())
 	if err != nil {
 		return err
@@ -302,7 +343,9 @@ func Update(p dictionary.Project, change func(*Grouping)) error {
 	if err != nil {
 		return err
 	}
-	change(&g)
+	if err := change(&g); err != nil {
+		return err
+	}
 	return Save(p, g)
 }
 

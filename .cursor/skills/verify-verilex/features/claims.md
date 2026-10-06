@@ -82,7 +82,7 @@ Preconditions:
 - A dated line in the sub-feature is read like any other, so editing run history there flags the claim too. Keep run history outside every sub-feature (for example under a heading of its own) to avoid a review.
 - Requirement sentences are not part of the prose fingerprint: each is checked on its own. Editing one gives `requirement changed or gone` and `requirement no claim maps`, not `prose changed`.
 - `verilex plan` cuts a long reason to 300 characters with `…`; `verilex check` and `verilex claims` print it whole.
-- After a remap, the admitted words that prove the claim are drift-suspect until they are admitted again; restoring `$K` lifts that. A remap makes the next run live (`claim sources changed`). Restoring `$K` restores the stamps, so the passes recorded before the remap stand again while they are younger than 7 days.
+- After a remap, the admitted words that prove the claim are drift-suspect until they are onboarded again; restoring `$K` lifts that. A remap makes the next run live (`claim sources changed`). Restoring `$K` restores the stamps, so the passes recorded before the remap stand again while they are younger than 7 days.
 - `verilex claims` and `verilex check` exit `0` whatever they report. Read stdout.
 - `verilex claims` loads the whole dictionary, so a word contract error (as in **Binding refused**) refuses it too.
 - The `sed` commands with `\n` in the replacement need GNU sed.

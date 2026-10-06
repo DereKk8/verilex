@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
@@ -319,6 +320,134 @@ func TestEveryWordOfAnUndecidedClaimWaitsForTheAgent(t *testing.T) {
 		equal(t, verilex(t, root, nil, "index").stdout, tier1)
 		equal(t, verilex(t, root, nil, "index", "item-held").stdout, tier2)
 	}
+}
+
+// repin points a word at another claim version and uses it in two new runs.
+func repin(t *testing.T, root, word, pin string) {
+	t.Helper()
+	path := filepath.Join(root, ".verilex", "words", word, "word.md")
+	text := regexp.MustCompile(`(?m)^claim: .*$`).ReplaceAllString(read(t, path), "claim: "+pin)
+	write(t, path, text, 0644)
+	used(t, root, "store-open | "+word+" fig")
+	used(t, root, "store-open | "+word+" kiwi")
+}
+
+// A new claim version is a new meaning, so the agent's answer for the old version never carries
+// over: neither when the alias claim changes nor when the claim it was grouped under changes.
+func TestAnswerForAnOldClaimVersionDoesNotCarryOver(t *testing.T) {
+	root := baseline(t)
+	held := claimLike(t, root, "item-held", [2]string{"sentence: A named item is in the store.", "sentence: A user's named item is held in the store."})
+	variant(t, root, "h1", held, storedRun(t, root))
+	variant(t, root, "h2", held, storedRun(t, root))
+	onboard(t, root, "h1")
+	onboard(t, root, "h2")
+	contains(t, onboard(t, root, "h1", "--same-as", "item-added").stdout, "h2 moved with it")
+
+	// The alias claim changes its meaning; h2 still holds a decision for the old version.
+	edit(t, claimFile(root, "item-held"), "is held in the store.", "is deleted from the store.")
+	deleted := pinOf(t, root, "item-held")
+	repin(t, root, "h1", deleted)
+	equal(t, strings.SplitN(onboard(t, root, "h1").stdout, "\n", 2)[0], "undecided h1: claim "+deleted+" joins the vocabulary as a claim of its own for now; caught dropped-add")
+	equal(t, decision(t, root, "h1").Claim, deleted)
+	equal(t, verilex(t, root, nil, "index", "item-held").stdout, deleted+"  A user's named item is deleted from the store.\n  entry: cli  requires: store  provides: item:{name}\n  h1 <name>\n")
+
+	// The grouped claim changes its meaning; h2 was grouped under its old version.
+	edit(t, claimFile(root, "item-added"), "sentence: A named item is in the store.", "sentence: A named item is removed from the store.")
+	repin(t, root, "h2", deleted)
+	equal(t, strings.SplitN(onboard(t, root, "h2").stdout, "\n", 2)[0], "onboarded h2: variant of "+deleted+"; caught dropped-add")
+	d := decision(t, root, "h2")
+	equal(t, []string{d.Claim, d.Proves, d.Match}, []string{deleted, "", grouping.Same})
+}
+
+// A decision of a word that no longer exists places nothing: a word that pins the claim it was
+// grouped under is matched and asked again.
+func TestDecisionOfARemovedWordPlacesNothing(t *testing.T) {
+	root := baseline(t)
+	gone := claimLike(t, root, "item-gone", [2]string{"sentence: A named item is in the store.", "sentence: A user's named item is still in the store."})
+	variant(t, root, "g1", gone, storedRun(t, root))
+	onboard(t, root, "g1")
+	onboard(t, root, "g1", "--same-as", "item-added")
+	if err := os.RemoveAll(filepath.Join(root, ".verilex", "words", "g1")); err != nil {
+		t.Fatal(err)
+	}
+	variant(t, root, "g2", gone, storedRun(t, root))
+	equal(t, strings.SplitN(onboard(t, root, "g2").stdout, "\n", 2)[0], "undecided g2: claim "+gone+" joins the vocabulary as a claim of its own for now; caught dropped-add")
+}
+
+// Two answers to one open question at once: the grouping file's lock lets one apply, and the
+// other is refused as an answer to a closed question, never a crash.
+func TestConcurrentAnswersApplyOnce(t *testing.T) {
+	root := baseline(t)
+	held := claimLike(t, root, "item-held", [2]string{"sentence: A named item is in the store.", "sentence: A user's named item is held in the store."})
+	variant(t, root, "item-hold", held, storedRun(t, root))
+	variant(t, root, "item-hold2", held, storedRun(t, root))
+	onboard(t, root, "item-hold")
+	onboard(t, root, "item-hold2")
+	open := read(t, groupingFile(root))
+	for round := range 8 {
+		write(t, groupingFile(root), open, 0644)
+		answers := [][]string{{"onboard", "item-hold", "--same-as", "item-added"}, {"onboard", "item-hold2", "--distinct"}}
+		if round%2 == 1 {
+			answers[1] = []string{"onboard", "item-hold2", "--same-as", "item-added"}
+		}
+		results := make([]output, len(answers))
+		var wg sync.WaitGroup
+		for i, args := range answers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				cmd, stdout, stderr := command(root, nil, args...)
+				code := 0
+				if err := cmd.Run(); err != nil {
+					code = 2
+					if e, ok := err.(*exec.ExitError); ok {
+						code = e.ExitCode()
+					}
+				}
+				results[i] = output{code, stdout.String(), stderr.String()}
+			}()
+		}
+		wg.Wait()
+		applied := 0
+		for _, r := range results {
+			switch r.code {
+			case 0:
+				applied++
+			case 2:
+				contains(t, r.stderr, "verilex: refused: ")
+				contains(t, r.stderr, "has no open grouping question")
+			default:
+				t.Fatalf("round %d: %+v", round, r)
+			}
+		}
+		equal(t, applied, 1)
+		equal(t, decision(t, root, "item-hold").Pending, []grouping.Pending(nil))
+		equal(t, decision(t, root, "item-hold2").Pending, []grouping.Pending(nil))
+	}
+}
+
+// A claim the agent puts under a claim whose own question is still open keeps the pending claims
+// it was compared with, so the open claim's answer can still move it.
+func TestClaimMovedUnderAnUndecidedClaimFollowsItsAnswer(t *testing.T) {
+	root := baseline(t)
+	v := pinOf(t, root, "item-added")
+	held := claimLike(t, root, "item-held", [2]string{"sentence: A named item is in the store.", "sentence: A user's named item is held in the store."})
+	variant(t, root, "h1", held, storedRun(t, root))
+	onboard(t, root, "h1")
+	retained := claimLike(t, root, "item-retained", [2]string{"sentence: A named item is in the store.", "sentence: The store retains each item a user names."})
+	variant(t, root, "r1", retained, storedRun(t, root))
+	onboard(t, root, "r1")
+	pending := []string{}
+	for _, p := range decision(t, root, "r1").Pending {
+		pending = append(pending, p.Claim)
+	}
+	equal(t, pending, []string{v, held})
+	equal(t, onboard(t, root, "r1", "--same-as", "item-held").stdout, "onboarded r1: variant of "+held+" through claim item-retained, as the agent decided\n")
+	equal(t, decision(t, root, "r1").Pending[0].Claim, v)
+	equal(t, onboard(t, root, "h1", "--same-as", "item-added").stdout, "onboarded h1: variant of "+v+" through claim item-held, as the agent decided; r1 moved with it\n")
+	d := decision(t, root, "r1")
+	equal(t, []string{d.Claim, d.Proves, d.Match}, []string{v, retained, grouping.Agent})
+	equal(t, d.Pending, []grouping.Pending(nil))
 }
 
 // Done-when (PER-230): a word that misses its planted defect is refused. Correctness is a

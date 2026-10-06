@@ -217,7 +217,7 @@ func TestAmbiguousProposalGoesBackToTheAgent(t *testing.T) {
 	variant(t, root, "item-keep", kept, storedRun(t, root))
 	done := onboard(t, root, "item-keep")
 	equal(t, done.stdout, "undecided item-keep: claim "+kept+" joins the vocabulary as a claim of its own for now; caught dropped-add\n"+
-		"  decide: does claim item-kept say the same as "+v+" (words: item-stored)? It behaved like their words on every trial state.\n"+
+		"  decide: does claim item-kept say the same as "+v+" (compared: item-stored)? item-keep behaved like them on every trial state.\n"+
 		"    verilex onboard item-keep --same-as item-added\n    verilex onboard item-keep --distinct\n"+
 		"  record: "+result(t, done).Record+"\n")
 	r := result(t, done)
@@ -230,7 +230,7 @@ func TestAmbiguousProposalGoesBackToTheAgent(t *testing.T) {
 	d := decision(t, root, "item-keep")
 	equal(t, d.Claim, kept)
 	equal(t, d.Match, grouping.New)
-	equal(t, d.Pending, []grouping.Pending{{Claim: v, Defects: map[string]string{"dropped-add": decision(t, root, "item-stored").Defects["dropped-add"]}}})
+	equal(t, d.Pending, []grouping.Pending{{Claim: v, Words: []string{"item-stored"}, Defects: map[string]string{"dropped-add": decision(t, root, "item-stored").Defects["dropped-add"]}}})
 	equal(t, status(t, root, "item-keep"), "admitted")
 	equal(t, verilex(t, root, nil, "index", "item-kept").stdout, kept+"  A user's named item is kept in the store.\n  entry: cli  requires: store  provides: item:{name}\n  item-keep <name>\n")
 	contains(t, verilex(t, root, nil, "onboard", "item-keep").stdout, "onboarded item-keep already: it proves "+kept+" for tally, and nothing it was judged on changed\n  decide: does claim item-kept say the same as ")
@@ -260,6 +260,65 @@ func TestAmbiguousProposalGoesBackToTheAgent(t *testing.T) {
 	equal(t, d.Claim, held)
 	equal(t, d.Match, grouping.New)
 	equal(t, d.Pending, []grouping.Pending(nil))
+}
+
+// Every word of an undecided claim waits for the same answer: a second word that pins the claim
+// is compared with the pending claim's words too and carries the question, identical words get
+// identical decisions, the index reads the same on every call, and the agent's one answer moves
+// all of them, so the claim is never a group and an alias at once.
+func TestEveryWordOfAnUndecidedClaimWaitsForTheAgent(t *testing.T) {
+	root := baseline(t)
+	v := pinOf(t, root, "item-added")
+	held := claimLike(t, root, "item-held", [2]string{"sentence: A named item is in the store.", "sentence: A user's named item is held in the store."})
+	for _, word := range []string{"item-hold", "item-hold2", "item-hold3", "item-hold4"} {
+		variant(t, root, word, held, storedRun(t, root))
+	}
+	equal(t, strings.SplitN(onboard(t, root, "item-hold").stdout, "\n", 2)[0], "undecided item-hold: claim "+held+" joins the vocabulary as a claim of its own for now; caught dropped-add")
+	second := onboard(t, root, "item-hold2")
+	equal(t, second.stdout, "undecided item-hold2: variant of "+held+", which stays a claim of its own for now; caught dropped-add\n"+
+		"  decide: does claim item-held say the same as "+v+" (compared: item-stored)? item-hold2 behaved like them on every trial state.\n"+
+		"    verilex onboard item-hold2 --same-as item-added\n    verilex onboard item-hold2 --distinct\n"+
+		"  record: "+result(t, second).Record+"\n")
+	equal(t, trialsOf(result(t, second)), []string{"healthy item-hold2 green", "dropped-add item-hold2 red", "healthy item-hold green", "dropped-add item-hold red", "healthy item-stored green", "dropped-add item-stored red"})
+	pending := []grouping.Pending{{Claim: v, Words: []string{"item-stored"}, Defects: map[string]string{"dropped-add": decision(t, root, "item-stored").Defects["dropped-add"]}}}
+	for _, word := range []string{"item-hold3", "item-hold4"} {
+		onboard(t, root, word)
+	}
+	for _, word := range []string{"item-hold2", "item-hold3", "item-hold4"} {
+		d := decision(t, root, word)
+		equal(t, []string{d.Claim, d.Proves, d.Match}, []string{held, "", grouping.Same})
+		equal(t, d.Pending, pending)
+	}
+	tier1, tier2 := verilex(t, root, nil, "index").stdout, verilex(t, root, nil, "index", "item-held").stdout
+	contains(t, tier1, "\nitem-held  A user's named item is held in the store.\n")
+	for range 20 {
+		equal(t, verilex(t, root, nil, "index").stdout, tier1)
+		equal(t, verilex(t, root, nil, "index", "item-held").stdout, tier2)
+	}
+
+	// A word whose files changed is onboarded again into the same open question.
+	write(t, filepath.Join(root, ".verilex", "words", "item-hold3", "run"), storedRun(t, root)+"# changed\n", 0755)
+	used(t, root, "store-open | item-hold3 fig")
+	used(t, root, "store-open | item-hold3 kiwi")
+	equal(t, strings.SplitN(onboard(t, root, "item-hold3").stdout, "\n", 2)[0], "undecided item-hold3: variant of "+held+", which stays a claim of its own for now; caught dropped-add")
+	equal(t, decision(t, root, "item-hold3").Pending, pending)
+
+	// One answer moves every word of the claim.
+	equal(t, onboard(t, root, "item-hold", "--same-as", "item-added").stdout, "onboarded item-hold: variant of "+v+" through claim item-held, as the agent decided; item-hold2, item-hold3, item-hold4 moved with it\n")
+	for _, word := range []string{"item-hold", "item-hold2", "item-hold3", "item-hold4"} {
+		d := decision(t, root, word)
+		equal(t, []string{d.Claim, d.Proves, d.Match}, []string{v, held, grouping.Agent})
+		equal(t, d.Pending, []grouping.Pending(nil))
+	}
+	tier1 = verilex(t, root, nil, "index").stdout
+	equal(t, strings.Contains(tier1, "item-held"), false)
+	tier2 = verilex(t, root, nil, "index", "item-held").stdout
+	contains(t, tier2, v+"  A named item is in the store.\n")
+	contains(t, tier2, "  item-hold4 <name>  (via item-held)\n")
+	for range 20 {
+		equal(t, verilex(t, root, nil, "index").stdout, tier1)
+		equal(t, verilex(t, root, nil, "index", "item-held").stdout, tier2)
+	}
 }
 
 // Done-when (PER-230): a word that misses its planted defect is refused. Correctness is a

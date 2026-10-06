@@ -198,6 +198,44 @@ func TestChangeLookupAgreesWithPlan(t *testing.T) {
 }
 
 // copyTree copies a product into dir, writing its files in reverse order at another time.
+// The change lookup follows a word grouped under another claim to that claim's file: an edit to
+// the grouped claim makes plan re-run the alias word's chains, through a planted defect or a new
+// version, so the lookup lists them too.
+func TestChangeLookupFollowsAliasWordsToTheirGroupedClaim(t *testing.T) {
+	root := baseline(t)
+	alias := claimLike(t, root, "item-put-done", [2]string{"    - \"`added NAME` alone", "    - \"exit 0 alone does not prove the item was stored.\"\n    - \"`added NAME` alone"})
+	variant(t, root, "item-put", alias, storedRun(t, root))
+	onboard(t, root, "item-put")
+	used(t, root, "store-open | item-put pear")
+	equal(t, strings.SplitN(plan(t, root, "store-open | item-put pear").stdout, "\n", 2)[0], "plan: skip 2, run 0")
+	original := read(t, claimFile(root, "item-added"))
+	reruns := func() []string {
+		names := []string{}
+		for _, c := range changed(t, root, claimFile(root, "item-added")).Chains {
+			if c.Run {
+				names = append(names, c.Chain)
+			}
+		}
+		return names
+	}
+	edit(t, claimFile(root, "item-added"), "  dropped-add: {TALLY_DEFECT: drop-adds}\n", "  dropped-add: {TALLY_DEFECT: drop-adds}\n  lost-add: {TALLY_DEFECT: drop-adds}\n")
+	contains(t, strings.Join(reruns(), "\n"), "store-open | item-put pear")
+	write(t, claimFile(root, "item-added"), original, 0644)
+	edit(t, claimFile(root, "item-added"), "sentence: A named item is in the store.", "sentence: A named item is kept in the store.")
+	contains(t, strings.Join(reruns(), "\n"), "store-open | item-put pear")
+}
+
+// A word re-pinned to another claim after onboarding is not onboarded for that claim, so the index
+// lists it there as provisional and the claim does not become active.
+func TestRepinnedWordIsNotActiveUnderItsNewClaim(t *testing.T) {
+	root := baseline(t)
+	noted := claimLike(t, root, "item-noted", [2]string{"sentence: A named item is in the store.", "sentence: A named item is noted in the store."})
+	tier1 := verilex(t, root, nil, "index").stdout
+	edit(t, filepath.Join(root, ".verilex", "words", "item-stored", "word.md"), "claim: "+pinOf(t, root, "item-added"), "claim: "+noted)
+	equal(t, verilex(t, root, nil, "index").stdout, strings.NewReplacer("3 active", "2 active", "item-added  A named item is in the store.\n", "").Replace(tier1))
+	equal(t, verilex(t, root, nil, "index", "item-noted").stdout, noted+"  A named item is noted in the store.\n  entry: cli  requires: store  provides: item:{name}\n  item-stored <name>  (provisional)\n")
+}
+
 func copyTree(t *testing.T, from, dir string) {
 	t.Helper()
 	paths := []string{}

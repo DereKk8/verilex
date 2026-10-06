@@ -76,7 +76,7 @@ type ClaimSource struct {
 	Prose        string   `yaml:"prose" json:"prose"`
 	Requirements []string `yaml:"requirements" json:"requirements"`
 	// Covered lists what other claims map in the same sub-feature, counted only for a claim
-	// whose word a curator admitted for the claim's current version and sources. A requirement
+	// whose word is onboarded for the claim's current version and sources. A requirement
 	// sentence of the sub-feature outside it is one no curated word proves. lifecycle.Load fills it.
 	Covered []string `yaml:"-" json:"-"`
 }

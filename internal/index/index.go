@@ -75,7 +75,7 @@ type Word struct {
 
 // Build generates a product's index from its records.
 func Build(p dictionary.Project) (Index, error) {
-	ix := Index{Product: p.Name, Claims: []Claim{}, group: map[string]string{}}
+	ix := Index{Product: p.Name, Claims: []Claim{}}
 	var err error
 	if ix.claims, ix.words, err = lifecycle.Load(p); err != nil {
 		return ix, err
@@ -83,14 +83,7 @@ func Build(p dictionary.Project) (Index, error) {
 	if ix.g, err = grouping.Load(p); err != nil {
 		return ix, err
 	}
-	for word, d := range ix.g.Words {
-		if grouping.Broken(word, d) == "" {
-			ix.group[grouping.Name(d.Claim)] = grouping.Name(d.Claim)
-			if d.Proves != "" {
-				ix.group[grouping.Name(d.Proves)] = grouping.Name(d.Claim)
-			}
-		}
-	}
+	ix.group = ix.g.Groups("")
 	entries := map[string]*Claim{}
 	for _, name := range slices.Sorted(maps.Keys(ix.claims)) {
 		if ix.groupOf(name) == name {
@@ -115,7 +108,8 @@ func Build(p dictionary.Project) (Index, error) {
 		if w.Claim.Name != entry.Claim {
 			word.Via = w.Claim.Name
 		}
-		if d, ok := ix.g.Sound(w.Name); ok {
+		// A decision counts only for the claim it judged: a word re-pinned since stays provisional.
+		if d, ok := ix.g.Sound(w.Name); ok && d.Pin() == w.Proves() {
 			word.State, word.Chain = Dormant, d.Chain
 			if _, used := d.Uses[p.Name]; used {
 				word.State = Active

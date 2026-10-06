@@ -46,8 +46,8 @@ const (
 	Rejected = "rejected"
 	// Inconclusive: a trial could not be judged, so nothing was decided.
 	Inconclusive = "inconclusive"
-	// Undecided: the word joined as a claim of its own, and only the calling agent can decide
-	// whether that claim says the same as a grouped one (see Request).
+	// Undecided: the word joined, but only the calling agent can decide whether the claim it is
+	// grouped under says the same as another grouped claim (see Request); until then they stay apart.
 	Undecided = "undecided"
 )
 
@@ -73,6 +73,9 @@ type Result struct {
 	Findings []Finding `json:"findings,omitempty"`
 	// Request is the decision the calling agent owes an undecided word.
 	Request *Request `json:"request,omitempty"`
+	// Moved lists the other words an agent's answer regrouped with this one: every word grouped
+	// under the same claim moves with it.
+	Moved []string `json:"moved,omitempty"`
 	// Decision is what onboarding recorded in the grouping file.
 	Decision *grouping.Decision `json:"decision,omitempty"`
 	// Record is the directory that keeps this result and every trial's evidence.
@@ -287,16 +290,17 @@ func (o *onboarding) decide(anchors []featuremap.Anchor, uses []curation.Use) {
 		if len(candidate.Words) == 0 {
 			o.expected(candidate, own, all)
 		}
-		if !candidate.Differs {
+		if !candidate.Differs && candidate.Kind == KindAmbiguous {
 			o.agree = append(o.agree, *candidate)
 		}
 	}
 	o.r.Candidates = candidates
+	differs := slices.IndexFunc(candidates, func(candidate Candidate) bool { return candidate.Differs && candidate.Kind != KindAmbiguous })
 	switch {
 	case kind == KindNew || kind == KindAmbiguous && len(o.agree) == 0:
 		o.r.Outcome, o.r.Match, o.group = Onboarded, grouping.New, c
-	case len(o.r.Findings) > 0 && kind != KindAmbiguous:
-		o.reject(fmt.Sprintf("%s behaves differently from the words of claim %s: one of them is wrong, or the claims differ", w.Name, grouping.Name(candidates[0].Claim)))
+	case differs >= 0:
+		o.reject(fmt.Sprintf("%s behaves differently from the words of claim %s: one of them is wrong, or the claims differ", w.Name, grouping.Name(candidates[differs].Claim)))
 	case kind == KindAmbiguous:
 		o.r.Outcome, o.r.Match, o.group = Undecided, grouping.New, c
 		o.r.Reason = fmt.Sprintf("claim %s may say the same as %s, and neither the mechanical match nor the behavioral check can tell", c.Name, claimNames(o.agree))
@@ -305,6 +309,10 @@ func (o *onboarding) decide(anchors []featuremap.Anchor, uses []curation.Use) {
 		o.r.Match = grouping.Mechanical
 		if kind == KindSame {
 			o.r.Match = grouping.Same
+		}
+		if len(o.agree) > 0 {
+			o.r.Outcome = Undecided
+			o.r.Reason = fmt.Sprintf("claim %s is grouped under %s, which may say the same as %s; only the calling agent can tell", c.Name, o.group.Name, claimNames(o.agree))
 		}
 	}
 }
@@ -344,35 +352,44 @@ func (o *onboarding) gate(own []Trial) bool {
 }
 
 // candidates finds the grouped claims the proposal may belong to: the one it already belongs to
-// when its claim is grouped (KindSame), else whatever the mechanical match finds.
+// when its claim is grouped (KindSame), else whatever the mechanical match finds. A grouped claim
+// whose question is still open brings the claims it may say the same as along, as ambiguous
+// candidates, so every word that joins it is compared with them before the agent answers.
 func (o *onboarding) candidates(c dictionary.Claim) (string, []Candidate) {
-	group := map[string]string{}
-	for word, d := range o.g.Words {
-		if word == o.w.Name || grouping.Broken(word, d) != "" {
-			continue
-		}
-		group[grouping.Name(d.Claim)] = grouping.Name(d.Claim)
-		if d.Proves != "" {
-			group[grouping.Name(d.Proves)] = grouping.Name(d.Claim)
-		}
-	}
+	group := o.g.Groups(o.w.Name)
 	claims, err := dictionary.LoadClaims(o.p)
 	if err != nil {
 		return KindNew, nil
 	}
+	kind, candidates := KindNew, []Candidate{}
 	if name, ok := group[c.Name]; ok {
 		if grouped, ok := claims[name]; ok {
-			return KindSame, []Candidate{{Claim: grouped.Pin(), Kind: KindSame, Sentence: 1, Literals: true, claim: grouped}}
+			kind, candidates = KindSame, []Candidate{{Claim: grouped.Pin(), Kind: KindSame, Sentence: 1, Literals: true, claim: grouped}}
 		}
 	}
-	grouped := []dictionary.Claim{}
-	for name, to := range group {
-		if claim, ok := claims[name]; ok && name == to && name != c.Name {
-			grouped = append(grouped, claim)
+	if kind == KindNew {
+		grouped := []dictionary.Claim{}
+		for name, to := range group {
+			if claim, ok := claims[name]; ok && name == to && name != c.Name {
+				grouped = append(grouped, claim)
+			}
+		}
+		slices.SortFunc(grouped, func(a, b dictionary.Claim) int { return strings.Compare(a.Name, b.Name) })
+		kind, candidates = match(c, o.w.Entry, grouped)
+	}
+	if kind != KindSame && kind != KindMatch {
+		return kind, candidates
+	}
+	for _, primary := range slices.Clone(candidates) {
+		for _, pin := range slices.Sorted(maps.Keys(o.g.Open(grouping.Name(primary.Claim), o.w.Name))) {
+			open, ok := claims[grouping.Name(pin)]
+			if !ok || open.Pin() != pin || open.Name == c.Name || slices.ContainsFunc(candidates, func(other Candidate) bool { return other.Claim == pin }) {
+				continue
+			}
+			candidates = append(candidates, Candidate{Claim: pin, Kind: KindAmbiguous, claim: open})
 		}
 	}
-	slices.SortFunc(grouped, func(a, b dictionary.Claim) int { return strings.Compare(a.Name, b.Name) })
-	return match(c, o.w.Entry, grouped)
+	return kind, candidates
 }
 
 // expected compares the word with what a candidate claim's gate demands of every word grouped
@@ -431,7 +448,7 @@ func (o *onboarding) record(g *grouping.Grouping, uses []curation.Use, sources [
 	}
 	if o.r.Outcome == Undecided {
 		for _, candidate := range o.agree {
-			pending := grouping.Pending{Claim: candidate.Claim, Defects: map[string]string{}}
+			pending := grouping.Pending{Claim: candidate.Claim, Words: candidate.Words, Defects: map[string]string{}}
 			for name, defect := range candidate.claim.Defects {
 				pending.Defects[name] = defect.Digest()
 			}
@@ -441,36 +458,40 @@ func (o *onboarding) record(g *grouping.Grouping, uses []curation.Use, sources [
 	g.Set(o.w.Name, d)
 	sealed := g.Words[o.w.Name]
 	o.r.Claim, o.r.Decision = d.Claim, &sealed
-	o.r.Request = request(o.p, o.w, sealed, *g)
+	o.r.Request = request(o.p, o.w, sealed)
 }
 
 // request builds the decision request for a word whose decision leaves grouped claims pending.
-func request(p dictionary.Project, w dictionary.Word, d grouping.Decision, g grouping.Grouping) *Request {
+// The question is about the claim the word is grouped under, so every word grouped under it is
+// regrouped by the one answer.
+func request(p dictionary.Project, w dictionary.Word, d grouping.Decision) *Request {
 	if len(d.Pending) == 0 {
 		return nil
 	}
-	r := &Request{Proposal: claimText(*w.Claim, nil)}
+	claim := grouping.Name(d.Claim)
+	proposal := ClaimText{Claim: d.Claim}
+	if text, err := os.ReadFile(filepath.Join(p.ClaimsDir(), claim+".yaml")); err == nil {
+		proposal.Text = string(text)
+	}
+	r := &Request{Proposal: proposal}
 	names := []string{}
 	for _, pending := range d.Pending {
 		name := grouping.Name(pending.Claim)
 		names = append(names, pending.Claim)
-		grouped := []string{}
-		for _, word := range slices.Sorted(maps.Keys(g.Words)) {
-			if other, ok := g.Sound(word); ok && word != w.Name && grouping.Name(other.Claim) == name {
-				grouped = append(grouped, word)
-			}
-		}
 		text, _ := os.ReadFile(filepath.Join(p.ClaimsDir(), name+".yaml"))
-		r.Candidates = append(r.Candidates, ClaimText{Claim: pending.Claim, Text: string(text), Words: grouped})
+		r.Candidates = append(r.Candidates, ClaimText{Claim: pending.Claim, Text: string(text), Words: pending.Words})
 		r.Commands = append(r.Commands, "verilex onboard "+w.Name+" --same-as "+name)
 	}
 	r.Commands = append(r.Commands, "verilex onboard "+w.Name+" --distinct")
-	r.Question = fmt.Sprintf("Does claim %s say the same as %s? Its word behaved like theirs on the healthy product and under every planted defect, but the mechanical match cannot tell; %s stays a claim of its own until you decide.", w.Claim.Name, strings.Join(names, " or "), w.Claim.Name)
+	r.Question = fmt.Sprintf("Does claim %s say the same as %s? %s behaved like the words compared with it on the healthy product and under every planted defect, but the mechanical match cannot tell; %s stays a claim of its own, with every word grouped under it, until you decide.", claim, strings.Join(names, " or "), w.Name, claim)
 	return r
 }
 
-// settle records the calling agent's choice for a word whose claim is undecided: grouped under
-// the pending claim it names, at the version its word was compared with, or kept apart.
+// settle records the calling agent's choice about the claim an undecided word is grouped under.
+// The answer regroups every word grouped under that claim, so identical words never end up in
+// different groups: --same-as moves them all under the pending claim, at the version they were
+// compared with, and is refused while one of them was never compared with it; --distinct closes
+// the question for all of them.
 func settle(p dictionary.Project, w dictionary.Word, g grouping.Grouping, choice Choice, r *Result) error {
 	d, _ := g.Sound(w.Name)
 	if len(d.Pending) == 0 {
@@ -479,6 +500,14 @@ func settle(p dictionary.Project, w dictionary.Word, g grouping.Grouping, choice
 	if choice.SameAs != "" && choice.Distinct {
 		return errors.New("choose one: --same-as <claim> or --distinct")
 	}
+	claim := grouping.Name(d.Claim)
+	words := []string{}
+	for _, word := range slices.Sorted(maps.Keys(g.Words)) {
+		if other, ok := g.Sound(word); ok && grouping.Name(other.Claim) == claim {
+			words = append(words, word)
+		}
+	}
+	var to grouping.Pending
 	if choice.SameAs != "" {
 		i := slices.IndexFunc(d.Pending, func(pending grouping.Pending) bool { return grouping.Name(pending.Claim) == choice.SameAs })
 		if i < 0 {
@@ -488,22 +517,42 @@ func settle(p dictionary.Project, w dictionary.Word, g grouping.Grouping, choice
 			}
 			return fmt.Errorf("%s's claim may say the same only as %s, not %s", w.Name, strings.Join(names, " or "), choice.SameAs)
 		}
-		pending := d.Pending[i]
+		to = d.Pending[i]
 		current, err := dictionary.ReadClaim(filepath.Join(p.ClaimsDir(), choice.SameAs+".yaml"))
 		if err != nil {
 			return err
 		}
-		if current.Pin() != pending.Claim {
-			return fmt.Errorf("claim %s is now %s, not the version %s was compared with (%s); keep it apart with --distinct, or onboard it again once its files change", choice.SameAs, current.Pin(), w.Name, pending.Claim)
+		if current.Pin() != to.Claim {
+			return fmt.Errorf("claim %s is now %s, not the version %s was compared with (%s); keep it apart with --distinct, or onboard it again once its files change", choice.SameAs, current.Pin(), w.Name, to.Claim)
 		}
-		d.Claim, d.Proves, d.GroupDefects, d.Match = pending.Claim, w.Proves(), maps.Clone(pending.Defects), grouping.Agent
+		if group := g.Groups("")[choice.SameAs]; group != choice.SameAs {
+			return fmt.Errorf("claim %s is now grouped under %s, which %s was never compared with; onboard it again", choice.SameAs, group, w.Name)
+		}
+		missing := []string{}
+		for _, word := range words {
+			if !slices.ContainsFunc(g.Words[word].Pending, func(pending grouping.Pending) bool { return pending.Claim == to.Claim }) {
+				missing = append(missing, word)
+			}
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("claim %s cannot join %s: its words %s were never compared with claim %s's words, or behaved differently from them; onboard them again, or keep claim %s apart with --distinct", claim, choice.SameAs, strings.Join(missing, ", "), choice.SameAs, claim)
+		}
 	}
-	d.Pending = nil
-	r.Outcome, r.Claim, r.Match = Onboarded, d.Claim, d.Match
 	return grouping.Update(p, func(g *grouping.Grouping) {
-		g.Set(w.Name, d)
+		for _, word := range words {
+			other := g.Words[word]
+			if choice.SameAs != "" {
+				pending := other.Pending[slices.IndexFunc(other.Pending, func(pending grouping.Pending) bool { return pending.Claim == to.Claim })]
+				other.Claim, other.Proves, other.GroupDefects, other.Match = to.Claim, other.Pin(), maps.Clone(pending.Defects), grouping.Agent
+			}
+			other.Pending = nil
+			g.Set(word, other)
+			if word != w.Name {
+				r.Moved = append(r.Moved, word)
+			}
+		}
 		sealed := g.Words[w.Name]
-		r.Decision = &sealed
+		r.Outcome, r.Claim, r.Match, r.Decision = Onboarded, sealed.Claim, sealed.Match, &sealed
 	})
 }
 
@@ -514,7 +563,7 @@ func useful(p dictionary.Project, w dictionary.Word, g grouping.Grouping, r *Res
 	r.Claim, r.Match, r.Decision = d.Claim, d.Match, &d
 	if _, ok := d.Uses[p.Name]; ok {
 		r.Outcome = Already
-		r.Request = request(p, w, d, g)
+		r.Request = request(p, w, d)
 		return nil
 	}
 	uses, err := counted(p, w)

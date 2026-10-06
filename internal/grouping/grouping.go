@@ -80,10 +80,11 @@ type Decision struct {
 }
 
 // Pending is a grouped claim, at the version onboarding compared, that a word's claim may say the
-// same as. Defects holds the digest of each of its planted defects the word behaved like its
-// words under.
+// same as. Words are its words the behavioral check compared the word with, and Defects holds the
+// digest of each of its planted defects the word behaved like them under.
 type Pending struct {
 	Claim   string            `yaml:"claim" json:"claim"`
+	Words   []string          `yaml:"words,omitempty" json:"words,omitempty"`
 	Defects map[string]string `yaml:"defects" json:"defects"`
 }
 
@@ -191,7 +192,7 @@ func (d Decision) normal() Decision {
 	} else {
 		pending := make([]Pending, len(d.Pending))
 		for i, p := range d.Pending {
-			pending[i] = Pending{Claim: p.Claim, Defects: maps.Clone(p.Defects)}
+			pending[i] = Pending{Claim: p.Claim, Words: slices.Clone(p.Words), Defects: maps.Clone(p.Defects)}
 		}
 		d.Pending = pending
 	}
@@ -216,6 +217,44 @@ func Broken(word string, d Decision) string {
 func (g Grouping) Sound(word string) (Decision, bool) {
 	d, ok := g.Words[word]
 	return d, ok && Broken(word, d) == ""
+}
+
+// Groups maps each claim name a sound decision places to the name of the claim it is grouped
+// under: a grouped claim maps to itself, an alias to its grouped claim. Decisions are read in word
+// order, and the first to place a claim wins, so the map depends only on the file. except names a
+// word whose decision is left out, the one being onboarded.
+func (g Grouping) Groups(except string) map[string]string {
+	group := map[string]string{}
+	for _, word := range slices.Sorted(maps.Keys(g.Words)) {
+		d, ok := g.Sound(word)
+		if !ok || word == except {
+			continue
+		}
+		if _, placed := group[Name(d.Claim)]; !placed {
+			group[Name(d.Claim)] = Name(d.Claim)
+		}
+		if _, placed := group[Name(d.Proves)]; d.Proves != "" && !placed {
+			group[Name(d.Proves)] = Name(d.Claim)
+		}
+	}
+	return group
+}
+
+// Open lists the grouping questions still open for a grouped claim: the claims, at the version
+// compared, that the words grouped under it may say the same as, sorted, each with the words
+// whose decisions leave it pending. except names a word whose decision is left out.
+func (g Grouping) Open(claim, except string) map[string][]string {
+	open := map[string][]string{}
+	for _, word := range slices.Sorted(maps.Keys(g.Words)) {
+		d, ok := g.Sound(word)
+		if !ok || word == except || Name(d.Claim) != claim {
+			continue
+		}
+		for _, pending := range d.Pending {
+			open[pending.Claim] = append(open[pending.Claim], word)
+		}
+	}
+	return open
 }
 
 // Set records a decision for a word, sealed. Only onboarding calls it.

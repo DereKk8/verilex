@@ -25,7 +25,7 @@ func onboard(project dictionary.Project, args options, out io.Writer, refuse fun
 			return refuse(err)
 		}
 	} else if args.distinct {
-		fmt.Fprintf(out, "onboarded %s: claim %s stays a claim of its own, as the agent decided\n", r.Word, r.Claim)
+		fmt.Fprintf(out, "onboarded %s: claim %s stays a claim of its own, as the agent decided%s\n", r.Word, r.Claim, moved(r))
 	} else {
 		onboarded(r, out)
 	}
@@ -54,7 +54,7 @@ func onboarded(r onboarding.Result, out io.Writer) {
 		case grouping.Mechanical:
 			how = "variant of " + grouped(r) + ", matched mechanically"
 		case grouping.Agent:
-			fmt.Fprintf(out, "onboarded %s: variant of %s, as the agent decided\n", r.Word, grouped(r))
+			fmt.Fprintf(out, "onboarded %s: variant of %s, as the agent decided%s\n", r.Word, grouped(r), moved(r))
 			return
 		}
 		if r.Record == "" {
@@ -63,7 +63,11 @@ func onboarded(r onboarding.Result, out io.Writer) {
 		}
 		fmt.Fprintf(out, "onboarded %s: %s; caught %s\n", r.Word, how, strings.Join(slices.Sorted(maps.Keys(r.Decision.Defects)), ", "))
 	case onboarding.Undecided:
-		fmt.Fprintf(out, "undecided %s: claim %s joins the vocabulary as a claim of its own for now; caught %s\n", r.Word, r.Claim, strings.Join(slices.Sorted(maps.Keys(r.Decision.Defects)), ", "))
+		how := "claim " + r.Claim + " joins the vocabulary as a claim of its own for now"
+		if r.Match != grouping.New {
+			how = "variant of " + grouped(r) + ", which stays a claim of its own for now"
+		}
+		fmt.Fprintf(out, "undecided %s: %s; caught %s\n", r.Word, how, strings.Join(slices.Sorted(maps.Keys(r.Decision.Defects)), ", "))
 		decide(r, out)
 	default:
 		fmt.Fprintf(out, "%s %s: %s\n", r.Outcome, r.Word, report.OneLine(r.Reason))
@@ -86,9 +90,13 @@ func decide(r onboarding.Result, out io.Writer) {
 	}
 	pins := []string{}
 	for _, c := range r.Request.Candidates {
-		pins = append(pins, c.Claim+" (words: "+strings.Join(c.Words, ", ")+")")
+		words := "none compared; its gate held"
+		if len(c.Words) > 0 {
+			words = "compared: " + strings.Join(c.Words, ", ")
+		}
+		pins = append(pins, c.Claim+" ("+words+")")
 	}
-	fmt.Fprintf(out, "  decide: does claim %s say the same as %s? It behaved like their words on every trial state.\n", grouping.Name(r.Proves), strings.Join(pins, " or "))
+	fmt.Fprintf(out, "  decide: does claim %s say the same as %s? %s behaved like them on every trial state.\n", grouping.Name(r.Request.Proposal.Claim), strings.Join(pins, " or "), r.Word)
 	for _, command := range r.Request.Commands {
 		fmt.Fprintf(out, "    %s\n", command)
 	}
@@ -101,4 +109,12 @@ func grouped(r onboarding.Result) string {
 		return r.Claim + " through claim " + grouping.Name(r.Proves)
 	}
 	return r.Claim
+}
+
+// moved names the other words an agent's answer regrouped with the word.
+func moved(r onboarding.Result) string {
+	if len(r.Moved) == 0 {
+		return ""
+	}
+	return "; " + strings.Join(r.Moved, ", ") + " moved with it"
 }

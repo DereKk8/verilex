@@ -9,6 +9,7 @@ import (
 
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/featuremap"
+	"github.com/DereKk8/verilex/internal/grouping"
 	"github.com/DereKk8/verilex/internal/lifecycle"
 	"github.com/DereKk8/verilex/internal/runner"
 )
@@ -91,6 +92,11 @@ func (ix Index) Changed(p dictionary.Project, touched []string) (Change, error) 
 		if w.Claim != nil {
 			deps = append(deps, filepath.Join(p.Dir(), "grouping.yaml"))
 			deps = append(deps, claimDeps[w.Claim.Name]...)
+			// A word grouped under another claim is judged against that claim too, so its claim
+			// file and sources are the word's as well.
+			if d, ok := ix.g.Sound(w.Name); ok && d.Pin() == w.Proves() && grouping.Name(d.Claim) != w.Claim.Name {
+				deps = append(deps, claimDeps[grouping.Name(d.Claim)]...)
+			}
 		} else {
 			for _, ref := range w.Implements {
 				if section, err := featuremap.Resolve(p.Root, p.SkillDirs, ref); err == nil {

@@ -92,4 +92,5 @@ All live in `.cursor/skills/verify-verilex/scripts/` and are executable.
 | `doctor SESSION` | read-only health check |
 | `"$S/vx" LABEL CMD...` | run one command in the session and keep its transcript (wraps `capture SESSION LABEL CMD...`) |
 | `admit-all SESSION` | baseline for skip, plan and `--continue`: two green runs of `store-open \| item-stored apple \| item-listed apple`, then `propose` and `admit` for all three words; prints `admitted words: 3`. Run it once per session. |
+| `snapshot SESSION` | read-only sha256 of every file in `$S/tally`, `$S/tickets` and `$S/config`; diff two snapshots to prove nothing changed |
 | `cleanup SESSION` | tear down kept instances and the session, keep evidence |

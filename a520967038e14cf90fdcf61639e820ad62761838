@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "summary": "Adds verilex onboard, which admits claim words through mechanical checks and planted-defect trials and returns ambiguous grouping to the calling agent, plus the generated three-tier verilex index.",
+  "files": [
+    {
+      "path": "internal/onboarding/onboarding.go",
+      "summary": "Owns the onboarding pipeline from usefulness through the sealed grouping decision.",
+      "annotations": [
+        {
+          "newRange": [300, 304],
+          "summary": "decide marks an ambiguous proposal whose word agreed with every candidate's words as Undecided and onboards it as its own claim.",
+          "rationale": "The 2026-10-05 design record forbids any model call in the verilex core, so only the calling agent can say whether two claims mean the same. Until it answers, the claims stay separate, so nothing is grouped on a guess. TestAmbiguousProposalGoesBackToTheAgent and the onboard.md Ambiguous steps verify the output, the pending candidates and the index.",
+          "author": "fm/verilex-onboarding"
+        },
+        {
+          "newRange": [474, 508],
+          "summary": "settle applies the agent's --same-as or --distinct answer to the sealed decision without running trials.",
+          "rationale": "The trials already ran when the word became undecided, and pending records each candidate's version and defect digests, so the answer only regroups. A candidate that moved to a new version is refused because the trials compared the old one. Refusals for no open question and an unoffered claim are tested; the moved-version refusal is not covered by a test.",
+          "author": "fm/verilex-onboarding"
+        }
+      ]
+    },
+    {
+      "path": "internal/lifecycle/lifecycle.go",
+      "summary": "Derives admission, drift and requirement coverage for claim words from the grouping decision.",
+      "annotations": [
+        {
+          "newRange": [142, 146],
+          "summary": "Curated now requires a sound onboarding decision that pins the current claim with unchanged sources and word digest.",
+          "rationale": "Main covered requirement sentences from curator admissions, but claim words are now admitted only by onboarding, so coverage follows the decision. Coverage is keyed by repository and sub-feature, so a cross-repo claim never covers a local sub-feature with the same reference. go test ./... covers both cases in tests/claims_test.go.",
+          "author": "fm/verilex-onboarding"
+        }
+      ]
+    },
+    {
+      "path": "internal/stamp/stamp.go",
+      "summary": "Adds the onboarding seal to a claim word's proof stamp.",
+      "annotations": [
+        {
+          "newRange": [156, 164],
+          "summary": "The word admission component now holds the decision seal, so onboarding or a hand edit makes the next run live.",
+          "rationale": "A curator admission already worked this way for words without a claim, so the behavior stays parallel. An unreadable grouping file returns an unclear reason, so the chain runs live instead of skipping on unknown state. Verified by the onboard.md Stamp step.",
+          "author": "fm/verilex-onboarding"
+        }
+      ]
+    },
+    {
+      "path": "internal/curation/admit.go",
+      "summary": "Keeps propose and admit for words without a claim only.",
+      "annotations": [
+        {
+          "newRange": [54, 64],
+          "summary": "Admit refuses a word that proves a claim and points to verilex onboard instead.",
+          "rationale": "Two admission paths for claim words would let a curator skip the planted-defect gate. Existing curator flows for words without a claim are unchanged, as the propose.md and admit.md recipes show.",
+          "author": "fm/verilex-onboarding"
+        }
+      ]
+    },
+    {
+      "path": "internal/index/changed.go",
+      "summary": "Implements the model-free change lookup that reuses plan's skip decision.",
+      "annotations": [
+        {
+          "newRange": [40, 60],
+          "summary": "Index.Changed returns the affected claims and each known chain's plan decision as plain values.",
+          "rationale": "runner.Decide is the same call plan makes, so the lookup cannot disagree with plan. Returning plain values lets plan take it as its diff input later (PER-245), which is not built here. TestChangeLookupAgreesWithPlan compares every reported chain with plan --json.",
+          "author": "fm/verilex-onboarding"
+        }
+      ]
+    }
+  ]
+}

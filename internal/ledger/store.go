@@ -109,21 +109,20 @@ func (s Store) find(st stamp.Stamp, claim string, now time.Time) (Entry, string,
 	if err != nil {
 		return Entry{}, "", err
 	}
+	// A pass file names its stamp, so only passes for this step's stamp are read, unless none of
+	// them stands and the newest other pass has to say what changed.
+	matching, others := [][]string{}, [][]string{}
+	for _, file := range files {
+		if m := passName.FindStringSubmatch(file.Name()); m != nil && m[1] == st.Digest {
+			matching = append(matching, m)
+		} else if m != nil {
+			others = append(others, m)
+		}
+	}
 	var stands, refused, other *pass
 	why := ""
-	for _, file := range files {
-		m := passName.FindStringSubmatch(file.Name())
-		if m == nil {
-			continue
-		}
-		p, damage := s.open(dir, m)
-		if m[1] != st.Digest {
-			if damage == "" && newer(p, other) {
-				other = &p
-			}
-			continue
-		}
-		reason := damage
+	for _, m := range matching {
+		p, reason := s.open(dir, m)
 		if reason == "" {
 			reason = s.stands(p, st, claim, now)
 		}
@@ -132,6 +131,13 @@ func (s Store) find(st stamp.Stamp, claim string, now time.Time) (Entry, string,
 			stands = &p
 		case reason != "" && (refused == nil || newer(p, refused)):
 			refused, why = &p, reason
+		}
+	}
+	if stands == nil && refused == nil {
+		for _, m := range others {
+			if p, damage := s.open(dir, m); damage == "" && newer(p, other) {
+				other = &p
+			}
 		}
 	}
 	switch {

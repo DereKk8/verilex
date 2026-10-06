@@ -41,7 +41,7 @@ func curate(project dictionary.Project, args options, out io.Writer, refuse func
 			fmt.Fprintf(out, "admitted %s (curator %s, %d runs)\n", admission.Word, admission.Curator, len(admission.Runs))
 			return 0
 		}
-		words, err := dictionary.LoadWords(project)
+		words, err := lifecycle.LoadWords(project)
 		if err != nil {
 			return refuse(err)
 		}
@@ -61,7 +61,7 @@ func curate(project dictionary.Project, args options, out io.Writer, refuse func
 		}
 		fmt.Fprintf(out, "gap recorded for the verify skill's owner: %s\n", path)
 	case "check":
-		words, err := dictionary.LoadWords(project)
+		words, err := lifecycle.LoadWords(project)
 		if err != nil {
 			return refuse(err)
 		}

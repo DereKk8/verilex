@@ -5,7 +5,7 @@
 ## Sub-features
 
 - `run-live` launches an instance, runs every word, cleans up and records the run.
-- `run-refused` refuses an unknown word or a word whose `requires` nothing earlier provides, before starting anything.
+- `run-refused` refuses an unknown word or a word whose `requires` (its own or those its claim pins) nothing earlier provides, before starting anything.
 - `run-keep` leaves the instance alive and records `cleanup=kept`.
 - `run-fresh` runs live even when every stamp matches.
 - `run-json` prints the complete run record, including `rerun` (why it ran live) or `skipped`.
@@ -25,12 +25,12 @@ Preconditions:
 
 - **Live.** Run `"$S/vx" run-live verilex run 'store-open | item-stored apple | item-listed apple'`. Output `green: 3 green; run <RUN>`, exit `0`.
 - **Live, second view.** Run `"$S/vx" run-live-runs verilex runs` and `"$S/vx" run-live-stores ls "$S/stores"`. `<RUN>` shows `green  cleanup=done` and no store is left.
-- **Refused order.** Run `"$S/vx" run-refused-order verilex run 'item-stored apple | store-open'`. Stderr `verilex: refused: item-stored apple requires store; nothing earlier provides it`, exit `2`.
+- **Refused order.** Run `"$S/vx" run-refused-order verilex run 'item-stored apple | store-open'`. Stderr `verilex: refused: item-stored apple requires store, pinned by claim item-added; nothing earlier provides it`, exit `2`.
 - **Refused word.** Run `"$S/vx" run-refused-word verilex run 'store-open | nope'`. Stderr `verilex: refused: unknown word 'nope'; ...`, exit `2`.
 - **Refused, second view.** Run `"$S/vx" run-refused-runs verilex runs`. No run was added for either refusal.
 - **Keep.** Run `"$S/vx" run-keep verilex run --keep 'store-open | item-stored apple'`. The last line is ``kept: tear down with `verilex cleanup <RUN>` ``.
 - **Keep, second view.** Run `"$S/vx" run-keep-store cat "$S/stores/tally-<RUN>/store.json"` and `"$S/vx" run-keep-runs verilex runs`. The store holds `{"items": ["apple"]}` and the run shows `cleanup=kept`. Tear it down with `"$S/vx" run-keep-cleanup verilex cleanup <RUN>`.
-- **JSON.** Run `"$S/vx" run-json verilex run --json 'store-open | item-stored banana'`. Stdout is one JSON record with `run`, `frame` (`launch`, `doctor`, `cleanup`, each `exit: 0`), `words` with `verdict`, `claim`, `observation` and `stamp`, `"verdict": "green"`, `"cleanup": "done"`, `"evidence_kept": true`, and `rerun` naming why it ran live.
+- **JSON.** Run `"$S/vx" run-json verilex run --json 'store-open | item-stored banana'`. Stdout is one JSON record with `run`, `frame` (`launch`, `doctor`, `cleanup`, each `exit: 0`), `words` with `proves` (the claim version, such as `item-added@<version>`), `entry` (`cli`), `verdict`, `reported` (the word's own `pass`), `observation` and `stamp`, `"verdict": "green"`, `"cleanup": "done"`, `"evidence_kept": true`, and `rerun` naming why it ran live.
 - **Skip (admitted baseline).** After `admit-all`, run `"$S/vx" run-after-admit verilex run 'store-open | item-stored apple | item-listed apple'` (live: admission changed every stamp), then `"$S/vx" run-skip verilex run 'store-open | item-stored apple | item-listed apple'`. The second prints `green: 3 green, skipped: stamps match run <A>; run <B>` where `<A>` is the run-after-admit id.
 - **Skip, second view.** Run `"$S/vx" run-skip-runs verilex runs`, `"$S/vx" run-skip-stores ls "$S/stores"` and `"$S/vx" run-skip-cleanup verilex cleanup <B>`. `<B>` shows `cleanup=none`, no store exists, and cleanup prints `verilex: <B> launched nothing; it relied on stamps`.
 - **Skip JSON.** Run `"$S/vx" run-skip-json verilex run --json 'store-open | item-stored apple | item-listed apple'`. The record has `"skipped": true`, `"cleanup": "none"`, an empty `frame` and `relies_on` on each word.

@@ -1,0 +1,12 @@
+claim: store-opened
+sentence: A new, empty store is open and ready for items.
+entry: [cli]
+provides: [store]
+evidence:
+  action: "`tally open` exits 0 and prints `opened`."
+  observation: store.json holds no items.
+sources:
+  - ref: verify-tally/features/store.md#store-open
+    prose: 3742352a752d
+    requirements:
+      - 'Expect exit 0 and `opened`; `store.json` holds `{"items": []}`.'

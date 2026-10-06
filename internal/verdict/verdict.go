@@ -1,4 +1,4 @@
-// Package verdict owns the three verdicts and the honesty rules that turn a word's claim into one.
+// Package verdict owns the three verdicts and the honesty rules that turn a word's report into one.
 package verdict
 
 import (
@@ -51,15 +51,15 @@ func Legacy(label string) Verdict {
 	}
 }
 
-// Claims a word may make in its result object, and the exit code each must come with.
-var claims = map[string]struct {
+// Reports a word may make in its result object, and the exit code each must come with.
+var reports = map[string]struct {
 	verdict Verdict
 	exit    int
 }{"pass": {Green, 0}, "fail": {Red, 1}, "blocked": {Inconclusive, 2}}
 
-// ClaimExit is the exit code that matches a word's claim.
-func ClaimExit(claim string) int {
-	if c, ok := claims[claim]; ok {
+// ReportExit is the exit code that matches a word's report.
+func ReportExit(report string) int {
+	if c, ok := reports[report]; ok {
 		return c.exit
 	}
 	return 2
@@ -68,7 +68,7 @@ func ClaimExit(claim string) int {
 // Judgment is a word's verdict together with what the word said.
 type Judgment struct {
 	Verdict             Verdict
-	Claim               string
+	Reported            string
 	Reason              any
 	Observation, Detail any
 }
@@ -85,25 +85,25 @@ func Judge(code *int, stdout []byte, timeout int) Judgment {
 	m, ok := raw.(map[string]any)
 	var j Judgment
 	if ok {
-		j.Claim, _ = m["verdict"].(string)
+		j.Reported, _ = m["verdict"].(string)
 		j.Observation = m["observation"]
 		j.Detail = m["detail"]
 	}
-	claim, known := claims[j.Claim]
+	report, known := reports[j.Reported]
 	if !ok || !known {
 		return Judgment{Verdict: Inconclusive, Reason: "result has no verdict of pass, fail or blocked"}
 	}
 	j.Verdict, j.Reason = Inconclusive, j.Detail
 	held, _ := m["preconditions_held"].(bool)
 	switch {
-	case claim.exit != *code:
-		j.Reason = fmt.Sprintf("exit %d disagrees with verdict %s", *code, j.Claim)
-	case claim.verdict == Green && (!dictionary.Truthy(j.Observation) || strings.TrimSpace(fmt.Sprint(j.Observation)) == ""):
+	case report.exit != *code:
+		j.Reason = fmt.Sprintf("exit %d disagrees with verdict %s", *code, j.Reported)
+	case report.verdict == Green && (!dictionary.Truthy(j.Observation) || strings.TrimSpace(fmt.Sprint(j.Observation)) == ""):
 		j.Reason = "pass without a second observation"
-	case claim.verdict == Red && !held:
+	case report.verdict == Red && !held:
 		j.Reason = "fail without stating that its preconditions held"
 	default:
-		j.Verdict = claim.verdict
+		j.Verdict = report.verdict
 	}
 	return j
 }

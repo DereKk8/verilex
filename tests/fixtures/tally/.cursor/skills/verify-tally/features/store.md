@@ -14,7 +14,7 @@ A user opens a new, empty store before adding anything.
 
 Preconditions: an owned, empty store directory.
 
-- **Open.** Run `bin/tally --store "$STORE" open`. Expect exit 0 and `opened`. `store.json` holds `{"items": []}`.
+- `store-open`: Run `bin/tally --store "$STORE" open`. Expect exit 0 and `opened`; `store.json` holds `{"items": []}`.
 
 ## Gotchas
 

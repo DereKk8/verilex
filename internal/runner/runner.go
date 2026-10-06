@@ -133,7 +133,7 @@ func (r *Run) reuse(entries []ledger.Entry, stamps []stamp.Stamp) (Record, error
 func (r *Run) reused(i int, entry ledger.Entry, s stamp.Stamp) WordRecord {
 	step := r.steps[i]
 	return WordRecord{
-		Word: step.Word.Name, Args: step.Argv, Provides: step.Provides, Implements: step.Word.Implements,
+		Word: step.Word.Name, Args: step.Argv, Provides: step.Provides, Implements: step.Word.Implements, Proves: step.Word.Proves(), Entry: step.Word.Entry,
 		Verdict: verdict.Green, Observation: entry.Observation, Evidence: entry.Evidence,
 		Stamp: s.Digest, ReliesOn: entry.Run,
 	}
@@ -322,7 +322,7 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 		judged.Verdict = verdict.Inconclusive
 		judged.Reason = "secret pattern in evidence " + leak
 	}
-	return WordRecord{Word: step.Word.Name, Args: step.Argv, Provides: step.Provides, Implements: step.Word.Implements, Verdict: judged.Verdict, Claim: judged.Claim, Reason: judged.Reason, Observation: judged.Observation, Detail: judged.Detail, Exit: code, Seconds: math.RoundToEven(time.Since(started).Seconds()*100) / 100, Evidence: evidence}, nil
+	return WordRecord{Word: step.Word.Name, Args: step.Argv, Provides: step.Provides, Implements: step.Word.Implements, Proves: step.Word.Proves(), Entry: step.Word.Entry, Verdict: judged.Verdict, Reported: judged.Reported, Reason: judged.Reason, Observation: judged.Observation, Detail: judged.Detail, Exit: code, Seconds: math.RoundToEven(time.Since(started).Seconds()*100) / 100, Evidence: evidence}, nil
 }
 
 func (r *Run) frame(step, label string) (Frame, error) {

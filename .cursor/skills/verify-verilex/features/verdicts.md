@@ -1,6 +1,6 @@
 # Verdicts and exit codes
 
-Every `verilex run` ends in one of three verdicts with a matching exit code: `green` (0) when the product works with evidence, `red` (1) when it is broken with evidence, and `inconclusive` (2) for environment or harness trouble or a word claim that is not backed. Environment trouble is never reported as red.
+Every `verilex run` ends in one of three verdicts with a matching exit code: `green` (0) when the product works with evidence, `red` (1) when it is broken with evidence, and `inconclusive` (2) for environment or harness trouble or a word report that is not backed. Environment trouble is never reported as red.
 
 ## Sub-features
 
@@ -8,13 +8,13 @@ Every `verilex run` ends in one of three verdicts with a matching exit code: `gr
 - `verdict-red` reports red and exits 1 when a word fails with its preconditions held and the doctor still vouches for the instance.
 - `verdict-inconclusive-env` reports inconclusive and exits 2 when the product's environment blocks a word.
 - `verdict-inconclusive-frame` reports inconclusive and exits 2 when the frame doctor refuses the instance.
-- `verdict-honesty` turns unbacked claims into inconclusive: `pass` without an observation, `fail` without `preconditions_held`, an exit code that disagrees with the claim, stdout that is not one result JSON object, and a secret pattern in evidence.
+- `verdict-honesty` turns unbacked reports into inconclusive: `pass` without an observation, `fail` without `preconditions_held`, an exit code that disagrees with the report, stdout that is not one result JSON object, and a secret pattern in evidence.
 - `verdict-secret-project` applies the project's own `secret_patterns` from `.verilex/config.yaml` to word evidence.
 
 ## How to get to it (user POV)
 
 - Run `verilex run '<chain>'` and read the first word of output and the exit code.
-- Write a word's `run` that claims `pass`, `fail` or `blocked`, then run a chain that uses it.
+- Write a word's `run` that reports `pass`, `fail` or `blocked`, then run a chain that uses it.
 
 ## Driving it with vx
 

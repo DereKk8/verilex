@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/DereKk8/verilex/internal/featuremap"
@@ -38,4 +40,231 @@ func TestResolveSelectsHeadingSectionsAndFeatureIDs(t *testing.T) {
 			t.Fatalf("%s resolved: %v", ref, err)
 		}
 	}
+}
+
+const runbook = "# Items\n\n## Sub-features\n\n- `item-add` stores a named item.\n\n## Steps\n\n" +
+	"- **`item-add`.** Run `tally add NAME`. Expect exit 0 and `added NAME`;\n  `store.json` lists NAME.\n" +
+	"- Run `tally add NAME` again; it must exit 0.\n" +
+	"- Verified 2026-09-12: `tally add` exits 0.\n" +
+	"- The CLI returns `{\"items\": []}` for an empty store. Then a user adds more.\n" +
+	"- Prose that mentions `must` only in code.\n\n" +
+	"```sh\ntally add x # must exit 0\n```\n\n" +
+	"| Step | Result |\n|---|---|\n| list | Expect NAME on its own line. |\n"
+
+// R2: requirement sentences drop action sentences (and so their commands), fenced code and
+// layout, and keep literal values in code spans. A dated sentence is read like any other.
+func TestRequirementsKeepOnlyNormalizedRequirementSentences(t *testing.T) {
+	got := featuremap.Requirements(runbook)
+	want := []string{
+		"Expect exit 0 and `added NAME`; `store.json` lists NAME.",
+		"Verified 2026-09-12: `tally add` exits 0.",
+		"The CLI returns `{\"items\": []}` for an empty store.",
+		"Expect NAME on its own line.",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %q", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %q, want %q", got[i], want[i])
+		}
+	}
+	if s := featuremap.Normalize("- Expect  exit 0 and\n `added NAME`;  `store.json` lists NAME."); s != want[0] {
+		t.Fatalf("normalized %q", s)
+	}
+}
+
+// pinner writes items.md under a skill directory and pins its `item-add` sub-feature, with the
+// prose fingerprint of accepted as the one a reviewer accepted.
+func pinner(t *testing.T, accepted string) func(text string, requirements []string, covered ...string) featuremap.Anchor {
+	root := t.TempDir()
+	dir := filepath.Join(root, "skills", "verify-x")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	pin := func(text, prose string, requirements, covered []string) featuremap.Anchor {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "items.md"), []byte(text), 0644); err != nil {
+			t.Fatal(err)
+		}
+		a, err := featuremap.Pin(root, []string{"skills"}, featuremap.Source{Ref: "verify-x/items.md#item-add", Requirements: requirements, Prose: prose, Covered: covered})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	prose := pin(accepted, "", nil, nil).Prose
+	if len(prose) != featuremap.ProseDigits {
+		t.Fatalf("prose %q", prose)
+	}
+	return func(text string, requirements []string, covered ...string) featuremap.Anchor {
+		t.Helper()
+		return pin(text, prose, requirements, covered)
+	}
+}
+
+func reviews(t *testing.T, a featuremap.Anchor, want ...string) {
+	t.Helper()
+	if !slices.Equal(a.Review, want) {
+		t.Fatalf("review %q, want %q", a.Review, want)
+	}
+}
+
+func changed(a featuremap.Anchor) string {
+	return "prose changed: check that the claim still holds, then pin prose " + a.Prose
+}
+
+const added = "Expect exit 0 and `added NAME`; `store.json` lists NAME."
+
+// R1: an anchor asks for review only when its sub-feature id or one of its requirement
+// sentences changes; commands and text outside the sub-feature never do.
+func TestPinFlagsOnlyChangedIdsAndRequirements(t *testing.T) {
+	pin := pinner(t, runbook)
+	base := pin(runbook, []string{added})
+	if len(base.Review) != 0 || base.File != filepath.Join("skills", "verify-x", "items.md") || len(base.Hash) != 64 {
+		t.Fatalf("%#v", base)
+	}
+	noise := strings.NewReplacer("Run `tally add NAME`.", "Run `tally --quiet add NAME`.", "Items\n", "Items we keep\n", "2026-09-12", "2026-10-01").Replace(runbook)
+	if a := pin(noise, []string{added}); len(a.Review) != 0 || a.Hash != base.Hash || a.Prose != base.Prose {
+		t.Fatalf("noise asked for review: %#v", a)
+	}
+	reviews(t, pin(strings.Replace(runbook, "`added NAME`", "`stored NAME`", 1), []string{added}),
+		"requirement changed or gone: "+added, "requirement no claim maps: Expect exit 0 and `stored NAME`; `store.json` lists NAME.")
+	reviews(t, pin(strings.ReplaceAll(runbook, "`item-add`", "`item-put`"), []string{added}), "sub-feature item-add is gone")
+	reviews(t, pin(runbook, []string{"Run `tally add NAME`.", added}), "requirement changed or gone: Run `tally add NAME`.")
+	missing, err := featuremap.Pin(t.TempDir(), []string{"skills"}, featuremap.Source{Ref: "verify-x/items.md#item-add", Requirements: []string{added}})
+	if err != nil || len(missing.Review) != 1 || !strings.HasPrefix(missing.Review[0], "no feature file") {
+		t.Fatalf("%#v %v", missing, err)
+	}
+}
+
+// Any change to the sub-feature's prose outside code spans asks for review, the words of a Run
+// sentence included, so a rule written outside a requirement sentence is never missed. Command
+// edits and layout do not. A dated line is read like any other, so editing run history flags too.
+func TestPinFlagsProseChangesButNotCommands(t *testing.T) {
+	pin := pinner(t, runbook)
+	base := pin(runbook, []string{added})
+	for name, edit := range map[string][2]string{
+		"run sentence": {"Run `tally add NAME`.", "Run `tally add NAME`, which must exit 2 when NAME is stored."},
+		"definition":   {"stores a named item", "keeps a named item"},
+		"new sentence": {"lists NAME.\n", "lists NAME. Never add a NAME twice.\n"},
+		"dated prose":  {"lists NAME.\n", "lists NAME. On 2026-10-01 the store moved to format 2.\n"},
+		"bare date":    {"lists NAME.\n", "lists NAME. 2026-09-12: run 3 was green.\n"},
+	} {
+		a := pin(strings.Replace(runbook, edit[0], edit[1], 1), []string{added})
+		if a.Prose == base.Prose {
+			t.Fatalf("%s: prose %s did not change", name, a.Prose)
+		}
+		reviews(t, a, changed(a))
+	}
+	for name, edit := range map[string][2]string{
+		"command":  {"Run `tally add NAME`.", "Run `tally --store \"$STORE\" add NAME`."},
+		"layout":   {"Run `tally add NAME`. Expect", "Run   `tally add NAME`.\n  Expect"},
+		"emphasis": {"stores a named item", "stores a **named** item"},
+	} {
+		if a := pin(strings.Replace(runbook, edit[0], edit[1], 1), []string{added}); len(a.Review) != 0 {
+			t.Fatalf("%s: %#v", name, a)
+		}
+	}
+	// A dated rule is a rule, written as run history too.
+	for _, dated := range []string{"Since 2026-10-01 a NAME added twice must exit 2.", "Verified 2026-10-01: a NAME added twice must exit 2."} {
+		reviews(t, pin(strings.Replace(runbook, "lists NAME.\n", "lists NAME. "+dated+"\n", 1), []string{added}), "requirement no claim maps: "+dated)
+		reviews(t, pin(strings.Replace(runbook, "lists NAME.\n", "lists NAME. "+dated+"\n", 1), []string{added, dated}))
+	}
+
+	// Any edit inside a fenced block of the sub-feature asks for review; trailing spaces do not.
+	fenced := strings.Replace(runbook, "`store.json` lists NAME.\n", "`store.json` lists NAME.\n\n  ```sh\n  tally add NAME\n  ```\n", 1)
+	pinFenced := pinner(t, fenced)
+	if a := pinFenced(fenced, []string{added}); len(a.Review) != 0 {
+		t.Fatalf("%#v", a)
+	}
+	for name, edit := range map[string][2]string{
+		"command": {"  tally add NAME\n", "  tally --quiet add NAME\n"},
+		"info":    {"```sh", "```bash"},
+		"added":   {"  tally add NAME\n", "  tally add NAME\n  tally list\n"},
+	} {
+		a := pinFenced(strings.Replace(fenced, edit[0], edit[1], 1), []string{added})
+		reviews(t, a, changed(a))
+		if name == "command" && a.Prose == base.Prose {
+			t.Fatal("fence edit kept the prose")
+		}
+	}
+	if a := pinFenced(strings.Replace(fenced, "  tally add NAME\n", "  tally add NAME  \n", 1), []string{added}); len(a.Review) != 0 {
+		t.Fatalf("trailing spaces asked for review: %#v", a)
+	}
+
+	// A tilde fence is a fence, so a code span inside it is not blanked, and a backtick fence
+	// inside it is content. A fence that follows the step with only blank lines between, before
+	// the next item, belongs to the sub-feature.
+	for name, block := range map[string]string{
+		"tilde":     "  ~~~sh\n  echo `date` | tally add NAME\n  ```\n  Run `x`.\n  ~~~",
+		"following": "```sh\necho `date` | tally add NAME\n```",
+	} {
+		text := strings.Replace(runbook, "`store.json` lists NAME.\n", "`store.json` lists NAME.\n\n"+block+"\n\n", 1)
+		pinBlock := pinner(t, text)
+		if a := pinBlock(text, []string{added}); len(a.Review) != 0 {
+			t.Fatalf("%s: %#v", name, a)
+		}
+		for _, edit := range [][2]string{{"`date`", "`uname`"}, {"`x`", "`y`"}} {
+			if !strings.Contains(text, edit[0]) {
+				continue
+			}
+			a := pinBlock(strings.Replace(text, edit[0], edit[1], 1), []string{added})
+			reviews(t, a, changed(a))
+		}
+	}
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "skills", "verify-x"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "skills", "verify-x", "items.md"), []byte(runbook), 0644); err != nil {
+		t.Fatal(err)
+	}
+	unpinned, err := featuremap.Pin(root, []string{"skills"}, featuremap.Source{Ref: "verify-x/items.md#item-add", Requirements: []string{added}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviews(t, unpinned, "prose is not pinned: check that the claim holds, then pin prose "+base.Prose)
+}
+
+// R1: a sub-feature is the text its id names, so its requirement sentences count only there. A
+// sentence moved to another step, an id left only as a mention elsewhere, or a claim mapped to a
+// sentence of another step asks for review.
+func TestPinScopesRequirementsToTheirSubFeature(t *testing.T) {
+	pin := pinner(t, runbook)
+	moved := strings.Replace(runbook, " Expect exit 0 and `added NAME`;\n  `store.json` lists NAME.\n", "\n", 1) + "| add | " + added + " |\n"
+	reviews(t, pin(moved, []string{added}), "requirement is outside sub-feature item-add: "+added)
+	mention := strings.ReplaceAll(runbook, "`item-add`", "`item-put`") + "\nUse `item-add` only through the CLI.\n"
+	reviews(t, pin(mention, []string{added}), "sub-feature item-add is gone")
+	wrapped := strings.Replace(runbook, "**`item-add`.**", "**Add.**", 1) + "\nText that wraps onto the next line\n`item-add` there does not open a block.\n"
+	a := pin(wrapped, []string{added})
+	reviews(t, a, "requirement is outside sub-feature item-add: "+added, changed(a))
+	reviews(t, pin(runbook, []string{added, "Expect NAME on its own line."}), "requirement is outside sub-feature item-add: Expect NAME on its own line.")
+
+	// A heading, a table row, and the lines and fences nested under a list item all belong to it.
+	for name, text := range map[string]string{
+		"heading":   "# Items\n\n## Steps\n\n### item-add\n\nRun `tally add NAME`.\n\n#### Result\n\n" + added + "\n\n### item-list\n\nExpect NAME on its own line.\n",
+		"table row": "| Step | Result |\n|---|---|\n| `item-add` | " + added + " |\n| `item-list` | Expect NAME on its own line. |\n",
+		"nested":    "- `item-add`: Run `tally add NAME`.\n\n  ```sh\n  tally add x # must exit 0\n  ```\n\n  " + added + "\n- `item-list`: Expect NAME on its own line.\n",
+	} {
+		if a := pinner(t, text)(text, []string{added}); len(a.Review) != 0 {
+			t.Fatalf("%s: %#v", name, a)
+		}
+	}
+	// A heading inside the sub-feature is prose too.
+	heading := "# Items\n\n### item-add\n\nRun `tally add NAME`.\n\n#### Result\n\n" + added + "\n"
+	a = pinner(t, heading)(strings.Replace(heading, "#### Result", "#### Outcome", 1), []string{added})
+	reviews(t, a, changed(a))
+}
+
+// A requirement the sub-feature states that no claim maps asks for review and is named, unless
+// a claim maps it in the same sub-feature.
+func TestPinFlagsRequirementsNoClaimMaps(t *testing.T) {
+	pin := pinner(t, runbook)
+	refused := "Expect exit 2 and `exists NAME` when NAME is already stored."
+	text := strings.Replace(runbook, "`store.json` lists NAME.\n", "`store.json` lists NAME. "+refused+"\n", 1)
+	reviews(t, pin(text, []string{added}), "requirement no claim maps: "+refused)
+	reviews(t, pin(text, []string{added}, added, "- "+refused))
+	reviews(t, pin(text, []string{added, refused}))
 }

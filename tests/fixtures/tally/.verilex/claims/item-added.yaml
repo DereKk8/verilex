@@ -1,0 +1,16 @@
+claim: item-added
+sentence: A named item is in the store.
+args: [name]
+entry: [cli]
+requires: [store]
+provides: ["item:{name}"]
+evidence:
+  action: "`tally add NAME` exits 0 and prints `added NAME`."
+  observation: store.json lists NAME.
+  non_proofs:
+    - "`added NAME` alone does not prove the item was stored."
+sources:
+  - ref: verify-tally/features/items.md#item-add
+    prose: 2948a95bd310
+    requirements:
+      - "Expect exit 0 and `added NAME`; `store.json` lists NAME."

@@ -1,6 +1,6 @@
 ---
 name: verify-verilex
-description: "Drive the verilex CLI as its users do, against a disposable copy of the tally sample product with an isolated VERILEX_HOME; use when proving verilex behavior (run, plan, --continue, words, runs, cleanup, new, propose, admit, gap, check, the three verdicts and quiet output) on a fresh or a given verilex build."
+description: "Drive the verilex CLI as its users do, against a disposable copy of the tally sample product with an isolated VERILEX_HOME; use when proving verilex behavior (run, plan, --continue, words, claims, runs, cleanup, new, propose, admit, gap, check, the three verdicts and quiet output) on a fresh or a given verilex build."
 ---
 
 # Verify verilex
@@ -78,7 +78,8 @@ Each feature file lists its own gotchas. These traps cross features:
 - Only variables in a word's `env` enter its stamp. Probe frame-only variables such as `TALLY_ADOPT_STORE` with `--fresh`.
 - `verilex plan` and `verilex check` exit `0` whatever they report. Read stdout.
 - `verilex runs` sorts by run id, so two runs in the same second are out of time order. Use the id a command printed.
-- Edits to `$S/tally` (words, `config.yaml`, the tally feature map) change stamps or cause drift. Restore them before the next recipe.
+- Edits to `$S/tally` (words, claims, `config.yaml`, the tally feature map) change stamps, versions or cause drift. Restore them before the next recipe.
+- The tally words prove claims, so a feature-map edit causes drift when it changes anything outside code spans in a sub-feature's text (the `Sub-features` entry and the step that opens with its id): an id, a requirement sentence, other prose (dated sentences and run history included) or anything inside a fenced block (backtick or `~~~`, or a block right after the step). Inline command edits and text outside every sub-feature flag nothing. Re-mapping a claim's sources or pinning new prose makes its admitted words drift-suspect until they are admitted again, and another claim covers a sentence only through a word a curator admitted (see [claims.md](features/claims.md)).
 
 ## Helpers
 

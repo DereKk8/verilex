@@ -229,22 +229,23 @@ func TestDriftSuspectWordNeverSkips(t *testing.T) {
 	root := curated(t)
 	kept := green(t, root, nil, chain, "--keep")
 	items := feature(root, "items.md")
-	write(t, items, strings.Replace(read(t, items), "Expect NAME on its own line.", "Expect NAME alone on its line.", 1), 0644)
+	original := read(t, items)
+	changeAddRequirement(t, root)
 	equal(t, status(t, root, "item-stored"), "drift-suspect")
-	held := "item-stored apple: drift-suspect: " + itemAdd + ": section changed"
+	held := "item-stored apple: drift-suspect: " + reviewAdd
 
-	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; "+held+"\n")
+	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; "+headline(held)+"\n")
 	done := plan(t, root, chain, "--continue", kept.Run)
 	equal(t, done.code, 2)
 	contains(t, done.stderr, "verilex: refused: "+held+"; the kept instance already holds the effects of item-stored apple")
 	record := green(t, root, nil, chain)
 	equal(t, record.Rerun, held)
 	ranLive(t, record)
-	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; "+held+"\n")
+	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; "+headline(held)+"\n")
 
 	// A read-only word that must run live (here provisional again) runs on the kept instance:
 	// it changes nothing there.
-	write(t, items, strings.Replace(read(t, items), "Expect NAME alone on its line.", "Expect NAME on its own line.", 1), 0644)
+	write(t, items, original, 0644)
 	equal(t, status(t, root, "item-stored"), "admitted")
 	if err := os.Remove(filepath.Join(root, ".verilex", "words", "item-listed", "admission.json")); err != nil {
 		t.Fatal(err)
@@ -293,8 +294,16 @@ func TestContinueRefusalsAndRefreshFailure(t *testing.T) {
 func TestReadOnlyWordProvidesNothing(t *testing.T) {
 	root := product(t)
 	path := filepath.Join(root, ".verilex", "words", "item-stored", "word.md")
-	write(t, path, strings.Replace(read(t, path), "requires: [store]", "requires: [store]\nread_only: true", 1), 0644)
+	write(t, path, strings.Replace(read(t, path), "entry: cli", "entry: cli\nprovides: [shelf]\nread_only: true", 1), 0644)
 	done := verilex(t, root, nil, "words")
 	equal(t, done.code, 2)
 	contains(t, done.stderr, "a 'read_only' word changes nothing, so it provides no states")
+}
+
+// headline is a reason as a one-line headline shows it: at most 300 characters.
+func headline(reason string) string {
+	if runes := []rune(reason); len(runes) > 300 {
+		return string(runes[:299]) + "…"
+	}
+	return reason
 }

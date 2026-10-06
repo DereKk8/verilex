@@ -1,6 +1,6 @@
-// Package featuremap owns reading the verify skill's feature map: resolving a word's
-// `implements` reference to a section and hashing that section. It only reads; verilex
-// never edits a verify skill.
+// Package featuremap owns reading the verify skill's feature map: pinning a claim's anchors
+// (a sub-feature id plus normalized requirement sentences) and resolving an older word's
+// `implements` reference to a whole section. It only reads; verilex never edits a verify skill.
 package featuremap
 
 import (
@@ -38,8 +38,8 @@ func (e *MissingError) Error() string { return fmt.Sprintf("%s: %s", e.Ref, e.Wh
 // Without an anchor the section is the whole file.
 func Resolve(root string, skillDirs []string, ref string) (Section, error) {
 	path, anchor, _ := strings.Cut(ref, "#")
-	clean := filepath.Clean(filepath.FromSlash(path))
-	if path == "" || filepath.IsAbs(clean) || clean == "." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
+	clean, ok := relative(path)
+	if !ok {
 		return Section{}, &MissingError{ref, "not a <skill>/<file>#<section> reference"}
 	}
 	for _, dir := range skillDirs {
@@ -64,20 +64,67 @@ func Resolve(root string, skillDirs []string, ref string) (Section, error) {
 
 var heading = regexp.MustCompile(`^(#{1,6})[ \t]+(.*?)[ \t#]*$`)
 
+// fenceRun matches a line that opens or closes a fenced block: three or more backticks or tildes.
+var fenceRun = regexp.MustCompile("^\\s*(`{3,}|~{3,})")
+
+// fence tracks fenced blocks line by line: the run that opened the current block, or "" outside
+// one. A block opens with three or more backticks or tildes and closes with a bare run of the
+// same character at least as long, so a shorter or other fence inside it is content.
+type fence string
+
+// step moves f past line and reports whether line opens or closes a block.
+func (f *fence) step(line string) bool {
+	m := fenceRun.FindStringSubmatch(line)
+	switch {
+	case m == nil:
+		return false
+	case *f == "":
+		*f = fence(m[1])
+	case m[1][0] == (*f)[0] && len(m[1]) >= len(*f) && strings.TrimSpace(line) == m[1]:
+		*f = ""
+	default:
+		return false
+	}
+	return true
+}
+
+// fenceEnd returns the index just past the fenced block that opens at lines[i].
+func fenceEnd(lines []string, i int) int {
+	var f fence
+	f.step(lines[i])
+	for i++; i < len(lines); i++ {
+		if f.step(lines[i]) {
+			return i + 1
+		}
+	}
+	return i
+}
+
 func section(text, anchor string) (string, bool) {
 	if anchor == "" {
 		return text, true
 	}
+	if text, ok := headingSection(text, anchor); ok {
+		return text, true
+	}
+	if strings.Contains(text, "`"+anchor+"`") {
+		return text, true
+	}
+	return "", false
+}
+
+// headingSection is the section under the first heading whose slug equals anchor: that heading
+// through the next heading of the same or a higher level.
+func headingSection(text, anchor string) (string, bool) {
 	lines := strings.Split(text, "\n")
 	start, level := -1, 0
-	fenced := false
+	var f fence
 	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "```") {
-			fenced = !fenced
+		if f.step(line) {
 			continue
 		}
 		m := heading.FindStringSubmatch(line)
-		if fenced || m == nil {
+		if f != "" || m == nil {
 			continue
 		}
 		if start >= 0 && len(m[1]) <= level {
@@ -89,9 +136,6 @@ func section(text, anchor string) (string, bool) {
 	}
 	if start >= 0 {
 		return strings.Join(lines[start:], "\n"), true
-	}
-	if strings.Contains(text, "`"+anchor+"`") {
-		return text, true
 	}
 	return "", false
 }

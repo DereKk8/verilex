@@ -16,8 +16,8 @@ A user adds named items to an open store and lists them.
 
 Preconditions: an open store.
 
-- **Add.** Run `bin/tally --store "$STORE" add NAME`. Expect exit 0 and `added NAME`; `store.json` lists NAME.
-- **List.** Run `bin/tally --store "$STORE" list`. Expect NAME on its own line.
+- `item-add`: Run `bin/tally --store "$STORE" add NAME`. Expect exit 0 and `added NAME`; `store.json` lists NAME.
+- `item-list`: Run `bin/tally --store "$STORE" list`. Expect NAME on its own line.
 
 ## Gotchas
 

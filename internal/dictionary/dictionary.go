@@ -1,4 +1,4 @@
-// Package dictionary owns project discovery, word contracts, and chain planning.
+// Package dictionary owns project discovery, word and claim contracts, and chain planning.
 package dictionary
 
 import (
@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -49,13 +49,29 @@ type Word struct {
 	// ReadOnly declares that the word only observes the instance and never changes it, so it
 	// may run on a kept instance whatever ran there before. A read-only word provides no states.
 	ReadOnly bool
+	// Claim is the claim the word's contract pins ('claim: <claim>@<version>'), nil for a word
+	// that only names feature-map sections in 'implements'. Requires and Provides include the
+	// claim's states, Pinned lists the requires the claim pins, and Implements its sources.
+	Claim  *Claim
+	Pinned []string
+	// Entry is the user entry point the word exercises, one of its claim's.
+	Entry string
+	// Stale says why the pin names an older version of the claim; a chain holding the word is refused.
+	Stale string
+	pin   string
 }
 
 func (w Word) Run() string { return filepath.Join(w.Path, "run") }
 
+// Proves is the claim version the word's contract pins, <claim>@<version>; empty without a
+// claim. It differs from the claim's current version only while the word is Stale.
+func (w Word) Proves() string { return w.pin }
+
 type Step struct {
 	Word                     Word
 	Argv, Requires, Provides []string
+	// Pinned are the requires the step's claim pins, with arguments bound.
+	Pinned []string
 }
 
 func (s Step) Label() string { return strings.Join(append([]string{s.Word.Name}, s.Argv...), " ") }
@@ -117,23 +133,29 @@ func CompilePattern(pattern string) (*regexp2.Regexp, error) {
 	return regexp2.Compile(pattern, 0)
 }
 
-func LoadWords(p Project) ([]Word, error) {
+// Load reads a project's claims and its words and binds each word to the claim it pins. Claim
+// sources come back without Covered, which depends on admissions: lifecycle.Load fills it.
+func Load(p Project) (map[string]Claim, []Word, error) {
 	paths, err := filepath.Glob(filepath.Join(p.Dir(), "words", "*", "word.md"))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	claims, err := LoadClaims(p)
+	if err != nil {
+		return nil, nil, err
 	}
 	words := make([]Word, 0, len(paths))
 	for _, path := range paths {
-		word, err := loadWord(filepath.Dir(path))
+		word, err := loadWord(filepath.Dir(path), claims)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		words = append(words, word)
 	}
-	return words, nil
+	return claims, words, nil
 }
 
-func loadWord(path string) (Word, error) {
+func loadWord(path string, claims map[string]Claim) (Word, error) {
 	file := filepath.Join(path, "word.md")
 	text, err := os.ReadFile(file)
 	if err != nil {
@@ -187,34 +209,28 @@ func loadWord(path string) (Word, error) {
 			return Word{}, fmt.Errorf("%s: a 'read_only' word changes nothing, so it provides no states", file)
 		}
 	}
-	if len(w.Implements) == 0 {
-		return Word{}, fmt.Errorf("%s: 'implements' must point at the verify skill's feature map", file)
+	if raw, ok := meta["entry"]; ok {
+		if w.Entry, ok = raw.(string); !ok {
+			return Word{}, fmt.Errorf("%s: 'entry' must name one entry point", file)
+		}
+	}
+	if raw, ok := meta["claim"]; ok {
+		pin, ok := raw.(string)
+		if !ok {
+			return Word{}, fmt.Errorf("%s: 'claim' must pin a claim version, <claim>@<version> as `verilex claims` prints it", file)
+		}
+		if err = bindClaim(&w, file, pin, claims); err != nil {
+			return Word{}, err
+		}
+	} else if len(w.Implements) == 0 {
+		return Word{}, fmt.Errorf("%s: 'implements' must point at the verify skill's feature map, or 'claim' must pin the claim the word proves", file)
 	}
 	if !Truthy(meta["promise"]) || strings.TrimSpace(fmt.Sprint(meta["promise"])) == "" {
 		return Word{}, fmt.Errorf("%s: 'promise' is required", file)
 	}
 	w.Promise = strings.Join(strings.Fields(fmt.Sprint(meta["promise"])), " ")
-	for _, state := range append(append([]string{}, w.Requires...), w.Provides...) {
-		unknown := map[string]bool{}
-		for _, match := range placeholder.FindAllStringSubmatch(state, -1) {
-			found := false
-			for _, arg := range w.Args {
-				if arg == match[1] {
-					found = true
-				}
-			}
-			if !found {
-				unknown[match[1]] = true
-			}
-		}
-		if len(unknown) > 0 {
-			names := make([]string, 0, len(unknown))
-			for name := range unknown {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-			return Word{}, fmt.Errorf("%s: state %s uses undeclared args %s", file, quote(state), repr(names))
-		}
+	if err = undeclared(file, append(append([]string{}, w.Requires...), w.Provides...), w.Args); err != nil {
+		return Word{}, err
 	}
 	if raw, ok := meta["timeout"]; ok {
 		switch value := raw.(type) {
@@ -264,6 +280,9 @@ func ParseChain(chain string, words []Word) ([]Step, error) {
 		if word == nil {
 			return nil, fmt.Errorf("unknown word %s; `verilex words` lists the dictionary", quote(tokens[0]))
 		}
+		if word.Stale != "" {
+			return nil, errors.New(word.Stale)
+		}
 		argv := tokens[1:]
 		if len(argv) != len(word.Args) {
 			return nil, fmt.Errorf("%s takes %d argument(s) %s, got %s", word.Name, len(word.Args), repr(word.Args), repr(argv))
@@ -279,7 +298,7 @@ func ParseChain(chain string, words []Word) ([]Step, error) {
 			}
 			return result
 		}
-		steps = append(steps, Step{Word: *word, Argv: argv, Requires: bind(word.Requires), Provides: bind(word.Provides)})
+		steps = append(steps, Step{Word: *word, Argv: argv, Requires: bind(word.Requires), Provides: bind(word.Provides), Pinned: bind(word.Pinned)})
 	}
 	return steps, nil
 }
@@ -289,7 +308,11 @@ func CheckOrder(steps []Step) error {
 	for _, step := range steps {
 		for _, state := range step.Requires {
 			if !available[state] {
-				return fmt.Errorf("%s requires %s; nothing earlier provides it", step.Label(), state)
+				pinned := ""
+				if slices.Contains(step.Pinned, state) {
+					pinned = ", pinned by claim " + step.Word.Claim.Name
+				}
+				return fmt.Errorf("%s requires %s%s; nothing earlier provides it", step.Label(), state, pinned)
 			}
 		}
 		for _, state := range step.Provides {

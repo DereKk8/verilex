@@ -155,7 +155,7 @@ func TestQuietOutputShowsVerdictThenFailuresOnly(t *testing.T) {
 		equal(t, verdicts(record), []string{"green", "green", "green"})
 		equal(t, record.Steps, 3)
 		for _, word := range record.Words {
-			if word.Observation == nil || word.Evidence == "" || len(word.Stamp) != 64 || word.Claim != "pass" {
+			if word.Observation == nil || word.Evidence == "" || len(word.Stamp) != 64 || word.Reported != "pass" {
 				t.Fatalf("incomplete word record: %+v", word)
 			}
 		}

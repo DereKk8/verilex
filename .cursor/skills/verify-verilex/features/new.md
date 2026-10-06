@@ -1,6 +1,6 @@
 # New word
 
-`verilex new <word> --implements <ref>` scaffolds a provisional word whose every `--implements` reference resolves to a feature-map section. Its `run` claims `blocked` until written, so its steps are inconclusive. In a project without `.verilex/`, `new` also creates `config.yaml` and frame stubs that exit 2.
+`verilex new <word> --implements <ref>` scaffolds a provisional word whose every `--implements` reference resolves to a feature-map section. Its `run` reports `blocked` until written, so its steps are inconclusive. In a project without `.verilex/`, `new` also creates `config.yaml` and frame stubs that exit 2.
 
 ## Sub-features
 

@@ -36,7 +36,7 @@ type Scaffold struct {
 
 // New writes a provisional word whose contract implements refs. Every ref must resolve to a
 // feature-map section. When start lies in no project, .verilex/ is created at start with a
-// config and frame stubs; the stubs exit 2 and the word's run claims blocked until written, so
+// config and frame stubs; the stubs exit 2 and the word's run reports blocked until written, so
 // a scaffold is always inconclusive, never green.
 func New(start, name string, refs []string) (Scaffold, error) {
 	if !dictionary.WordName.MatchString(name) {

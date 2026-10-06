@@ -91,9 +91,7 @@ func Human(record runner.Record, out io.Writer) {
 	for _, missed := range record.Uncovered {
 		fmt.Fprintf(out, "  uncovered  %s\n    next: %s\n", missed.Claim, missed.Next)
 	}
-	for _, name := range record.Unclaimed {
-		fmt.Fprintf(out, "  unclaimed  %s: proves no claim; verify it with the product verify skill\n", name)
-	}
+	Gaps(record.Gaps, out)
 	frame("doctor-after-failure")
 	frame("cleanup")
 	if v != verdict.Green && !claimed && record.Reason != nil && *record.Reason != "" && !explained(*record.Reason, labels) {
@@ -228,5 +226,18 @@ func Ticket(t ticket.Ticket, out io.Writer) {
 			fmt.Fprintf(out, "  from %s", from)
 		}
 		fmt.Fprintln(out)
+	}
+}
+
+// Gaps prints what a diff touched that no claim verdict proves, one line each.
+func Gaps(gaps runner.Gaps, out io.Writer) {
+	for _, change := range gaps.Unmapped {
+		fmt.Fprintf(out, "  unmapped  %s: no word depends on it; check the path or key, or verify it with the product verify skill\n", change)
+	}
+	for _, name := range gaps.Unclaimed {
+		fmt.Fprintf(out, "  unclaimed  %s: proves no claim; verify it with the product verify skill\n", name)
+	}
+	for _, name := range gaps.Unrun {
+		fmt.Fprintf(out, "  unrun  %s: proves a claim this chain proves through another word; run a chain that uses it\n", name)
 	}
 }

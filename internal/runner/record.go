@@ -2,6 +2,7 @@ package runner
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -27,6 +28,38 @@ type Request struct {
 	Claims  []string `json:"claims"`
 	Named   []string `json:"named"`
 	Changed []string `json:"changed"`
+}
+
+// Gaps is what a diff touched that no claim verdict of the run proves. Each entry is counted in
+// the verdict's warning, as an uncovered claim is.
+type Gaps struct {
+	// Unmapped are diff entries, as given, that hit no word and no claim: a typo, or a change
+	// nothing in .verilex depends on.
+	Unmapped []string `json:"unmapped,omitempty"`
+	// Unclaimed are touched words outside the chain that prove no claim.
+	Unclaimed []string `json:"unclaimed,omitempty"`
+	// Unrun are touched words outside the chain whose claim the chain proves through another word.
+	Unrun []string `json:"unrun,omitempty"`
+}
+
+// Phrases counts each kind of gap for a warning, in a fixed order.
+func (g Gaps) Phrases() []string {
+	var phrases []string
+	for _, kind := range []struct {
+		n         int
+		one, many string
+	}{
+		{len(g.Unmapped), "change no word covers", "changes no word covers"},
+		{len(g.Unclaimed), "touched word with no claim", "touched words with no claim"},
+		{len(g.Unrun), "touched word not run", "touched words not run"},
+	} {
+		if kind.n == 1 {
+			phrases = append(phrases, "1 "+kind.one)
+		} else if kind.n > 1 {
+			phrases = append(phrases, fmt.Sprintf("%d %s", kind.n, kind.many))
+		}
+	}
+	return phrases
 }
 
 // Uncovered is a touched claim this run did not prove, and the command that would prove it.
@@ -101,8 +134,7 @@ type Record struct {
 	Format    string   `json:"format,omitempty"`
 	Requested *Request `json:"requested,omitempty"`
 	Touched   []string `json:"touched,omitempty"`
-	// Unclaimed names words the diff touched that prove no claim, so no claim verdict covers them.
-	Unclaimed []string `json:"unclaimed,omitempty"`
+	Gaps
 	// Warning, Uncovered and Claims are set when this run was given a diff or a claim plan.
 	// Warning is empty when every touched claim was proved. Uncovered names touched claims this
 	// run did not prove, each with the next command that would prove it. Claims is one verdict

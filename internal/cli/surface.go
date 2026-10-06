@@ -67,7 +67,7 @@ func claimSurface(project dictionary.Project, words []dictionary.Word, args opti
 	record.Format = runner.ClaimRunFormat
 	record.Requested = requested(args)
 	record.Touched = plan.Touched
-	record.Unclaimed = plan.Unclaimed
+	record.Gaps = plan.Gaps
 	if err = attachCoverage(&record, ix, plan.Selected, plan.Unpicked, args.changed); err != nil {
 		return refuse(err)
 	}
@@ -80,7 +80,7 @@ func claimSurface(project dictionary.Project, words []dictionary.Word, args opti
 }
 
 // coverChain attaches a missed-claim warning to a chain run that was given a diff.
-func coverChain(project dictionary.Project, record *runner.Record, changed []string) error {
+func coverChain(project dictionary.Project, steps []dictionary.Step, record *runner.Record, changed []string) error {
 	if len(changed) == 0 {
 		return nil
 	}
@@ -91,7 +91,7 @@ func coverChain(project dictionary.Project, record *runner.Record, changed []str
 	record.Format = runner.ClaimRunFormat
 	record.Requested = &runner.Request{Claims: []string{}, Named: []string{}, Changed: listed(changed)}
 	record.Touched = ix.TouchedClaims(project, changed)
-	record.Unclaimed = ix.UnclaimedWords(project, changed)
+	record.Gaps = ix.Gaps(project, changed, steps)
 	if err = attachCoverage(record, ix, nil, record.Touched, changed); err != nil {
 		return err
 	}
@@ -145,12 +145,13 @@ func attachCoverage(record *runner.Record, ix index.Index, selected, missed []st
 		}
 		record.Uncovered = append(record.Uncovered, runner.Uncovered{Claim: name, Next: nextCommand(name, changed, false)})
 	}
-	record.Warning = ""
+	var phrases []string
 	if n := len(record.Uncovered); n == 1 {
-		record.Warning = "1 touched claim not covered"
+		phrases = append(phrases, "1 touched claim not covered")
 	} else if n > 1 {
-		record.Warning = fmt.Sprintf("%d touched claims not covered", n)
+		phrases = append(phrases, fmt.Sprintf("%d touched claims not covered", n))
 	}
+	record.Warning = strings.Join(append(phrases, record.Gaps.Phrases()...), ", ")
 	return nil
 }
 
@@ -195,15 +196,15 @@ func nextCommand(claim string, changed []string, fresh bool) string {
 func nothingCovered(plan index.ClaimPlan, args options, out io.Writer, refuse func(error) int) int {
 	if args.json {
 		value := struct {
-			Format    string               `json:"format"`
-			Verdict   verdict.Verdict      `json:"verdict"`
-			Reason    string               `json:"reason"`
-			Requested *runner.Request      `json:"requested"`
-			Touched   []string             `json:"touched"`
-			Unclaimed []string             `json:"unclaimed"`
+			Format    string          `json:"format"`
+			Verdict   verdict.Verdict `json:"verdict"`
+			Reason    string          `json:"reason"`
+			Requested *runner.Request `json:"requested"`
+			Touched   []string        `json:"touched"`
+			runner.Gaps
 			Claims    []runner.ClaimReport `json:"claims"`
 			Uncovered []runner.Uncovered   `json:"uncovered"`
-		}{runner.ClaimRunFormat, verdict.Inconclusive, plan.Inconclusive, requested(args), plan.Touched, plan.Unclaimed, []runner.ClaimReport{}, []runner.Uncovered{}}
+		}{runner.ClaimRunFormat, verdict.Inconclusive, plan.Inconclusive, requested(args), plan.Touched, plan.Gaps, []runner.ClaimReport{}, []runner.Uncovered{}}
 		if err := encode(out, value); err != nil {
 			return refuse(err)
 		}
@@ -270,9 +271,7 @@ func printClaimPlan(plan index.ClaimPlan, out io.Writer) {
 	for _, name := range plan.Unpicked {
 		fmt.Fprintf(out, "  unpicked  %s\n", name)
 	}
-	for _, name := range plan.Unclaimed {
-		fmt.Fprintf(out, "  unclaimed  %s: proves no claim; verify it with the product verify skill\n", name)
-	}
+	report.Gaps(plan.Gaps, out)
 }
 
 func writeRun(record runner.Record, runErr error, asJSON bool, out, stderr io.Writer, refuse func(error) int) int {

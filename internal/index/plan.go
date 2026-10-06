@@ -37,10 +37,10 @@ type ClaimPlan struct {
 	// A claim in Skip still has a standing pass, yet the run drives its step again.
 	Rerun string `json:"rerun,omitempty"`
 	// Inconclusive is set when no claim covers the diff and none was given or named: nothing
-	// can prove the change, so the run is inconclusive. Unclaimed names touched words that
-	// prove no claim, so no claim verdict covers them.
-	Inconclusive string   `json:"inconclusive,omitempty"`
-	Unclaimed    []string `json:"unclaimed,omitempty"`
+	// can prove the change, so the run is inconclusive.
+	Inconclusive string `json:"inconclusive,omitempty"`
+	// Gaps is what the diff touched that Chain's claim verdicts do not prove; Warning counts it.
+	runner.Gaps
 
 	// force is why the chain must run live even when every stamp matches. It is not part of
 	// the JSON contract; `verilex run` reads it so a matching stamp cannot hide the diff.
@@ -65,9 +65,9 @@ type LiveClaim struct {
 	Reason string `json:"reason"`
 }
 
-// UnclaimedWords names the words a diff hits that prove no claim, in name order.
-func (ix Index) UnclaimedWords(p dictionary.Project, changes []string) []string {
-	return ix.touchOf(p, changes).unclaimed(ix.words)
+// Gaps is what a diff touched that a chain's claim verdicts do not prove.
+func (ix Index) Gaps(p dictionary.Project, changes []string, steps []dictionary.Step) runner.Gaps {
+	return ix.gapsOf(ix.touchOf(p, changes), steps)
 }
 
 // TouchedClaims names the claims a diff hits, in index order. It runs nothing and binds no arguments.
@@ -132,11 +132,8 @@ func (ix Index) PlanClaims(p dictionary.Project, derived, named, changes []strin
 			plan.Unpicked = append(plan.Unpicked, name)
 		}
 	}
-	if n := len(plan.Unpicked); n > 0 {
-		plan.Warning = countPhrase(n, "touched claim not picked", "touched claims not picked")
-	}
-	plan.Unclaimed = hit.unclaimed(ix.words)
 	if len(plan.Selected) == 0 {
+		plan.Gaps = ix.gapsOf(hit, nil)
 		plan.Inconclusive = "no claim covers this change; fall back to the product verify skill"
 		if len(plan.Unclaimed) > 0 {
 			plan.Inconclusive = strings.Join(plan.Unclaimed, ", ") + " proves no claim and the diff touched it; fall back to the product verify skill"
@@ -156,6 +153,12 @@ func (ix Index) PlanClaims(p dictionary.Project, derived, named, changes []strin
 		return plan, err
 	}
 	plan.force = hit.forcedChain(steps)
+	plan.Gaps = ix.gapsOf(hit, steps)
+	var phrases []string
+	if n := len(plan.Unpicked); n > 0 {
+		phrases = append(phrases, countPhrase(n, "touched claim not picked", "touched claims not picked"))
+	}
+	plan.Warning = strings.Join(append(phrases, plan.Gaps.Phrases()...), ", ")
 	stamps := stamp.Chain(p, steps)
 	store := ledger.At(runner.LedgerDir(p))
 	seen := map[string]bool{}
@@ -172,8 +175,9 @@ func (ix Index) PlanClaims(p dictionary.Project, derived, named, changes []strin
 		if stamps[i].Hold != "" {
 			why = stamps[i].Hold
 		}
+		// The run forces a live chain from its own words only, so the plan reads the same rule.
 		if why == "" {
-			why = hit.forced[name]
+			why = hit.forcedWords[step.Word.Name]
 		}
 		if why == "" {
 			prints := entry.Components

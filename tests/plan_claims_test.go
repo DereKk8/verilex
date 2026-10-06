@@ -24,6 +24,8 @@ type claimPlan struct {
 	Rerun        string         `json:"rerun"`
 	Inconclusive string         `json:"inconclusive"`
 	Unclaimed    []string       `json:"unclaimed"`
+	Unmapped     []string       `json:"unmapped"`
+	Unrun        []string       `json:"unrun"`
 }
 
 type skippedClaim struct {
@@ -411,4 +413,85 @@ func TestPlanSaysChainRunsLive(t *testing.T) {
 			t.Fatalf("a step skipped under a changed image pin: %#v", word)
 		}
 	}
+}
+
+// Rule: a diff entry no word depends on, a touched word with no claim, and a touched word the
+// chain does not drive are each counted in the verdict's warning, never dropped beside a
+// mapped entry. The tally here reads its defect from lib/mode, which no word declares.
+func TestMixedDiffGapsWarn(t *testing.T) {
+	root := curated(t)
+	tally := filepath.Join(root, "bin", "tally")
+	reads := strings.Replace(read(t, tally), `defect = os.environ.get("TALLY_DEFECT")`,
+		`defect = os.environ.get("TALLY_DEFECT") or (Path(__file__).parent.parent / "lib" / "mode").read_text().strip()`, 1)
+	if err := os.Remove(tally); err != nil {
+		t.Fatal(err)
+	}
+	write(t, tally, reads, 0755)
+	if err := os.MkdirAll(filepath.Join(root, "lib"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(root, "lib", "mode"), "", 0644)
+	green(t, root, nil, chain)
+	green(t, root, nil, chain)
+	replace(t, filepath.Join(root, "lib", "mode"), "drop-adds\n")
+
+	equal(t, verilex(t, root, nil, "run", "--changed", "lib/mode").code, 2)
+	mixed := verilex(t, root, nil, "run", "--changed", "lib/mode", "--changed", "runbook:verify-tally/features/items.md#item-add")
+	contains(t, mixed.stdout, "with 1 change no word covers; run ")
+	contains(t, mixed.stdout, "  unmapped  lib/mode: no word depends on it")
+	asJSON := verilex(t, root, nil, "run", "--json", "--changed", "lib/mode", "--changed", "runbook:verify-tally/features/items.md#item-add")
+	var record map[string]any
+	if err := json.Unmarshal([]byte(asJSON.stdout), &record); err != nil {
+		t.Fatal(err)
+	}
+	equal(t, record["unmapped"], any([]any{"lib/mode"}))
+	equal(t, record["warning"], "1 change no word covers")
+	contains(t, verilex(t, root, nil, "runs").stdout, "warning: 1 change no word covers")
+	equal(t, planClaims(t, root, "--changed", "lib/mode", "--changed", "runbook:verify-tally/features/items.md#item-add").Unmapped, []string{"lib/mode"})
+
+	typo := verilex(t, root, nil, "run", "--claim", "item-listed", "--changed", "config:tally.lsit")
+	contains(t, typo.stdout, "with 1 change no word covers; run ")
+	contains(t, typo.stdout, "  unmapped  config:tally.lsit")
+	contains(t, verilex(t, root, nil, "run", "--changed", "config:tally.lsit", "--changed", "config:tally.open").stdout, "with 1 change no word covers; run ")
+
+	verilex(t, root, nil, "new", "probe-word", "--implements", "verify-tally/features/items.md#item-add")
+	stub := verilex(t, root, nil, "run", "--changed", ".verilex/words/probe-word/run", "--changed", ".verilex/words/item-listed/run")
+	contains(t, stub.stdout, "with 1 touched word with no claim; run ")
+	contains(t, verilex(t, root, nil, "runs").stdout, "warning: 1 touched word with no claim")
+	chained := verilex(t, root, nil, "run", "--json", "store-open | probe-word", "--changed", ".verilex/words/probe-word/run")
+	if strings.Contains(chained.stdout, `"unclaimed"`) {
+		t.Fatalf("a claimless word the chain ran was reported as a gap: %s", chained.stdout)
+	}
+}
+
+// Rule: plan and run share one force rule. A config key hit on a claim's word the chain does not
+// use leaves the plan and the run agreeing, and the warning names that word as not run.
+func TestForcedHitOnOtherWordOfClaim(t *testing.T) {
+	root := curated(t)
+	green(t, root, nil, chain)
+	src, dst := filepath.Join(root, ".verilex", "words", "item-listed"), filepath.Join(root, ".verilex", "words", "item-listed-b")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dst, "run"), read(t, filepath.Join(src, "run")), 0755)
+	word := strings.Replace(read(t, filepath.Join(src, "word.md")), "word: item-listed\n", "word: item-listed-b\n", 1)
+	write(t, filepath.Join(dst, "word.md"), strings.Replace(word, "config_keys: [tally.list]", "config_keys: [tally.listb]", 1), 0644)
+
+	plan := planClaims(t, root, "--changed", "config:tally.listb")
+	equal(t, plan.Selected, []string{"item-listed"})
+	equal(t, plan.Unrun, []string{"item-listed-b"})
+	equal(t, plan.Warning, "1 touched word not run")
+	if len(plan.Run) != 0 || plan.Rerun != "" {
+		t.Fatalf("plan says run while no chain word changed: run=%+v rerun=%q", plan.Run, plan.Rerun)
+	}
+	done := verilex(t, root, nil, "run", "--json", "--changed", "config:tally.listb")
+	var record map[string]any
+	if err := json.Unmarshal([]byte(done.stdout), &record); err != nil {
+		t.Fatal(err)
+	}
+	equal(t, record["skipped"], true)
+	equal(t, record["warning"], "1 touched word not run")
+	equal(t, record["unrun"], any([]any{"item-listed-b"}))
+	contains(t, verilex(t, root, nil, "run", "--changed", "config:tally.listb").stdout,
+		"  unrun  item-listed-b: proves a claim this chain proves through another word; run a chain that uses it\n")
 }

@@ -10,22 +10,24 @@ import (
 	"github.com/DereKk8/verilex/internal/featuremap"
 	"github.com/DereKk8/verilex/internal/grouping"
 	"github.com/DereKk8/verilex/internal/lifecycle"
+	"github.com/DereKk8/verilex/internal/runner"
 )
 
 // diffKind is one entry of a diff: a path, a config key, an image pin or a runbook section.
 type diffKind struct {
 	kind, value string
+	at          int
 }
 
 // touch is which claims and words a diff hits, and why a hit the proof stamp does not
-// fingerprint must run live, by claim (forced) and by word (forcedWords). files is how the diff
-// is reported back.
+// fingerprint must run live, by word (forcedWords). files is how the diff is reported back.
 type touch struct {
 	files       []string
 	covered     map[string]bool
 	claims      map[string]bool
-	forced      map[string]string
 	forcedWords map[string]string
+	// unmapped are the diff entries that hit no word and no claim, as given.
+	unmapped []string
 }
 
 // touchOf intersects a diff with word dependencies. A path hits a word's directory, its inputs,
@@ -34,14 +36,17 @@ type touch struct {
 // runbook refs and section hashes its claim sources pin. A config key or image pin is not in
 // the proof stamp, so a hit forces the claim to run.
 func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
-	hit := touch{files: []string{}, covered: map[string]bool{}, claims: map[string]bool{}, forced: map[string]string{}, forcedWords: map[string]string{}}
+	hit := touch{files: []string{}, covered: map[string]bool{}, claims: map[string]bool{}, forcedWords: map[string]string{}}
 	var paths []string
+	var pathAt []int
 	var typed []diffKind
-	for _, item := range raw {
+	mapped := make([]bool, len(raw))
+	for i, item := range raw {
 		kind, value := classifyChange(item)
 		if kind == "path" {
 			path := resolve(value)
 			paths = append(paths, path)
+			pathAt = append(pathAt, i)
 			shown := path
 			if rel, err := filepath.Rel(p.Root, path); err == nil && !strings.HasPrefix(rel, "..") {
 				shown = rel
@@ -49,15 +54,20 @@ func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
 			hit.files = append(hit.files, filepath.ToSlash(shown))
 			continue
 		}
-		typed = append(typed, diffKind{kind, value})
+		typed = append(typed, diffKind{kind, value, i})
 		hit.files = append(hit.files, item)
 	}
+	// covers marks every path entry that hits deps, so an entry that hits nothing is reported.
 	covers := func(deps []string) bool {
-		return slices.ContainsFunc(paths, func(path string) bool {
-			return slices.ContainsFunc(deps, func(dep string) bool {
+		found := false
+		for i, path := range paths {
+			if slices.ContainsFunc(deps, func(dep string) bool {
 				return path == dep || strings.HasPrefix(path, dep+string(filepath.Separator))
-			})
-		})
+			}) {
+				mapped[pathAt[i]], found = true, true
+			}
+		}
+		return found
 	}
 	shared := sharedDeps(p)
 	claimDeps := map[string][]string{}
@@ -77,7 +87,7 @@ func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
 		claimDeps[name] = deps
 	}
 	for name, deps := range claimDeps {
-		if covers(deps) || sectionHit(typed, runbook[name], hashes[name]) {
+		if covers(deps) || sectionHit(typed, runbook[name], hashes[name], mapped) {
 			hit.claims[ix.groupOf(name)] = true
 		}
 	}
@@ -109,18 +119,20 @@ func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
 			}
 		}
 		refs = append(refs, w.Depends.Runbook...)
-		reason := declaredHit(w, typed)
-		if covers(deps) || reason != "" || sectionHit(typed, refs, digests) {
+		reason := declaredHit(w, typed, mapped)
+		if covers(deps) || reason != "" || sectionHit(typed, refs, digests, mapped) {
 			hit.covered[w.Name] = true
 			if reason != "" {
 				hit.forcedWords[w.Name] = reason
 			}
 			if name := ix.claimName(w); name != "" {
 				hit.claims[name] = true
-				if reason != "" {
-					hit.forced[name] = reason
-				}
 			}
+		}
+	}
+	for i, item := range raw {
+		if !mapped[i] {
+			hit.unmapped = append(hit.unmapped, item)
 		}
 	}
 	return hit
@@ -137,16 +149,30 @@ func (hit touch) forcedChain(steps []dictionary.Step) string {
 	return ""
 }
 
-// unclaimed names the hit words that prove no claim, in name order.
-func (hit touch) unclaimed(words []dictionary.Word) []string {
-	names := []string{}
-	for _, word := range words {
-		if hit.covered[word.Name] && word.Claim == nil {
-			names = append(names, word.Name)
+// gapsOf is what hit touched outside steps: entries that hit nothing, claimless words, and words
+// whose claim steps prove through another word. Each list is sorted.
+func (ix Index) gapsOf(hit touch, steps []dictionary.Step) runner.Gaps {
+	gaps := runner.Gaps{Unmapped: hit.unmapped}
+	inChain, proved := map[string]bool{}, map[string]bool{}
+	for _, step := range steps {
+		inChain[step.Word.Name] = true
+		if name := ix.claimName(step.Word); name != "" {
+			proved[name] = true
 		}
 	}
-	slices.Sort(names)
-	return names
+	for _, word := range ix.words {
+		if !hit.covered[word.Name] || inChain[word.Name] {
+			continue
+		}
+		if name := ix.claimName(word); name == "" {
+			gaps.Unclaimed = append(gaps.Unclaimed, word.Name)
+		} else if proved[name] {
+			gaps.Unrun = append(gaps.Unrun, word.Name)
+		}
+	}
+	slices.Sort(gaps.Unclaimed)
+	slices.Sort(gaps.Unrun)
+	return gaps
 }
 
 // ForcedLive is why a chain must run live for a diff, or "" when the stamps decide. A chain
@@ -211,16 +237,18 @@ func classifyChange(raw string) (kind, value string) {
 // declaredHit names config keys and image pins the diff hits. Those are not in the proof
 // stamp, so a hit must run live. A runbook section is fingerprinted with the claim sources, so
 // it is a touch, not a forced run.
-func declaredHit(w dictionary.Word, typed []diffKind) string {
+func declaredHit(w dictionary.Word, typed []diffKind, mapped []bool) string {
 	var reasons []string
 	for _, change := range typed {
 		switch change.kind {
 		case "config":
 			if slices.Contains(w.Depends.ConfigKeys, change.value) {
+				mapped[change.at] = true
 				reasons = append(reasons, "config key "+change.value+" changed")
 			}
 		case "image":
 			if slices.Contains(w.Depends.Images, change.value) {
+				mapped[change.at] = true
 				reasons = append(reasons, "image pin "+change.value+" changed")
 			}
 		}
@@ -229,16 +257,18 @@ func declaredHit(w dictionary.Word, typed []diffKind) string {
 	return strings.Join(reasons, "; ")
 }
 
-func sectionHit(typed []diffKind, refs, hashes []string) bool {
+// sectionHit reports whether a runbook entry hits refs or hashes, and marks each entry that does.
+func sectionHit(typed []diffKind, refs, hashes []string, mapped []bool) bool {
+	found := false
 	for _, change := range typed {
 		if change.kind != "runbook" {
 			continue
 		}
 		if slices.Contains(refs, runbookRef(change.value)) || slices.Contains(hashes, change.value) {
-			return true
+			mapped[change.at], found = true, true
 		}
 	}
-	return false
+	return found
 }
 
 func runbookRef(value string) string {

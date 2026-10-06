@@ -138,10 +138,10 @@ func TestPassOnOneClaimVersionIsNotReusedForTheNext(t *testing.T) {
 	v2 := pinOf(t, root, "item-added")
 	equal(t, plan(t, root, chain).stderr, stale("item-stored", v1, v2))
 
-	// Pinning the new version is a change to the word, so it is admitted again.
+	// Pinning the new version is a change to the word, so it is onboarded again.
 	edit(t, filepath.Join(root, ".verilex", "words", "item-stored", "word.md"), "claim: "+v1, "claim: "+v2)
 	// Uses that proved the old version are no evidence for the new one either.
-	contains(t, verilex(t, root, nil, "propose", "item-stored").stderr, "item-stored has counted uses in 0 run(s)")
+	contains(t, verilex(t, root, nil, "onboard", "item-stored").stderr, "item-stored has counted uses in 0 run(s) of tally")
 	admitted(t, root, "item-stored")
 	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; item-stored apple: claim changed\n")
 	done := plan(t, root, chain, "--continue", kept.Run)
@@ -193,21 +193,21 @@ func TestChangedSourceRequirementFlagsClaimForReview(t *testing.T) {
 	equal(t, plan(t, root, chain).stdout, "plan: skip 0, run 3; "+headline("item-stored apple: drift-suspect: claim item-added needs review: "+review)+"\n")
 
 	// The reviewer judges that the claim still says the same and maps it to the new sentence.
-	// The version and the uses recorded for it stand, but the curator judged item-stored against
-	// the old sources, so it is drift-suspect and runs live until a curator admits it again.
+	// The version and the uses recorded for it stand, but onboarding checked item-stored against
+	// the old sources, so it is drift-suspect and runs live until it is onboarded again.
 	edit(t, claimFile(root, "item-added"), addRequirement, reworded)
 	equal(t, pinOf(t, root, "item-added"), v1)
-	remapped := "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: admitted before claim item-added's sources changed; propose it again\n"
+	remapped := "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: onboarded before claim item-added's sources changed; onboard it again\n"
 	equal(t, verilex(t, root, nil, "check").stdout, remapped)
 	record := green(t, root, nil, chain)
 	ranLive(t, record)
 	equal(t, record.Words[1].Proves, v1)
 	record = green(t, root, nil, chain)
-	equal(t, record.Rerun, "item-stored apple: drift-suspect: admitted before claim item-added's sources changed; propose it again")
+	equal(t, record.Rerun, "item-stored apple: drift-suspect: onboarded before claim item-added's sources changed; onboard it again")
 	ranLive(t, record)
 	readmit := func() {
 		t.Helper()
-		admit(t, root, "item-stored")
+		onboard(t, root, "item-stored")
 		equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
 		ranLive(t, green(t, root, nil, chain))
 		again := green(t, root, nil, chain)
@@ -216,7 +216,7 @@ func TestChangedSourceRequirementFlagsClaimForReview(t *testing.T) {
 	readmit()
 
 	// A requirement added to the sub-feature that no claim maps asks for review and is named;
-	// mapping it in the claim clears the review, and the word waits for a curator again.
+	// mapping it in the claim clears the review, and the word waits to be onboarded again.
 	write(t, items, strings.Replace(read(t, items), reworded, reworded+" Expect exit 2 and `exists NAME` when NAME is already stored.", 1), 0644)
 	unmapped := itemAdd + ": requirement no claim maps: Expect exit 2 and `exists NAME` when NAME is already stored."
 	contains(t, verilex(t, root, nil, "claims").stdout, "  entry: cli  words: item-stored\n  review: "+unmapped+"\n")
@@ -267,8 +267,8 @@ func TestClaimRequirementsStayInsideTheirSubFeature(t *testing.T) {
 	write(t, items, original, 0644)
 	edit(t, claimFile(root, "item-added"), "      - \""+addRequirement+"\"", "      - Expect NAME on its own line.")
 	review := itemAdd + ": requirement is outside sub-feature item-add: Expect NAME on its own line.; " + itemAdd + ": requirement no claim maps: " + addRequirement
-	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: admitted before claim item-added's sources changed; propose it again; claim item-added needs review: "+review+"\n")
-	done := verilex(t, root, nil, "propose", "item-stored")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: onboarded before claim item-added's sources changed; onboard it again; claim item-added needs review: "+review+"\n")
+	done := verilex(t, root, nil, "onboard", "item-stored")
 	equal(t, done.code, 2)
 	contains(t, done.stderr, "verilex: refused: ")
 	contains(t, done.stderr, "claim item-added needs review: "+review+"; bring its sources in line with the verify skill first")
@@ -307,13 +307,13 @@ func TestProseChangeInSubFeatureFlagsClaimForReview(t *testing.T) {
 	contains(t, verilex(t, root, nil, "check").stdout, "check: 2 of 3 admitted drift-suspect; they always run\n  item-listed: claim item-listed needs review: verify-tally/features/items.md#item-list: prose changed")
 	write(t, items, strings.Replace(original, "add NAME`. Expect", "add NAME`, which must exit 2 when NAME is stored. Expect", 1), 0644)
 
-	// The reviewer judges that the claim still holds and pins the new prose. The curator judged
-	// item-stored against the old prose, so it runs live until a curator admits it again.
+	// The reviewer judges that the claim still holds and pins the new prose. Onboarding checked
+	// item-stored against the old prose, so it runs live until it is onboarded again.
 	edit(t, claimFile(root, "item-added"), "prose: 2948a95bd310", "prose: "+prose)
-	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: admitted before claim item-added's sources changed; propose it again\n")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n  item-stored: onboarded before claim item-added's sources changed; onboard it again\n")
 	ranLive(t, green(t, root, nil, chain))
 	ranLive(t, green(t, root, nil, chain, "--fresh"))
-	admit(t, root, "item-stored")
+	onboard(t, root, "item-stored")
 	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
 	ranLive(t, green(t, root, nil, chain))
 	contains(t, plan(t, root, chain).stdout, "plan: skip 3, run 0\n")
@@ -384,9 +384,9 @@ func TestDatedRulesAndFencedBlocksFlagClaimForReview(t *testing.T) {
 	}
 }
 
-// Rule: another claim's mapping covers a requirement sentence only when a curator admitted one
-// of its words for the claim as it is now. A claim without a word, a stub or never-run word, a
-// word with judged live uses but no admission, or a word pinned to an older version covers
+// Rule: another claim's mapping covers a requirement sentence only when one of its words is
+// onboarded for the claim as it is now. A claim without a word, a stub or never-run word, a word
+// with judged live uses that was never onboarded, or a word pinned to an older version covers
 // nothing, so it can never clear another claim's review.
 func TestOnlyCuratedClaimsCoverRequirements(t *testing.T) {
 	root := curated(t)
@@ -399,7 +399,8 @@ func TestOnlyCuratedClaimsCoverRequirements(t *testing.T) {
 	equal(t, verilex(t, root, nil, "check").stdout, flagged)
 
 	write(t, claimFile(root, "item-kept-once"), "claim: item-kept-once\nsentence: A name is stored at most once.\nargs: [name]\nentry: [cli]\nrequires: [store]\n"+
-		"evidence:\n  action: \"`tally add NAME` twice exits 2 the second time.\"\n  observation: store.json lists NAME once.\n"+
+		"evidence:\n  action: \"`tally add NAME` twice exits 2 the second time and prints `exists NAME`.\"\n  observation: store.json lists NAME once.\n"+
+		"defects:\n  dropped-add: {TALLY_DEFECT: drop-adds}\n"+
 		"sources:\n  - ref: "+itemAdd+"\n    prose: 2948a95bd310\n    requirements: [\""+twice+"\"]\n", 0644)
 	pin := pinOf(t, root, "item-kept-once")
 	contains(t, verilex(t, root, nil, "claims").stdout, pin+"  A name is stored at most once.\n  entry: cli  words: -\n")
@@ -420,8 +421,8 @@ func TestOnlyCuratedClaimsCoverRequirements(t *testing.T) {
 	used(t, root, "store-open | item-added-twice apple")
 	equal(t, verilex(t, root, nil, "check").stdout, flagged)
 
-	// A curator admits the word over a packet that shows the item-add anchor: now it covers.
-	admit(t, root, "item-added-twice")
+	// Onboarding checks the word against the item-add anchor and its planted defect: now it covers.
+	onboard(t, root, "item-added-twice")
 	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (4 admitted)\n")
 
 	// A word pinned to an older version covers nothing.
@@ -429,10 +430,11 @@ func TestOnlyCuratedClaimsCoverRequirements(t *testing.T) {
 	contains(t, verilex(t, root, nil, "check").stdout, "  item-stored: "+review+"\n")
 }
 
-// Rule: a claim covers a sentence of sub-feature S only when its word was admitted while the
-// claim already mapped that sentence in S. A source added to an admitted claim afterwards, even
+// Rule: a claim covers a sentence of sub-feature S only when its word was onboarded while the
+// claim already mapped that sentence in S. A source added to an onboarded claim afterwards, even
 // after a green live run, does not show that the claim's words exercise S, so it silences no
-// other claim's review until a curator admits the word again over the new sources.
+// other claim's review until the word is onboarded again over the new sources, and onboarding
+// rejects a claim that maps a step its evidence contract does not prove.
 func TestClaimCoversOnlySubFeaturesItsWordWasCuratedFor(t *testing.T) {
 	root := curated(t)
 	green(t, root, nil, chain)
@@ -442,18 +444,21 @@ func TestClaimCoversOnlySubFeaturesItsWordWasCuratedFor(t *testing.T) {
 	stored := "  item-stored: claim item-added needs review: " + itemAdd + ": requirement no claim maps: " + twice + "\n"
 	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n"+stored)
 
-	// item-listed maps the sentence too, but its word was admitted before the claim did.
+	// item-listed maps the sentence too, but its word was onboarded before the claim did.
 	edit(t, claimFile(root, "item-listed"), "sources:\n", "sources:\n  - ref: "+itemAdd+"\n    prose: 2948a95bd310\n    requirements: [\""+twice+"\"]\n")
-	both := "check: 2 of 3 admitted drift-suspect; they always run\n  item-listed: admitted before claim item-listed's sources changed; propose it again\n" + stored
+	both := "check: 2 of 3 admitted drift-suspect; they always run\n  item-listed: onboarded before claim item-listed's sources changed; onboard it again\n" + stored
 	equal(t, verilex(t, root, nil, "check").stdout, both)
 	ranLive(t, green(t, root, nil, chain))
 	equal(t, verilex(t, root, nil, "check").stdout, both)
 	equal(t, plan(t, root, "store-open | item-stored apple").stdout, "plan: skip 0, run 2; item-stored apple: drift-suspect: claim item-added needs review: "+itemAdd+": requirement no claim maps: "+twice+"\n")
 
-	// The curator judges the item-listed word against its new sources and admits it again.
+	// Onboarding checks the item-listed word against its new sources: its claim maps a step its
+	// evidence contract does not prove, so the word is rejected and covers nothing.
 	green(t, root, nil, chain, "--fresh")
-	admit(t, root, "item-listed")
-	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
+	done := verilex(t, root, nil, "onboard", "item-listed")
+	equal(t, done.code, 1)
+	contains(t, done.stdout, "rejected item-listed: claim item-listed maps "+itemAdd+" to \""+twice+"\", but its evidence contract names 0 of that step's 2 expected values (`2`, `exists _`)")
+	equal(t, verilex(t, root, nil, "check").stdout, both)
 }
 
 // Rule: a claim pins the order of reality for every word that proves it. A variant word that

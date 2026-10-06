@@ -1,7 +1,7 @@
-// Package curation moves a word through its lifecycle: a word starts provisional, earns uses
-// in runs, is proposed to an outside curator, and is admitted only by that curator's recorded
-// verdict. Package lifecycle reads the resulting state. verilex never calls a model and never
-// edits a verify skill.
+// Package curation moves a word without a claim through its lifecycle: a word starts
+// provisional, earns uses in runs, is proposed to an outside curator, and is admitted only by
+// that curator's recorded verdict. A word that proves a claim joins through package onboarding
+// instead. Package lifecycle reads the resulting state. verilex never edits a verify skill.
 package curation
 
 import (
@@ -15,13 +15,8 @@ import (
 	"github.com/DereKk8/verilex/internal/featuremap"
 )
 
-// sections resolves the feature-map sections a word without a claim implements; a word that
-// proves a claim is anchored through its claim instead.
 func sections(p dictionary.Project, w dictionary.Word) ([]featuremap.Section, error) {
 	result := make([]featuremap.Section, 0, len(w.Implements))
-	if w.Claim != nil {
-		return result, nil
-	}
 	for _, ref := range w.Implements {
 		section, err := featuremap.Resolve(p.Root, p.SkillDirs, ref)
 		if err != nil {
@@ -30,6 +25,15 @@ func sections(p dictionary.Project, w dictionary.Word) ([]featuremap.Section, er
 		result = append(result, section)
 	}
 	return result, nil
+}
+
+// onboardOnly refuses a word that proves a claim: it joins the vocabulary through onboarding,
+// which gates its correctness, never through a curator's verdict alone.
+func onboardOnly(w dictionary.Word) error {
+	if w.Claim != nil {
+		return fmt.Errorf("%s proves claim %s, so it joins the vocabulary through `verilex onboard %s`, not propose and admit", w.Name, w.Claim.Name, w.Name)
+	}
+	return nil
 }
 
 func find(words []dictionary.Word, name string) (dictionary.Word, error) {

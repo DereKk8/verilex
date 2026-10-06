@@ -257,11 +257,9 @@ func TestDriftSuspectWordNeverSkips(t *testing.T) {
 	// it changes nothing there.
 	write(t, items, original, 0644)
 	equal(t, status(t, root, "item-stored"), "admitted")
-	if err := os.Remove(filepath.Join(root, ".verilex", "words", "item-listed", "admission.json")); err != nil {
-		t.Fatal(err)
-	}
+	unadmitted(t, root, "item-listed")
 	continued := green(t, root, nil, chain, "--continue", kept.Run)
-	equal(t, continued.Rerun, "item-listed apple: word changed")
+	equal(t, continued.Rerun, "item-listed apple: word admission changed")
 	equal(t, continued.Words[1].ReliesOn, kept.Run)
 	equal(t, continued.Words[2].ReliesOn, "")
 }

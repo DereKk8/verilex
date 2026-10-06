@@ -9,6 +9,8 @@ evidence:
   observation: store.json lists NAME.
   non_proofs:
     - "`added NAME` alone does not prove the item was stored."
+defects:
+  dropped-add: {TALLY_DEFECT: drop-adds}
 sources:
   - ref: verify-tally/features/items.md#item-add
     prose: 2948a95bd310

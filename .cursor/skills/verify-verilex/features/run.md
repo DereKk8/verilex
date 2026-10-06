@@ -31,7 +31,7 @@ Preconditions:
 - **Keep.** Run `"$S/vx" run-keep verilex run --keep 'store-open | item-stored apple'`. The last line is ``kept: tear down with `verilex cleanup <RUN>` ``.
 - **Keep, second view.** Run `"$S/vx" run-keep-store cat "$S/stores/tally-<RUN>/store.json"` and `"$S/vx" run-keep-runs verilex runs`. The store holds `{"items": ["apple"]}` and the run shows `cleanup=kept`. Tear it down with `"$S/vx" run-keep-cleanup verilex cleanup <RUN>`.
 - **JSON.** Run `"$S/vx" run-json verilex run --json 'store-open | item-stored banana'`. Stdout is one JSON record with `run`, `frame` (`launch`, `doctor`, `cleanup`, each `exit: 0`), `words` with `proves` (the claim version, such as `item-added@<version>`), `entry` (`cli`), `verdict`, `reported` (the word's own `pass`), `observation` and `stamp`, `"verdict": "green"`, `"cleanup": "done"`, `"evidence_kept": true`, and `rerun` naming why it ran live.
-- **Skip (admitted baseline).** After `admit-all`, run `"$S/vx" run-after-admit verilex run 'store-open | item-stored apple | item-listed apple'` (live: admission changed every stamp), then `"$S/vx" run-skip verilex run 'store-open | item-stored apple | item-listed apple'`. The second prints `green: 3 green, skipped: stamps match run <A>; run <B>` where `<A>` is the run-after-admit id.
+- **Skip (admitted baseline).** After `admit-all`, run `"$S/vx" run-after-admit verilex run 'store-open | item-stored apple | item-listed apple'` (live: onboarding changed every stamp), then `"$S/vx" run-skip verilex run 'store-open | item-stored apple | item-listed apple'`. The second prints `green: 3 green, skipped: stamps match run <A>; run <B>` where `<A>` is the run-after-admit id.
 - **Skip, second view.** Run `"$S/vx" run-skip-runs verilex runs`, `"$S/vx" run-skip-stores ls "$S/stores"` and `"$S/vx" run-skip-cleanup verilex cleanup <B>`. `<B>` shows `cleanup=none`, no store exists, and cleanup prints `verilex: <B> launched nothing; it relied on stamps`.
 - **Skip JSON.** Run `"$S/vx" run-skip-json verilex run --json 'store-open | item-stored apple | item-listed apple'`. The record has `"skipped": true`, `"cleanup": "none"`, an empty `frame`, and `relies_on` on each word, whose `evidence` is the ledger's copy under `$S/home/tally/ledger/evidence/`.
 - **Fresh.** Run `"$S/vx" run-fresh verilex run --fresh 'store-open | item-stored apple | item-listed apple'`. Output `green: 3 green; run <RUN>` with no `skipped`; `verilex runs` shows it `cleanup=done`.
@@ -42,8 +42,8 @@ Preconditions:
 
 ## Gotchas
 
-- Provisional words never skip. A fresh session's chains always run live until `admit-all` (or `propose` and `admit`) has run.
-- The first run after an admission is live (`word changed`): the admission record is part of the stamp.
+- Provisional words never skip. A fresh session's chains always run live until `admit-all` (or `onboard`) has run.
+- The first run after an admission is live: `word admission changed` after `onboard`, `word changed` after `admit` of a word without a claim. The decision's seal (or the admission record) is part of the stamp.
 - Only variables in a word's `env` enter its stamp. A variable read only by the frame (`TALLY_ADOPT_STORE`) does not, so use `--fresh` to probe the frame.
 - Ledger entries are keyed by chain prefix, so a shorter chain (`store-open | item-stored apple`) also skips after the longer chain was green.
 - Skipping is all or nothing: `store-open | item-stored banana` runs both words live even when `store-open` alone is proven.

@@ -1,8 +1,9 @@
-// Package lifecycle owns a word's lifecycle state: provisional until an outside curator's
-// verdict admits it, drift-suspect once an admitted word's files, claim or feature-map sections
-// change. It also owns a claim's review state: a claim needs review once the verify skill no
-// longer holds what its sources pin. It only reads the project, so the skip rule can consult
-// it; package curation moves words through the lifecycle.
+// Package lifecycle owns a word's lifecycle state: provisional until it is admitted (a word that
+// proves a claim by its onboarding decision, a word without a claim by an outside curator's
+// verdict), drift-suspect once what that admission judged changes. It also owns a claim's review
+// state: a claim needs review once the verify skill no longer holds what its sources pin. It only
+// reads the project, so the skip rule can consult it; packages onboarding and curation move
+// words through the lifecycle.
 package lifecycle
 
 import (
@@ -12,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/featuremap"
+	"github.com/DereKk8/verilex/internal/grouping"
 )
 
 type State string
@@ -39,21 +42,16 @@ type Status struct {
 	Drift []string // why the word is drift-suspect, one line per changed or missing section
 }
 
-// Admission is the record `verilex admit` writes beside an admitted word.
+// Admission is the record `verilex admit` writes beside an admitted word without a claim.
 type Admission struct {
-	Word       string   `json:"word"`
-	Date       string   `json:"date"`
-	Curator    string   `json:"curator"`
-	Reason     string   `json:"reason,omitempty"`
-	Packet     string   `json:"packet"`
-	Runs       []string `json:"runs"`
-	WordDigest string   `json:"word_digest"`
-	// Claim is the claim version the word was admitted to prove, and ClaimSources the claim's
-	// sources as the curator saw them (dictionary.Claim.SourcesDigest); Sections, for a word
-	// without a claim, hold the hash of each feature-map section it implements.
-	Claim        string            `json:"claim,omitempty"`
-	ClaimSources string            `json:"claim_sources,omitempty"`
-	Sections     map[string]string `json:"sections,omitempty"`
+	Word       string            `json:"word"`
+	Date       string            `json:"date"`
+	Curator    string            `json:"curator"`
+	Reason     string            `json:"reason,omitempty"`
+	Packet     string            `json:"packet"`
+	Runs       []string          `json:"runs"`
+	WordDigest string            `json:"word_digest"`
+	Sections   map[string]string `json:"sections"`
 }
 
 const admissionFile = "admission.json"
@@ -70,32 +68,34 @@ func readAdmission(w dictionary.Word) (*Admission, error) {
 		return nil, err
 	}
 	var a Admission
-	if err = json.Unmarshal(data, &a); err != nil || a.Word != w.Name || a.Curator == "" || a.WordDigest == "" || (len(a.Sections) == 0 && a.Claim == "") {
+	if err = json.Unmarshal(data, &a); err != nil || a.Word != w.Name || a.Curator == "" || a.WordDigest == "" || len(a.Sections) == 0 {
 		return nil, fmt.Errorf("%s: not an admission record written by `verilex admit`", AdmissionPath(w))
 	}
 	return &a, nil
 }
 
 // Load reads a project's claims and words, then fills each claim source's Covered: what the
-// other claims map in the same sub-feature. A claim covers a sentence only when one of its words
-// is curated for the claim as it is now (see Curated). A stub, a never-run or merely used word,
-// or a claim that only lists a sub-feature its words were never judged against, covers nothing,
-// so it can never clear another claim's review.
+// other claims map in the same sub-feature of the same repository. A claim covers a sentence
+// only when one of its words is onboarded for the claim as it is now (see Curated). A stub, a
+// never-run or merely used word, or a claim that only lists a sub-feature its words were never
+// judged against, covers nothing, so it can never clear another claim's review.
 func Load(p dictionary.Project) (map[string]dictionary.Claim, []dictionary.Word, error) {
 	claims, words, err := dictionary.Load(p)
 	if err != nil {
 		return nil, nil, err
 	}
+	// An unreadable grouping file curates nothing; StatusOf reports why.
+	g, _ := grouping.Load(p)
 	covered := map[string][]string{}
 	counted := map[string]bool{}
 	for _, w := range words {
 		if w.Claim == nil || counted[w.Claim.Name] {
 			continue
 		}
-		if Curated(w) {
+		if Curated(g, w) {
 			counted[w.Claim.Name] = true
 			for _, source := range w.Claim.Sources {
-				key := dictionary.SubFeature(source.Ref)
+				key := dictionary.SourceKey(source)
 				covered[key] = append(covered[key], source.Requirements...)
 			}
 		}
@@ -103,7 +103,7 @@ func Load(p dictionary.Project) (map[string]dictionary.Claim, []dictionary.Word,
 	for name, c := range claims {
 		c.Sources = slices.Clone(c.Sources)
 		for i := range c.Sources {
-			c.Sources[i].Covered = covered[dictionary.SubFeature(c.Sources[i].Ref)]
+			c.Sources[i].Covered = covered[dictionary.SourceKey(c.Sources[i])]
 		}
 		claims[name] = c
 	}
@@ -122,27 +122,32 @@ func LoadWords(p dictionary.Project) ([]dictionary.Word, error) {
 	return words, err
 }
 
-// Curated reports whether a curator admitted w for its claim as it is now: the admission names
-// the claim version w pins, records the claim's current sources, and w's files are unchanged.
-// Only such a word shows that its claim's sentences are exercised: a judged live use shows that
-// the word runs, not that it exercises a sub-feature its claim was mapped to afterwards. An
-// admission record or word file that cannot be read makes w uncurated; StatusOf reports why.
-func Curated(w dictionary.Word) bool {
+// Curated reports whether onboarding admitted w for its claim as it is now: w's decision in g
+// is sound, pins the claim version w pins, records the claim's current sources, and w's files
+// are unchanged. Only such a word shows that its claim's sentences are exercised: a judged live
+// use shows that the word runs, not that it exercises a sub-feature its claim was mapped to
+// afterwards.
+func Curated(g grouping.Grouping, w dictionary.Word) bool {
 	if w.Claim == nil || w.Stale != "" {
 		return false
 	}
-	a, err := readAdmission(w)
-	if err != nil || a == nil || a.Claim != w.Claim.Pin() || a.ClaimSources != w.Claim.SourcesDigest() {
+	d, ok := g.Sound(w.Name)
+	if !ok || d.Pin() != w.Proves() || d.ClaimSources != w.Claim.SourcesDigest() {
 		return false
 	}
 	digest, err := WordDigest(w)
-	return err == nil && digest == a.WordDigest
+	return err == nil && digest == d.Digest
 }
 
-// StatusOf reports a word's lifecycle state, comparing an admitted word's file digest, claim
-// version and the claim's review state (or, for a word without a claim, its stored section
-// hashes) with the project as it is now.
+// StatusOf reports a word's lifecycle state. A word that proves a claim is admitted by its
+// onboarding decision in the grouping file, and drifts when its files, its claim version, the
+// claim it is grouped under, its claim's planted defects or the claim's review state no longer
+// match that decision. A word without a claim is admitted by its admission record, and drifts
+// when its files or stored section hashes no longer match the project.
 func StatusOf(p dictionary.Project, w dictionary.Word) (Status, error) {
+	if w.Claim != nil {
+		return onboarded(p, w)
+	}
 	a, err := readAdmission(w)
 	if err != nil || a == nil {
 		return Status{Word: w.Name, State: Provisional}, err
@@ -155,37 +160,72 @@ func StatusOf(p dictionary.Project, w dictionary.Word) (Status, error) {
 	if digest != a.WordDigest {
 		s.Drift = append(s.Drift, "the word's files changed since admission")
 	}
-	if w.Claim != nil {
-		err = s.claimDrift(p, w, a)
-	} else {
-		err = s.sectionDrift(p, w, a)
-	}
+	err = s.sectionDrift(p, w, a)
 	if len(s.Drift) > 0 {
 		s.State = DriftSuspect
 	}
 	return s, err
 }
 
-func (s *Status) claimDrift(p dictionary.Project, w dictionary.Word, a *Admission) error {
+func onboarded(p dictionary.Project, w dictionary.Word) (Status, error) {
+	g, err := grouping.Load(p)
+	if err != nil {
+		return Status{Word: w.Name, State: Provisional}, err
+	}
+	d, ok := g.Words[w.Name]
+	if !ok {
+		return Status{Word: w.Name, State: Provisional}, nil
+	}
+	s := Status{Word: w.Name, State: DriftSuspect}
+	if why := grouping.Broken(w.Name, d); why != "" {
+		s.Drift = append(s.Drift, why+"; onboard it again")
+		return s, nil
+	}
+	digest, err := WordDigest(w)
+	if err != nil {
+		return s, err
+	}
+	if digest != d.Digest {
+		s.Drift = append(s.Drift, "the word's files changed since onboarding")
+	}
 	switch {
 	case w.Stale != "":
 		s.Drift = append(s.Drift, w.Stale)
-	case a.Claim != w.Claim.Pin():
-		admitted := a.Claim
-		if admitted == "" {
-			admitted = "its feature-map sections"
-		}
-		s.Drift = append(s.Drift, "admitted for "+admitted+", not claim "+w.Claim.Pin())
-	case a.ClaimSources != w.Claim.SourcesDigest():
-		// A re-map keeps the claim version, but the curator judged the word against the old
+	case d.Pin() != w.Proves():
+		s.Drift = append(s.Drift, "onboarded for "+d.Pin()+", not claim "+w.Proves())
+	case d.ClaimSources != w.Claim.SourcesDigest():
+		// A re-map keeps the claim version, but onboarding checked the word against the old
 		// sources: nothing yet says the word exercises what the claim now maps.
-		s.Drift = append(s.Drift, "admitted before claim "+w.Claim.Name+"'s sources changed; propose it again")
+		s.Drift = append(s.Drift, "onboarded before claim "+w.Claim.Name+"'s sources changed; onboard it again")
+	}
+	if d.Proves != "" {
+		group, err := dictionary.ReadClaim(filepath.Join(p.ClaimsDir(), grouping.Name(d.Claim)+".yaml"))
+		switch {
+		case err != nil:
+			s.Drift = append(s.Drift, "grouped under claim "+grouping.Name(d.Claim)+", which no longer loads")
+		case group.Pin() != d.Claim:
+			s.Drift = append(s.Drift, "grouped under "+d.Claim+", which is now "+group.Pin())
+		default:
+			for _, name := range slices.Sorted(maps.Keys(group.Defects)) {
+				if d.GroupDefects[name] != group.Defects[name].Digest() {
+					s.Drift = append(s.Drift, "grouped claim "+group.Name+" declares planted defect "+name+", which "+w.Name+" was never compared under")
+				}
+			}
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(w.Claim.Defects)) {
+		if d.Defects[name] != w.Claim.Defects[name].Digest() {
+			s.Drift = append(s.Drift, "claim "+w.Claim.Name+" declares planted defect "+name+", which "+w.Name+" was never gated against")
+		}
 	}
 	_, review, err := Review(p, *w.Claim)
 	if len(review) > 0 {
 		s.Drift = append(s.Drift, "claim "+w.Claim.Name+" needs review: "+strings.Join(review, "; "))
 	}
-	return err
+	if len(s.Drift) == 0 {
+		s.State = Admitted
+	}
+	return s, err
 }
 
 func (s *Status) sectionDrift(p dictionary.Project, w dictionary.Word, a *Admission) error {
@@ -222,7 +262,8 @@ func Review(p dictionary.Project, c dictionary.Claim) ([]featuremap.Anchor, []st
 	anchors := make([]featuremap.Anchor, 0, len(c.Sources))
 	review := []string{}
 	for _, source := range c.Sources {
-		anchor, err := featuremap.Pin(p.Root, p.SkillDirs, featuremap.Source{Ref: source.Ref, Requirements: source.Requirements, Prose: source.Prose, Covered: source.Covered})
+		root, dirs := SourceRoot(p, source)
+		anchor, err := featuremap.Pin(root, dirs, featuremap.Source{Ref: source.Ref, Requirements: source.Requirements, Prose: source.Prose, Covered: source.Covered})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -232,6 +273,18 @@ func Review(p dictionary.Project, c dictionary.Claim) ([]featuremap.Anchor, []st
 		}
 	}
 	return anchors, review, nil
+}
+
+// SourceRoot is where a claim source's verify skill lives: the product's own skill directories,
+// or the default skill directories of the repository checkout the source names.
+func SourceRoot(p dictionary.Project, source dictionary.ClaimSource) (string, []string) {
+	if source.Repo == "" {
+		return p.Root, p.SkillDirs
+	}
+	if filepath.IsAbs(source.Repo) {
+		return filepath.Clean(source.Repo), dictionary.DefaultSkillDirs
+	}
+	return filepath.Join(p.Root, source.Repo), dictionary.DefaultSkillDirs
 }
 
 // WordDigest hashes every file of a word's directory except its admission record.

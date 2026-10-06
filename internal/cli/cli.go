@@ -19,12 +19,12 @@ import (
 	"github.com/DereKk8/verilex/internal/verdict"
 )
 
-const usage = "usage: verilex [-h] [--project PROJECT] {run,plan,ticket,words,claims,runs,cleanup,new,propose,admit,gap,check} ...\n"
+const usage = "usage: verilex [-h] [--project PROJECT] {run,plan,ticket,words,claims,index,runs,cleanup,new,onboard,propose,admit,gap,check} ...\n"
 
 type options struct {
-	project, command, operand, verdict, from, ticket string
-	implements                                       []string
-	keep, fresh, json                                bool
+	project, command, operand, verdict, from, ticket, intent, sameAs string
+	implements, changed, operands                                    []string
+	keep, fresh, json, distinct                                      bool
 }
 
 func Main(argv []string, out, stderr io.Writer) int {
@@ -60,6 +60,10 @@ func Main(argv []string, out, stderr io.Writer) int {
 	switch args.command {
 	case "propose", "admit", "gap", "check":
 		return curate(project, args, out, refuse)
+	case "onboard":
+		return onboard(project, args, out, refuse)
+	case "index":
+		return lookup(project, args, out, refuse)
 	case "runs":
 		records, err := runner.LoadRuns(project)
 		if err != nil {
@@ -181,22 +185,27 @@ type command struct {
 	values               []string // flags taking a value
 }
 
+// optional lists, for a command without a required operand, the positional operands it may take, in order.
+var optional = map[string][]string{"index": {"claim", "word"}}
+
 var commands = map[string]command{
 	"run":     {"chain", "[--keep] [--fresh] [--continue RUN] [--ticket FILE] [--json] chain", "run a chain of words, e.g. 'a | b X | c'", []string{"--keep", "--fresh", "--json"}, []string{"--continue", "--ticket"}},
 	"plan":    {"chain", "[--continue RUN] [--ticket FILE] [--json] chain", "show whether a chain would be skipped or run live, running nothing", []string{"--json"}, []string{"--continue", "--ticket"}},
 	"ticket":  {"file", "[--json] file", "validate a run ticket and resolve its profile and defaults", []string{"--json"}, nil},
 	"words":   {"", "", "list the dictionary and each word's lifecycle status", nil, nil},
 	"claims":  {"", "[--json]", "list each claim's current version, the words that prove it, and any review it needs", []string{"--json"}, nil},
+	"index":   {"", "[--intent TEXT | --changed FILE ...] [--json] [claim [word]]", "show the product's active claims, one claim's words, or one word's run details; or look claims up by intent or by changed files", []string{"--json"}, []string{"--intent", "--changed"}},
 	"runs":    {"", "", "list this project's runs and any instance still alive", nil, nil},
 	"cleanup": {"run", "run", "tear down a kept run's instance", nil, nil},
 	"new":     {"word", "--implements REF [--implements REF ...] word", "scaffold a provisional word", nil, []string{"--implements"}},
+	"onboard": {"word", "[--same-as CLAIM | --distinct] [--json] word", "onboard a word that proves a claim: group it under its claim, gate its correctness, record the decision; or answer its open grouping question", []string{"--distinct", "--json"}, []string{"--same-as"}},
 	"propose": {"word", "word", "build a curator packet for a word used in two runs", nil, nil},
 	"admit":   {"word", "--verdict FILE word", "record an outside curator's admit or reject verdict", nil, []string{"--verdict"}},
 	"gap":     {"description", "description", "record a product moment the feature map has no section for", nil, nil},
 	"check":   {"", "", "report admitted words whose files, claim or feature-map sections changed (drift-suspect)", nil, nil},
 }
 
-var order = []string{"run", "plan", "ticket", "words", "claims", "runs", "cleanup", "new", "propose", "admit", "gap", "check"}
+var order = []string{"run", "plan", "ticket", "words", "claims", "index", "runs", "cleanup", "new", "onboard", "propose", "admit", "gap", "check"}
 
 func parse(argv []string) (options, bool, error) {
 	cwd, err := os.Getwd()
@@ -250,6 +259,7 @@ func parse(argv []string) (options, bool, error) {
 			o.keep = o.keep || arg == "--keep"
 			o.fresh = o.fresh || arg == "--fresh"
 			o.json = o.json || arg == "--json"
+			o.distinct = o.distinct || arg == "--distinct"
 			continue
 		}
 		if name, value, inline := strings.Cut(arg, "="); !literal && slices.Contains(spec.values, name) {
@@ -263,6 +273,12 @@ func parse(argv []string) (options, bool, error) {
 			switch name {
 			case "--implements":
 				o.implements = append(o.implements, value)
+			case "--changed":
+				o.changed = append(o.changed, value)
+			case "--intent":
+				o.intent = value
+			case "--same-as":
+				o.sameAs = value
 			case "--continue":
 				o.from = value
 			case "--ticket":
@@ -279,6 +295,13 @@ func parse(argv []string) (options, bool, error) {
 			return o, false, fmt.Errorf("unrecognized arguments: %s", arg)
 		}
 		pos = append(pos, arg)
+	}
+	if names := optional[o.command]; len(names) > 0 {
+		if len(pos) > len(names) {
+			return o, false, fmt.Errorf("unrecognized arguments: %s", strings.Join(pos[len(names):], " "))
+		}
+		o.operands = pos
+		return o, false, nil
 	}
 	n := 0
 	if spec.operand != "" {
@@ -322,6 +345,9 @@ func printHelp(name string, out io.Writer) {
 	if spec.operand != "" {
 		fmt.Fprintf(out, "\npositional arguments:\n  %s\n", spec.operand)
 	}
+	if names := optional[name]; len(names) > 0 {
+		fmt.Fprintf(out, "\npositional arguments:\n  %s\n", strings.Join(names, " "))
+	}
 	fmt.Fprint(out, "\noptions:\n  -h, --help  show this help message and exit\n")
 	for _, flag := range append(append([]string{}, spec.flags...), spec.values...) {
 		fmt.Fprintf(out, "  %s\n", flagHelp[flag])
@@ -336,6 +362,10 @@ var flagHelp = map[string]string{
 	"--ticket":     "--ticket FILE     the run ticket: intent or diff, profile, harness, model, effort and budgets; see `verilex ticket`",
 	"--implements": "--implements REF  the feature-map section the word implements, <skill>/<file>#<section>; repeatable",
 	"--verdict":    "--verdict FILE    the curator's verdict JSON for the proposed packet",
+	"--intent":     "--intent TEXT     find the claims that prove what TEXT describes",
+	"--changed":    "--changed FILE    a touched file: list the claims that depend on it and the chains that must re-run; repeatable",
+	"--same-as":    "--same-as CLAIM   answer an undecided word: its claim says the same as the grouped CLAIM",
+	"--distinct":   "--distinct  answer an undecided word: its claim stays a claim of its own",
 }
 
 func cleanup(project dictionary.Project, id string, out io.Writer, refuse func(error) int) int {

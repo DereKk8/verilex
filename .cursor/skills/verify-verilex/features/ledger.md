@@ -23,12 +23,12 @@ The ledger is a directory of passes that every verilex instance pointed at it re
 
 Preconditions:
 
-- A fresh session with the admitted baseline (`admit-all`). Admission records live in `$S/tally`, so every instance sees the words as admitted.
+- A fresh session with the admitted baseline (`admit-all`). Onboarding decisions (`.verilex/grouping.yaml`) live in `$S/tally`, so every instance sees the words as admitted.
 - A stateless instance is `VX_INSTANCE=<name>`: its state home is `$S/instances/<name>`. Add `VERILEX_LEDGER="$S/ledger"` to share the ledger.
 - `AUDIT="$PWD/.cursor/skills/verify-verilex/scripts/ledger-audit"` and `RESEAL="$PWD/.cursor/skills/verify-verilex/scripts/reseal"`.
 - The refusal steps play another writer of the shared ledger, a tool or a person that bypasses verilex. They are the only steps that edit verilex state by hand.
 
-- **Default ledger.** After `admit-all`, run `"$S/vx" led-default verilex run 'store-open | item-stored apple | item-listed apple'` (live: the admission changed every stamp). Run `"$S/vx" led-default-audit "$AUDIT" "$S/home/tally/ledger" "$S/home"`: `lost: 0  forged: 0  damaged: 0  unowned: 0`, with as many passes as proven steps.
+- **Default ledger.** After `admit-all`, run `"$S/vx" led-default verilex run 'store-open | item-stored apple | item-listed apple'` (live: onboarding changed every stamp). Run `"$S/vx" led-default-audit "$AUDIT" "$S/home/tally/ledger" "$S/home"`: `lost: 0  forged: 0  damaged: 0  unowned: 0`, with as many passes as proven steps.
 - **Concurrent.** Run `for i in 1 2 3 4 5 6; do f=$(echo apple pear plum | cut -d' ' -f$(( (i - 1) % 3 + 1 ))); VX_INSTANCE=c$i VERILEX_LEDGER="$S/ledger" "$S/vx" led-conc-$i verilex run "store-open | item-stored $f | item-listed $f" > "$S/led-$i.out" 2>&1 & done; wait`. Each `led-$i.out` holds `green: 3 green; run <id>` and `exit 0`.
 - **Concurrent, second view.** Run `"$S/vx" led-conc-audit "$AUDIT" "$S/ledger/tally" "$S"/instances/c*`. It prints `proven: 18  passes: 18  intact: 18  matched: 18  lost: 0  forged: 0  damaged: 0  unowned: 0` and `passes per slot: 2 2 2 2 2 2 6`: `store-open` holds a pass from each of the six runs.
 - **Shared.** Run `VX_INSTANCE=n1 VERILEX_LEDGER="$S/ledger" "$S/vx" led-shared verilex run 'store-open | item-stored pear | item-listed pear'`. Output `green: 3 green, skipped: stamps match ...; run <N>`. Run `"$S/vx" led-shared-stores ls "$S/stores"`: empty, nothing was launched.

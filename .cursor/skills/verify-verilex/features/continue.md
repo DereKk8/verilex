@@ -48,7 +48,7 @@ Preconditions:
 
 - `--continue` with provisional words always refuses, because the kept instance already holds `store-open`'s effects. Admit first.
 - The instance keeps the first run's id: the store stays `$S/stores/tally-<KEPT>` across every continuing run.
-- Editing an admitted word also makes it drift-suspect (`the word's files changed since admission`). Restore the file before the next recipe.
+- Editing an admitted word also makes it drift-suspect (`the word's files changed since onboarding`). Restore the file before the next recipe.
 - Results proven on a continued instance never enter the ledger. They do not make a fresh `verilex run` skip.
 - After **Refresh fails**, no run owns the tampered store, so `verilex cleanup` cannot reach it. Only the session `cleanup` helper removes it.
 - A refused `--continue` adds no run and leaves the instance and its owner unchanged.

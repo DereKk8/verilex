@@ -51,6 +51,17 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 	case !packetID.MatchString(v.Packet):
 		return v, nil, fmt.Errorf("%s: 'packet' must be the id `verilex propose %s` printed", verdictPath, name)
 	}
+	words, err := lifecycle.LoadWords(p)
+	if err != nil {
+		return v, nil, err
+	}
+	w, err := find(words, name)
+	if err != nil {
+		return v, nil, err
+	}
+	if err = onboardOnly(w); err != nil {
+		return v, nil, err
+	}
 	packetPath := filepath.Join(proposalsDir(p, name), v.Packet+".json")
 	var packet Packet
 	data, err = os.ReadFile(packetPath)
@@ -63,14 +74,6 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 	if err = json.Unmarshal(data, &packet); err != nil || packet.Word != name || packet.ID != v.Packet {
 		return v, nil, fmt.Errorf("%s: not a packet for %s", packetPath, name)
 	}
-	words, err := lifecycle.LoadWords(p)
-	if err != nil {
-		return v, nil, err
-	}
-	w, err := find(words, name)
-	if err != nil {
-		return v, nil, err
-	}
 	stale := fmt.Errorf("%s changed since packet %s; propose it again", name, v.Packet)
 	digest, err := lifecycle.WordDigest(w)
 	if err != nil {
@@ -80,14 +83,7 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 	if err != nil {
 		return v, nil, fmt.Errorf("%v; %v", err, stale)
 	}
-	if digest != packet.WordDigest || len(current) != len(packet.Sections) || w.Stale != "" {
-		return v, nil, stale
-	}
-	proves, err := claimPacket(p, w)
-	if err != nil {
-		return v, nil, fmt.Errorf("%v; %v", err, stale)
-	}
-	if !sameClaim(proves, packet.Claim) {
+	if digest != packet.WordDigest || len(current) != len(packet.Sections) {
 		return v, nil, stale
 	}
 	hashes := map[string]string{}
@@ -108,25 +104,5 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 		runs = append(runs, use.Run)
 	}
 	a := &lifecycle.Admission{Word: name, Date: now(), Curator: v.Curator, Reason: v.Reason, Packet: v.Packet, Runs: runs, WordDigest: digest, Sections: hashes}
-	if proves != nil {
-		a.Claim, a.ClaimSources, a.Sections = proves.Pin, w.Claim.SourcesDigest(), nil
-	}
 	return v, a, writeJSON(lifecycle.AdmissionPath(w), a)
-}
-
-// sameClaim reports whether a word proves the claim version its packet showed, anchored in the
-// same requirement sentences.
-func sameClaim(current, packed *ClaimPacket) bool {
-	if current == nil || packed == nil {
-		return current == packed
-	}
-	if current.Pin != packed.Pin || current.Entry != packed.Entry || len(current.Sources) != len(packed.Sources) {
-		return false
-	}
-	for i, source := range current.Sources {
-		if source.Ref != packed.Sources[i].Ref || source.Hash != packed.Sources[i].Hash {
-			return false
-		}
-	}
-	return true
 }

@@ -1,0 +1,192 @@
+{
+  "version": 1,
+  "summary": "Adds verilex-agent, a launcher in its own agent/ module that runs the brain in a sandbox and returns verilex's own claim-run verdict, with a CI check that keeps harness code out of the core.",
+  "files": [
+    {
+      "path": "agent/internal/sandbox/sandbox.go",
+      "summary": "Owns the sandbox contract: what the brain may read and write, what stays hidden, and the check that the sandbox holds before the brain runs.",
+      "annotations": [
+        {
+          "newRange": [113, 179],
+          "summary": "start hands the helper its config on a pipe and returns only after the helper reports ok from inside the sandbox.",
+          "rationale": "The config travels on fd 3, so no hidden path shows on a command line the brain can read. If the tool fails, the pipe ends without ok and the reason is the tool's first stderr line, so the launcher never runs a brain it could not confine. Verified by TestNoSandboxNoVerdict with a failing fake bwrap and a fake that skips the sandbox.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [205, 270],
+          "summary": "newView builds the readable list from real paths and hides the ledger, the homes, the logs and every verilex binary on the brain's PATH.",
+          "rationale": "A verilex in a PATH directory that the launcher did not put there is the real binary, so it is hidden even when its directory stays readable. tooBroad drops a PATH entry that would expose the whole user home. Verified by TestBrainCannotReachTheRealVerilex (exit 126 on Linux, the binary shows as /dev/null).",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/sandbox/linux.go",
+      "summary": "Builds the bubblewrap command line for Linux.",
+      "annotations": [
+        {
+          "newRange": [60, 80],
+          "summary": "The brain gets new user, mount, pid, net, ipc, uts and cgroup namespaces, read-only binds sorted parents first, masks last, and a read-only root.",
+          "rationale": "The pid namespace hides the launcher's command line, which is where the tester's P11 forger read the ledger path. The private network blocks host loopback and abstract sockets, so the egress proxy is the only way out. Verified by the forgery test; sharing the pid namespace made its /proc and ps probes report reached. Landlock alone was rejected because it cannot hide a path inside an allowed tree and has no pid isolation.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/sandbox/darwin.go",
+      "summary": "Builds the sandbox-exec profile for macOS.",
+      "annotations": [
+        {
+          "newRange": [51, 101],
+          "summary": "seatbelt orders the rules so the last match wins: read all, deny user areas, allow the view, then deny reading, writing and running hidden paths.",
+          "rationale": "Exec does not need file-read in Seatbelt, so without the process-exec deny the brain still ran the real verilex binary; the first macOS CI run of the forgery test caught it. The network allows only the egress proxy's port on localhost. Unverified on macOS: a real harness run, because CI has no harness login.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/sandbox/init.go",
+      "summary": "The helper that runs inside the sandbox, checks it, bridges the egress port and then runs the brain.",
+      "annotations": [
+        {
+          "newRange": [73, 96],
+          "summary": "holds proves the sandbox from the inside: no new file in the project, nothing visible at hidden paths, and no reach to a host loopback port.",
+          "rationale": "A sandbox tool that starts but does not confine, such as a wrapper or a misconfigured profile, would otherwise run the brain unsandboxed. The probe file is removed if it was created. Verified by the passthrough case in TestNoSandboxNoVerdict.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/egress/egress.go",
+      "summary": "The CONNECT-only proxy that is the brain's only network path.",
+      "annotations": [
+        {
+          "newRange": [154, 201],
+          "summary": "pick resolves a host once, refuses any address that is not public or is the host's own, and the proxy dials the address it checked.",
+          "rationale": "Dialing the checked address closes DNS rebinding. Public unmaps IPv4-mapped IPv6, so a mapped loopback or CGNAT address is refused too. Verified by the forgery test for 127.0.0.1, localhost, ::1, 10.0.0.1, 192.168.1.1, 169.254.169.254 and 100.64.0.1; a proxy that allowed every address failed it.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/run/run.go",
+      "summary": "One launcher invocation: resolve the spec, snapshot the project, run the brain in the sandbox, check the project and home, return verilex's verdict.",
+      "annotations": [
+        {
+          "newRange": [215, 257],
+          "summary": "After the brain, the proxy closes first, an unavailable sandbox returns inconclusive, then the project and the run's home are checked.",
+          "rationale": "The tree check and cleanHome stay as defense in depth: the brain can no longer cause either one, but a host process can change the project or run verilex in the home during the run. Verified by TestProjectChangedDuringTheRunIsInconclusive and TestRunAroundTheLauncherIsInconclusive.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [361, 361],
+          "summary": "The hide list holds both homes, the ledger, the verilex binary, VERILEX_HOME, VERILEX_LEDGER, the run's logs and its verilex home.",
+          "rationale": "These decide a verdict, so the brain must neither read nor write them. The ledger directory is created before the brain starts so the sandbox can hide it. Verified by the forgery test: every pass added to the ledger names a run the launcher made, and every earlier file is unchanged.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [388, 436],
+          "summary": "brain passes the prompt as a file on stdin and writes the brain's output to the run's log files.",
+          "rationale": "With no pipe, no copy goroutine can wait on a child the brain left running, which matters on macOS, where a detached process can outlive the run. Verified by TestBudgetBoundsTheRunWhateverTheBrainStarts (a setsid child) and the stdin check in TestSkillIntentAndSuggestionsReachTheBrain; a prompt larger than the pipe buffer is not tested.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/harness/harness.go",
+      "summary": "Resolves the brain command and the credential files each built-in harness needs.",
+      "annotations": [
+        {
+          "newRange": [147, 164],
+          "summary": "The built-in claude and codex commands turn their own permission prompts and sandbox off, and each harness names only its credential file.",
+          "rationale": "A headless brain cannot answer a permission prompt, so without the flag claude could not run verilex at all; the launcher's sandbox is the boundary instead. Verified with real runs through the launcher: claude haiku and codex gpt-6-sol returned verilex's green, and pi with openai-codex/gpt-6-sol did too.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/prompt/prompt.go",
+      "summary": "Owns all prompt text for both brain phases.",
+      "annotations": [
+        {
+          "newRange": [22, 30],
+          "summary": "Verify ends the run prompt with a task section, and Suggest asks only for claims and carries no task.",
+          "rationale": "Without the task, a real claude haiku brain read the prompt as setup and waited for instructions, so the run had no verilex run. Verified by a real claude run that then called index, plan and run, and by TestSkillIntentAndSuggestionsReachTheBrain.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/brain_test.go",
+      "summary": "Regression tests for the tester's findings and the sandbox escape probes, on the real core.",
+      "annotations": [
+        {
+          "newRange": [251, 362],
+          "summary": "The forgery test runs the P11 shape (run, forge, rerun) with every path given to the brain, and checks host-side effects as well as the brain's own log.",
+          "rationale": "A write probe can succeed inside the brain's own /tmp without reaching the real path, so writes are judged on the host: the ledger only gains passes from launcher runs, and no forged file exists. Each grep uses [-] so it cannot match its own command line.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "summary": "Installs bubblewrap and allows it user namespaces in the Linux test job.",
+      "annotations": [
+        {
+          "newRange": [49, 56],
+          "summary": "The sandbox step adds an AppArmor profile that grants /usr/bin/bwrap user namespaces, the same recipe the README gives for Ubuntu.",
+          "rationale": "Ubuntu 24.04 denies unprivileged user namespaces to programs without a profile, so every agent test would be inconclusive. Using the profile instead of the global sysctl keeps the runner's other restrictions and proves the README recipe. Verified by a green test job on ubuntu-latest.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "README.md",
+      "summary": "Documents the launcher, its sandbox contract, requirements, run directory and residual risks.",
+      "annotations": [
+        {
+          "newRange": [377, 451],
+          "summary": "The Sandbox section states what the brain can and cannot reach, the run directory layout, and what the sandbox does not cover.",
+          "rationale": "The residual list names the known gaps: public egress, environment secrets, pathname sockets in readable directories on Linux, detached processes on macOS, CONNECT-only egress and token refresh. These are not tested as passing; they are limits.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/tree/tree.go",
+      "summary": "Records each file git tracks or would track, with its stat, so the launcher sees any change to the project during the run.",
+      "annotations": [
+        {
+          "newRange": [17, 45],
+          "summary": "Snapshot keys every non-ignored file by mode, size, mtime, inode change time, inode and device.",
+          "rationale": "The inode change time cannot be set back by an unprivileged process, so an edit that restores the bytes and mtime is still seen (tester finding F1). The sandbox now stops the brain from writing the project, so this check catches changes from outside the sandbox. Git-ignored files are not checked.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/verdict/verdict.go",
+      "summary": "Decides whether the brain's last verilex run may be returned as the spec's verdict.",
+      "annotations": [
+        {
+          "newRange": [74, 117],
+          "summary": "Exit requires verilex's exit to equal its verdict code; Check refuses a green that is not a claim run covering every launcher claim and diff path.",
+          "rationale": "A brain can run a narrow or unrelated chain that is truly green, so returning it would be a false green for the spec. verilex's requested field is read instead of the brain's flags. Verified by TestGreenThatDoesNotCoverTheSpecIsInconclusive against the real core.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "scripts/boundary.go",
+      "summary": "CI check that fails if cmd/ or internal/ import the agent module or name a harness.",
+      "annotations": [
+        {
+          "newRange": [1, 98],
+          "summary": "The check parses Go and scans only imports, string literals and comments.",
+          "rationale": "A text grep flagged the claim planner's loop index pi as a harness name, so the check parses instead. Verified by TestBoundaryPassesOnThisRepoAndFailsOnAHarnessNameOrImport.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    }
+  ]
+}

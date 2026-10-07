@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "summary": "Map runbook entries even when another dependency already covers their claim.",
+  "files": [
+    {
+      "path": "internal/index/touch.go",
+      "summary": "Evaluate both dependency matchers before selecting claims and words.",
+      "annotations": [
+        {
+          "newRange": [90, 92],
+          "summary": "touchOf maps claim-source runbook entries beside matching paths.",
+          "rationale": "sectionHit records mapping as a side effect, so short-circuiting it produced the N3 false warning. TestRunbookChangeMapsBesideClaimDependencies reproduced the failure before the fix and passed afterward. The scratch CLI proof also checked feature-file and claim-file diffs in human output, JSON and stored records. Other findings from the tester report remain outside this change.",
+          "author": "fm/verilex-runbook-unmapped-warning"
+        },
+        {
+          "newRange": [125, 127],
+          "summary": "touchOf maps words' own runbook references beside matching paths or config keys.",
+          "rationale": "A path hit or declaredHit reason previously prevented sectionHit from marking the word's own reference. The regression covers both cases and confirms unrelated entries still warn. scripts/ci passed on this commit, including race tests. No launcher behavior changed.",
+          "author": "fm/verilex-runbook-unmapped-warning"
+        }
+      ]
+    }
+  ]
+}

@@ -47,7 +47,8 @@ func command(spec Spec, v *view, self string, egressAddr net.Addr) (*exec.Cmd, [
 
 // seatbelt is the profile. Seatbelt applies the last rule that matches, so the order is: read
 // everything, deny the user and temporary areas, allow what the view lists, then deny reading,
-// writing and running what must stay hidden. Running needs its own rule: exec does not read.
+// writing and running what must stay hidden. Running needs its own rule: exec does not read. The
+// terminal devices are denied last.
 func seatbelt(spec Spec, v *view, port string) (string, error) {
 	var b strings.Builder
 	b.WriteString(base)
@@ -97,6 +98,9 @@ func seatbelt(spec Spec, v *view, port string) (string, error) {
 	if err := rule(&b, "allow network-outbound", sockets, unixRemote); err != nil {
 		return "", err
 	}
+	// No terminal, and last so no rule above allows one: the brain can neither read the user's
+	// keystrokes nor write into a terminal, its own session's or another's.
+	b.WriteString("(deny file-read* file-write* file-ioctl (regex #\"^/dev/tty\") (regex #\"^/dev/pty\") (literal \"/dev/ptmx\"))\n")
 	return b.String(), nil
 }
 
@@ -150,8 +154,9 @@ func quote(path string) (string, error) {
 }
 
 // base allows what any process needs and nothing that reaches outside the sandbox: no
-// LaunchServices, Apple Events or launchd jobs, which would start a process outside it. It follows
-// the Chromium-derived policies of Codex and Claude Code's sandbox runtime.
+// LaunchServices, Apple Events or launchd jobs, which would start a process outside it, and no
+// terminal device. It follows the Chromium-derived policies of Codex and Claude Code's sandbox
+// runtime, without their pseudo-terminal rules.
 const base = `(version 1)
 (deny default)
 (allow process-exec)
@@ -232,9 +237,6 @@ const base = `(version 1)
 (allow ipc-posix-shm)
 (allow iokit-open (iokit-registry-entry-class "RootDomainUserClient"))
 (allow system-socket (require-all (socket-domain AF_SYSTEM) (socket-protocol 2)))
-(allow pseudo-tty)
-(allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))
-(allow file-read* file-write* file-ioctl (regex #"^/dev/ttys[0-9]+"))
 (allow file-read* file-write-data file-ioctl
   (literal "/dev/null")
   (literal "/dev/zero")

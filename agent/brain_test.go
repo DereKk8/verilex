@@ -359,6 +359,67 @@ verilex run --claim item-listed > /dev/null
 	}
 }
 
+// A person starts the launcher in a terminal. The brain has no controlling terminal and cannot
+// open the terminal's device by its path, so it can neither type into the user's shell nor print
+// into the user's terminal, the tester's M2.
+func TestBrainCannotReachTheTerminal(t *testing.T) {
+	dir := t.TempDir()
+	fake := writeFake(t, dir, fakeFiles{ticket: ticketJSON("stub", "stub"), run: claimRun("green", "r1", []string{"store-opened"}, nil)})
+	brain := writeBrain(t, dir, `#!/bin/sh
+for path in /dev/tty "$TTY_PATH"; do
+  if printf 'TTY-MARKER\n' 2> /dev/null > "$path"; then echo "$path: written"; else echo "$path: refused"; fi
+done > "$HOME/tty"
+verilex run --named store-opened > /dev/null
+`)
+	argv, err := launcherArgs(dir, fake, brain, "--intent", "prove the store opens", "--harness", "stub", "--model", "stub", "--keep-work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The helper starts the launcher on a new terminal, the way a shell would, and prints all the
+	// terminal showed. TTY_PATH is that terminal's device.
+	helper := filepath.Join(dir, "terminal.py")
+	if err = os.WriteFile(helper, []byte(terminalHelper), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tmp := runTemp(t)
+	cmd := exec.Command("python3", append([]string{"-I", helper, agentBin}, argv...)...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "TMPDIR="+tmp)
+	shown, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\nterminal: %s", err, shown)
+	}
+	if strings.Contains(string(shown), "TTY-MARKER") {
+		t.Fatalf("the brain wrote into the terminal:\n%s", shown)
+	}
+	report := kept{stdout: string(shown), root: runRoot(t, tmp)}.home(t, "tty")
+	if strings.Count(report, ": refused") != 2 || !strings.Contains(report, "/dev/tty: refused") {
+		t.Fatalf("the brain reached a terminal:\n%s", report)
+	}
+}
+
+// terminalHelper runs its arguments on a new pseudo-terminal, prints what the terminal showed,
+// and exits with the command's code.
+const terminalHelper = `import os, pty, sys
+
+pid, fd = pty.fork()
+if pid == 0:
+    os.environ["TTY_PATH"] = os.ttyname(0)
+    os.execv(sys.argv[1], sys.argv[1:])
+shown = b""
+while True:
+    try:
+        chunk = os.read(fd, 65536)
+    except OSError:
+        break
+    if not chunk:
+        break
+    shown += chunk
+_, status = os.waitpid(pid, 0)
+sys.stdout.buffer.write(shown)
+sys.exit(os.waitstatus_to_exitcode(status))
+`
+
 // Where the sandbox cannot be established, the launcher returns no verdict and the brain never
 // runs: when the sandbox tool fails, and when it starts the brain without sandboxing it.
 func TestNoSandboxNoVerdict(t *testing.T) {

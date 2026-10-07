@@ -376,7 +376,7 @@ A run records its resolved ticket in its own run record (`ticket` in `--json` an
 
 ## Companion launcher
 
-`verilex-agent` is a separate module in `agent/`. The core does not import it and does not start a harness. The launcher reads the run spec through `verilex ticket`, starts the brain that spec names with the verilex skill and the intent, and prints the JSON from the brain's last `verilex run`. That JSON is verilex's own verdict, byte for byte, including its missed-claim warning (`warning`, `uncovered`, `unmapped`, `unclaimed`, `unrun`). The brain's message is not the verdict. A real harness starts only with `--allow-harness`. A named executable (`--brain`) is how tests and bots supply a brain without one.
+`verilex-agent` is a separate module in `agent/`. The core does not import it and does not start a harness. The launcher reads the run spec through `verilex ticket`, starts the brain that spec names with the verilex skill and the intent, and prints the JSON of one `verilex run` the brain made, chosen as described below. That JSON is verilex's own verdict, byte for byte, including its missed-claim warning (`warning`, `uncovered`, `unmapped`, `unclaimed`, `unrun`). The brain's message is not the verdict. A real harness starts only with `--allow-harness`. A named executable (`--brain`) is how tests and bots supply a brain without one.
 
 ```
 go build -o verilex-agent ./agent/cmd/verilex-agent
@@ -384,12 +384,24 @@ verilex-agent --ticket deep.yaml --project . --skill skills/verilex/SKILL.md
 verilex-agent --diff main...HEAD --claim item-listed --harness claude-code --model <model> --allow-harness
 ```
 
-The project must be in a git work tree. The brain's `verilex` command is the launcher's, and the only one its sandbox shows: it may run `index`, `plan`, `run`, `words`, `claims`, `runs`, `ticket` and `check`, never with `--keep` or `--continue`; every `run` and `plan` carries the run spec as `--ticket`, so the run record names the brain. A green is returned only from a `verilex-claim-run-1` run whose `requested` holds every `--claim` given to the launcher (`named` or `claims`) and every path the diff changes (`git diff --name-only -z --no-renames --relative <diff>` in the project, so both sides of a rename count).
+The project must be in a git work tree. The brain's `verilex` command is the launcher's, and the only one its sandbox shows: it may run `index`, `plan`, `run`, `words`, `claims`, `runs`, `ticket` and `check`, never with `--keep` or `--continue`; every `run` and `plan` carries the run spec as `--ticket`, so the run record names the brain.
+
+The launcher keeps the JSON of every `verilex run` the brain makes and chooses the verdict from all of them:
+
+1. A red from any run is the verdict, with exit `1`. The project is read-only for the brain, so a later green on other claims cannot undo a failure that verilex found in the code under test. If more than one run is red, the launcher returns the last red.
+2. Otherwise the last run is the verdict.
+3. A last run that is green is returned only if it is a `verilex-claim-run-1` run that proved every floor claim, was asked about every path the diff changes, and proved every claim that an earlier inconclusive run selected.
+
+The floor is every `--claim` given to the launcher, plus the claims that `verilex index --intent <intent> --json` finds for the intent. The launcher runs that lookup itself before the brain starts, and the prompt lists the floor. A run proved a claim when the run is green and its `requested` names the claim (`claims` or `named`), or its `claims` or `words` show the claim green. The diff's paths are `git diff --name-only -z --no-renames --relative <diff>` in the project, so both sides of a rename count, and the run's `requested.changed` must hold each one. The floor is only as good as the index's intent lookup.
+
+An intent that names no claim has no floor. Without `--claim`, the launcher returns inconclusive before the brain starts, because no verilex run can prove such an intent. With `--claim`, the named claims stand for the intent.
 
 The launcher returns no verdict, but prints `verilex-agent: inconclusive: <reason>` on stderr, nothing on stdout, and exits `2`, when:
 
-- the green does not cover the spec as above, or verilex's exit does not match its verdict;
-- the brain ran no verilex run, or `time_budget` ended. One deadline covers `--suggest` and the run, and no child the brain started holds the launcher past it;
+- the last run is green but does not prove the floor or the diff, or does not prove a claim that an earlier inconclusive run selected;
+- a run's exit does not match the verdict it printed;
+- the intent names no claim and no `--claim` is given;
+- the brain ran no verilex run, or `time_budget` ended before any run was red. A red that verilex printed before the deadline is still the verdict. One deadline covers `--suggest` and the run, and no child the brain started holds the launcher past it;
 - the sandbox could not start or did not hold (see [Sandbox](#sandbox));
 - the project changed during the run: a file git tracks or would track (ignored files are not checked) was added, removed, written or touched between the start of the brain and its end, even if the bytes were put back;
 - the run's home holds a run that did not come through the launcher, or a kept instance. The launcher tears down every instance left in the home.
@@ -407,7 +419,8 @@ The brain runs untrusted, in a sandbox: bubblewrap (`bwrap`) on Linux, `sandbox-
 - cannot reach the verilex home, the ledger, the real `verilex` binary (`--verilex`, and any other `verilex` on `PATH`), `VERILEX_HOME`, `VERILEX_LEDGER` or the run's logs. Each one is missing, or shows as an empty directory or as `/dev/null`;
 - runs verilex only through `<run>/share/bin/verilex`, which sends each command to the launcher. The launcher runs it with its own home and ledger;
 - reaches the network only through an egress proxy (`HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY`). The proxy serves `CONNECT` to public addresses only. It refuses loopback, private, link-local, CGNAT and reserved addresses, and the host's own addresses;
-- on Linux, sees only its own processes and has no host network, IPC or abstract sockets. Every process it starts ends with the run.
+- on Linux, sees only its own processes and has no host network, IPC or abstract sockets. Every process it starts ends with the run;
+- has no terminal. It runs in a session of its own with no controlling terminal, so it cannot type into the user's shell. On macOS the profile also denies every terminal device (`/dev/tty*`, `/dev/pty*` and `/dev/ptmx`), so the brain cannot read or write a terminal by its path. On Linux, `/dev` is the sandbox's own, with its own pseudo-terminals.
 
 Before the brain starts, a helper inside the sandbox checks that the project refuses a new file, that each hidden path shows nothing, and that a port on the host's loopback is out of reach. When the sandbox tool is missing or fails, or a check fails, the brain does not run, and the launcher prints `verilex-agent: inconclusive: the brain runs only in a sandbox, and the sandbox is not available here: <reason>`. The launcher never runs a brain without the sandbox.
 
@@ -444,6 +457,7 @@ The sandbox does not cover these cases:
 - The brain can reach any public address, so a service that the project publishes on a public address is reachable.
 - On Linux, a unix socket inside a readable directory, such as the project, stays reachable.
 - On macOS, a process that the brain detaches from its process group can outlive the run. The process keeps the sandbox's limits.
+- On macOS, the brain cannot open a pseudo-terminal, so a harness that runs its commands in one fails there. No harness was run on macOS.
 - The egress proxy serves only `CONNECT`. A client that sends plain HTTP requests to the proxy gets `405`.
 - A harness cannot save a token that it refreshes during a run. If the provider rotates refresh tokens, log in again on the host when the harness reports an expired login.
 

@@ -1,6 +1,7 @@
-// Package verdict reads the JSON a verilex run printed and decides whether the launcher may return
-// it. It never invents a verdict. It refuses a green that does not cover the run spec, and any
-// document whose process exit disagrees with it.
+// Package verdict reads the JSON every verilex run printed and decides which one the launcher
+// returns. It never invents a verdict. A red from any run stands, a green must cover the run
+// spec and every claim an earlier inconclusive run left open, and a document whose process exit
+// disagrees with it is refused.
 package verdict
 
 import (
@@ -29,6 +30,28 @@ type Doc struct {
 	Unmapped  []string    `json:"unmapped"`
 	Unclaimed []string    `json:"unclaimed"`
 	Unrun     []string    `json:"unrun"`
+	// Claims is every claim a claim run selected, with the verdict verilex gave it.
+	Claims []Claim `json:"claims"`
+	// Words is every word the run ran or reused.
+	Words []Step `json:"words"`
+}
+
+// Claim is one selected claim of a claim run.
+type Claim struct {
+	Claim   string `json:"claim"`
+	Verdict string `json:"verdict"`
+}
+
+// Step is one word of a run: the claim version it proves (<claim>@<version>) and its verdict.
+type Step struct {
+	Proves  string `json:"proves"`
+	Verdict string `json:"verdict"`
+}
+
+// Run is what one verilex run printed and its exit code.
+type Run struct {
+	Stdout []byte
+	Exit   int
 }
 
 // Request is what verilex says it was asked, read from verilex rather than from the brain.
@@ -44,8 +67,8 @@ type Uncovered struct {
 	Next  string `json:"next"`
 }
 
-// Want is what the run spec requires a green to cover: the named claims and every changed path,
-// relative to Project.
+// Want is what the run spec requires a green to cover: the named claims (the launcher's --claim
+// and the claims its intent names) and every changed path, relative to Project.
 type Want struct {
 	Project string
 	Named   []string
@@ -79,9 +102,113 @@ func Exit(doc Doc, verilexExit int) (int, error) {
 	return want, nil
 }
 
-// Check refuses a green that does not prove the spec: a run that was not a claim run, or whose
-// request left out a named claim or a changed path. A red or inconclusive verdict stands as
-// verilex printed it.
+// Decide picks the verdict the launcher returns from every run the brain made, in order, and its
+// exit code. A red from any run is the verdict: the project is read-only, so a later green on
+// other claims cannot undo a failure verilex found in the code under test. Otherwise the last run
+// is the verdict. A last run that is green must cover the spec and must have proved every claim
+// that an earlier inconclusive run left open. An error is a reason to return no verdict.
+func Decide(runs []Run, want Want) (Doc, int, error) {
+	if len(runs) == 0 {
+		return Doc{}, 2, fmt.Errorf("the brain ran no verilex run, so there is no verdict")
+	}
+	docs := make([]Doc, len(runs))
+	for i, run := range runs {
+		doc, err := Parse(run.Stdout)
+		if err != nil {
+			return Doc{}, 2, err
+		}
+		if _, err = Exit(doc, run.Exit); err != nil {
+			return Doc{}, 2, fmt.Errorf("run %s: %v", doc.Run, err)
+		}
+		docs[i] = doc
+	}
+	for i := len(docs) - 1; i >= 0; i-- {
+		if docs[i].Verdict == "red" {
+			return docs[i], 1, nil
+		}
+	}
+	last := docs[len(docs)-1]
+	if last.Verdict != "green" {
+		return last, code(last.Verdict), nil
+	}
+	if err := Check(last, want); err != nil {
+		return Doc{}, 2, err
+	}
+	proven := provenBy(last)
+	for _, doc := range docs[:len(docs)-1] {
+		if doc.Verdict != "inconclusive" {
+			continue
+		}
+		var open []string
+		for _, claim := range selected(doc) {
+			if !proven[claim] {
+				open = append(open, claim)
+			}
+		}
+		if len(open) > 0 {
+			return Doc{}, 2, fmt.Errorf("run %s is green but did not prove %s, which run %s left inconclusive", last.Run, strings.Join(open, ", "), doc.Run)
+		}
+	}
+	return last, 0, nil
+}
+
+// provenBy is every claim a green run proved: the claims it was asked for, and each selected
+// claim and word it gave a green. A run that is not green proved none.
+func provenBy(doc Doc) map[string]bool {
+	out := map[string]bool{}
+	if doc.Verdict != "green" {
+		return out
+	}
+	if doc.Requested != nil {
+		for _, name := range append(slices.Clone(doc.Requested.Claims), doc.Requested.Named...) {
+			out[name] = true
+		}
+	}
+	for _, claim := range doc.Claims {
+		if claim.Verdict == "green" {
+			out[claim.Claim] = true
+		}
+	}
+	for _, step := range doc.Words {
+		if step.Verdict == "green" && claimOf(step) != "" {
+			out[claimOf(step)] = true
+		}
+	}
+	return out
+}
+
+// selected is every claim a run set out to prove: the claims it was asked for, the claims a claim
+// run selected, and the claim each of its words proves.
+func selected(doc Doc) []string {
+	var out []string
+	add := func(name string) {
+		if name != "" && !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	if doc.Requested != nil {
+		for _, name := range append(slices.Clone(doc.Requested.Claims), doc.Requested.Named...) {
+			add(name)
+		}
+	}
+	for _, claim := range doc.Claims {
+		add(claim.Claim)
+	}
+	for _, step := range doc.Words {
+		add(claimOf(step))
+	}
+	return out
+}
+
+// claimOf is the claim a word proves, without its version; empty for a word with no claim.
+func claimOf(step Step) string {
+	name, _, _ := strings.Cut(step.Proves, "@")
+	return name
+}
+
+// Check refuses a green that does not prove the spec: a run that was not a claim run, one that
+// neither was asked for nor proved a named claim, or one whose request left out a changed path. A
+// red or inconclusive verdict stands as verilex printed it.
 func Check(doc Doc, want Want) error {
 	if doc.Verdict != "green" {
 		return nil
@@ -89,10 +216,10 @@ func Check(doc Doc, want Want) error {
 	if doc.Format != RunFormat || doc.Requested == nil {
 		return fmt.Errorf("run %s is green but is not a claim run, so it does not show what it was asked", doc.Run)
 	}
-	asked := append(slices.Clone(doc.Requested.Claims), doc.Requested.Named...)
+	proven := provenBy(doc)
 	var missing []string
 	for _, name := range want.Named {
-		if !slices.Contains(asked, name) {
+		if !proven[name] {
 			missing = append(missing, "claim "+name)
 		}
 	}

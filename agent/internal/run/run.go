@@ -146,6 +146,23 @@ func Run(opts Options) (result Result, err error) {
 	if spec.Diff != "" && len(changed) == 0 && spec.Intent == "" && len(opts.Claims) == 0 {
 		return Result{}, inconclusive("diff %s changes no file under %s, so there is nothing to prove", spec.Diff, project)
 	}
+	// The claims the intent names are a floor like --claim, found by verilex, not by the brain. An
+	// intent that names no claim has no floor, so only the caller's --claim can stand for it.
+	named := slices.Clone(opts.Claims)
+	if spec.Intent != "" {
+		claims, err := intentClaims(verilex, project, spec.Intent)
+		if err != nil {
+			return Result{}, err
+		}
+		if len(claims) == 0 && len(opts.Claims) == 0 {
+			return Result{}, inconclusive("intent %q names no claim (verilex index --intent found none), so no verilex run can prove it; name the claims with --claim", spec.Intent)
+		}
+		for _, claim := range claims {
+			if !slices.Contains(named, claim) {
+				named = append(named, claim)
+			}
+		}
+	}
 	budget, err := time.ParseDuration(or(spec.TimeBudget, "0s"))
 	if err != nil {
 		return Result{}, fmt.Errorf("time_budget: %v", err)
@@ -164,7 +181,7 @@ func Run(opts Options) (result Result, err error) {
 	if err != nil {
 		return Result{}, err
 	}
-	l, err := newLaunch(d, opts, brain, verilex, home)
+	l, err := newLaunch(d, opts, brain, verilex, home, named)
 	if err != nil {
 		return Result{}, err
 	}
@@ -184,7 +201,7 @@ func Run(opts Options) (result Result, err error) {
 	}
 	text := prompt.Verify(prompt.Input{
 		Skill: skill, Intent: intent, Diff: spec.Diff,
-		Named: opts.Claims, Changed: changed, Suggestions: suggestions,
+		Named: named, Changed: changed, Suggestions: suggestions,
 	})
 	promptPath := filepath.Join(d.share, "prompt.txt")
 	if err = os.WriteFile(promptPath, []byte(text), 0o600); err != nil {
@@ -228,31 +245,34 @@ func Run(opts Options) (result Result, err error) {
 	if err = cleanHome(px); err != nil {
 		return Result{}, inconclusive("%v", err)
 	}
+	runs := px.Runs()
+	want := verdict.Want{Project: project, Named: named, Changed: changed}
 	if isBudget(brainErr) {
+		// A red verilex printed before the budget ended still stands.
+		if doc, code, err := verdict.Decide(runs, want); err == nil && code == 1 {
+			return output(doc, code, opts.JSON), nil
+		}
 		return Result{}, inconclusive("%v", brainErr)
 	}
-	stdout, verilexExit, ok := px.LastRun()
-	if !ok {
+	if len(runs) == 0 {
 		if brainErr != nil {
 			return Result{}, inconclusive("%v, and ran no verilex run, so there is no verdict", brainErr)
 		}
 		return Result{}, inconclusive("the brain exited without a verilex run, so there is no verdict")
 	}
-	doc, err := verdict.Parse(stdout)
+	doc, code, err := verdict.Decide(runs, want)
 	if err != nil {
 		return Result{}, inconclusive("%v", err)
 	}
-	code, err := verdict.Exit(doc, verilexExit)
-	if err != nil {
-		return Result{}, inconclusive("run %s: %v", doc.Run, err)
+	return output(doc, code, opts.JSON), nil
+}
+
+// output prints doc as verilex printed it, or its quiet human form.
+func output(doc verdict.Doc, code int, asJSON bool) Result {
+	if !asJSON {
+		return Result{Stdout: []byte(verdict.Summary(doc)), Exit: code}
 	}
-	if err = verdict.Check(doc, verdict.Want{Project: project, Named: opts.Claims, Changed: changed}); err != nil {
-		return Result{}, inconclusive("%v", err)
-	}
-	if !opts.JSON {
-		return Result{Stdout: []byte(verdict.Summary(doc)), Exit: code}, nil
-	}
-	return Result{Stdout: doc.Raw, Exit: code}, nil
+	return Result{Stdout: doc.Raw, Exit: code}
 }
 
 // phaseError is the answer when a brain phase could not finish: the sandbox could not be
@@ -338,8 +358,8 @@ type launch struct {
 	egressLog  *os.File
 }
 
-func newLaunch(d dirs, opts Options, brain harness.Brain, verilex, home string) (*launch, error) {
-	l := &launch{d: d, argv: brain.Argv, project: opts.Project, files: map[string]string{}, named: opts.Claims, suggestOn: opts.Suggest}
+func newLaunch(d dirs, opts Options, brain harness.Brain, verilex, home string, named []string) (*launch, error) {
+	l := &launch{d: d, argv: brain.Argv, project: opts.Project, files: map[string]string{}, named: named, suggestOn: opts.Suggest}
 	l.read = []string{d.share}
 	if opts.Brain != "" {
 		l.read = append(l.read, opts.Brain)
@@ -529,7 +549,37 @@ func resolve(verilex, project, work string, opts Options) (ticket, string, error
 	if err != nil {
 		return ticket{}, "", err
 	}
-	cmd := exec.Command(verilex, "--project", project, "ticket", "--json", path)
+	var spec ticket
+	if err = verilexJSON(verilex, project, &spec, "ticket", "--json", path); err != nil {
+		return ticket{}, "", err
+	}
+	if spec.Harness == "" || spec.Model == "" {
+		return ticket{}, "", errors.New("resolved ticket names no harness or model")
+	}
+	return spec, path, nil
+}
+
+// intentClaims are the claims verilex index names for intent, best first.
+func intentClaims(verilex, project, intent string) ([]string, error) {
+	var rows []struct {
+		Claim string `json:"claim"`
+	}
+	if err := verilexJSON(verilex, project, &rows, "index", "--intent", intent, "--json"); err != nil {
+		return nil, err
+	}
+	var claims []string
+	for _, row := range rows {
+		if row.Claim != "" {
+			claims = append(claims, row.Claim)
+		}
+	}
+	return claims, nil
+}
+
+// verilexJSON runs one read-only verilex command for the launcher itself and decodes its JSON
+// into out. A refusal comes back as verilex worded it.
+func verilexJSON(verilex, project string, out any, args ...string) error {
+	cmd := exec.Command(verilex, append([]string{"--project", project}, args...)...)
 	cmd.Env = os.Environ()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -539,16 +589,12 @@ func resolve(verilex, project, work string, opts Options) (ticket, string, error
 		if detail == "" {
 			detail = err.Error()
 		}
-		return ticket{}, "", errors.New(strings.TrimPrefix(detail, "verilex: refused: "))
+		return errors.New(strings.TrimPrefix(detail, "verilex: refused: "))
 	}
-	var spec ticket
-	if err := json.Unmarshal(stdout.Bytes(), &spec); err != nil {
-		return ticket{}, "", fmt.Errorf("verilex ticket JSON: %v", err)
+	if err := json.Unmarshal(stdout.Bytes(), out); err != nil {
+		return fmt.Errorf("verilex %s JSON: %v", args[0], err)
 	}
-	if spec.Harness == "" || spec.Model == "" {
-		return ticket{}, "", errors.New("resolved ticket names no harness or model")
-	}
-	return spec, path, nil
+	return nil
 }
 
 func ticketYAML(opts Options) string {

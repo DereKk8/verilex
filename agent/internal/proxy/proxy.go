@@ -13,11 +13,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/DereKk8/verilex/agent/internal/verdict"
 )
 
 const maxStdin = 1 << 20
@@ -38,14 +41,8 @@ type Proxy struct {
 	ln      net.Listener
 	mu      sync.Mutex
 	cmds    []*exec.Cmd
-	run     capture
+	runs    []verdict.Run
 	started map[string]bool
-}
-
-type capture struct {
-	stdout []byte
-	exit   int
-	ok     bool
 }
 
 // allowed are the commands the brain may run. The rest change what verilex trusts (onboard,
@@ -96,12 +93,16 @@ func (p *Proxy) Serve() {
 	}
 }
 
-// LastRun is the last verilex run the brain asked for that printed a JSON document. A refused
-// run prints none, so it does not hide an earlier verdict.
-func (p *Proxy) LastRun() (stdout []byte, exit int, ok bool) {
+// Runs is every verilex run the brain asked for that printed a JSON document, in the order they
+// finished. A refused run prints none.
+func (p *Proxy) Runs() []verdict.Run {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return append([]byte(nil), p.run.stdout...), p.run.exit, p.run.ok
+	out := make([]verdict.Run, len(p.runs))
+	for i, run := range p.runs {
+		out[i] = verdict.Run{Stdout: append([]byte(nil), run.Stdout...), Exit: run.Exit}
+	}
+	return out
 }
 
 // Started is every run id a verilex run the brain asked for printed. A run in the home that is
@@ -121,7 +122,7 @@ func (p *Proxy) Exec(args ...string) (stdout, stderr []byte, code int) {
 	return p.exec(append([]string{"--project", p.Project}, args...), "")
 }
 
-// Close stops the listener and kills any verilex process the proxy still holds.
+// Close stops the listener and kills any verilex process still running for the brain.
 func (p *Proxy) Close() error {
 	sock := p.Socket()
 	err := p.ln.Close()
@@ -162,7 +163,7 @@ func (p *Proxy) handle(conn net.Conn) {
 		}
 		_ = json.Unmarshal(stdout, &doc)
 		p.mu.Lock()
-		p.run = capture{stdout: append([]byte(nil), stdout...), exit: code, ok: true}
+		p.runs = append(p.runs, verdict.Run{Stdout: append([]byte(nil), stdout...), Exit: code})
 		if doc.Run != "" {
 			if p.started == nil {
 				p.started = map[string]bool{}
@@ -196,6 +197,11 @@ func (p *Proxy) exec(args []string, stdin string) ([]byte, []byte, int) {
 	p.cmds = append(p.cmds, cmd)
 	p.mu.Unlock()
 	err := cmd.Run()
+	// A finished command leaves the list, so Close never signals a pid the kernel gave to
+	// another process.
+	p.mu.Lock()
+	p.cmds = slices.DeleteFunc(p.cmds, func(c *exec.Cmd) bool { return c == cmd })
+	p.mu.Unlock()
 	return stdout.Bytes(), stderr.Bytes(), exitCode(err)
 }
 

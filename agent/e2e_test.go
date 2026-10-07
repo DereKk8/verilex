@@ -78,7 +78,7 @@ func TestLauncherReturnsVerilexJSONNotTheBrain(t *testing.T) {
 }
 
 func TestBrainExitDoesNotReplaceTheVerdict(t *testing.T) {
-	runJSON := claimRun("green", "r9", nil, nil)
+	runJSON := claimRun("green", "r9", []string{"store-opened"}, nil)
 	dir := t.TempDir()
 	fake := writeFake(t, dir, fakeFiles{run: runJSON, ticket: ticketJSON("stub", "stub")})
 	brain := writeBrain(t, dir, "#!/bin/sh\nverilex run --json 'store-open'\nexit 1\n")
@@ -132,7 +132,8 @@ func TestSkillIntentAndSuggestionsReachTheBrain(t *testing.T) {
 		"floor: store-opened",
 		"changed: notes.txt",
 		"suggestion: item-added",
-		"The launcher returns verilex's own JSON verdict from your last verilex run and ignores your message.",
+		"The launcher returns verilex's own JSON verdict and ignores your message. A red from any of your verilex runs is the result.\n",
+		"Otherwise your last verilex run is the result.",
 		"# Task\nProve the intent now.",
 	} {
 		if !strings.Contains(text, want) {
@@ -186,7 +187,7 @@ func TestRealHarnessStaysOptIn(t *testing.T) {
 func TestSameHomeIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")
-	fake := writeFake(t, dir, fakeFiles{ticket: ticketJSON("stub", "stub"), run: claimRun("green", "hold", nil, nil)})
+	fake := writeFake(t, dir, fakeFiles{ticket: ticketJSON("stub", "stub"), run: claimRun("green", "hold", []string{"store-opened"}, nil)})
 	brain := writeBrain(t, dir, holdBrain+"verilex run --json 'store-open'\n")
 	held := launchHeld(t, dir, fake, brain, "--home", home, "--intent", "prove the store opens", "--harness", "stub", "--model", "stub")
 	_, stderr, code := launch(t, dir, fake, brain, "--home", home, "--intent", "prove the store opens", "--harness", "stub", "--model", "stub")
@@ -352,13 +353,52 @@ type fakeFiles struct {
 	plan    []byte
 	run     []byte
 	runExit int
+	// runs, when set, answers each verilex run in turn instead of run.
+	runs []fakeRun
+	// index answers verilex index; by default the intent names store-opened.
+	index []byte
 }
+
+type fakeRun struct {
+	body []byte
+	exit int
+}
+
+// fakeScript is a verilex that answers each subcommand from the files the FAKE_* variables name.
+const fakeScript = `#!/bin/sh
+cmd=
+prev=
+for arg in "$@"; do
+  case "$prev" in
+    --project|--continue|--ticket|--intent|--changed|--implements|--verdict|--same-as|--claim|--claims|--diff) prev=; continue ;;
+  esac
+  case "$arg" in
+    --project|--continue|--ticket|--intent|--changed|--implements|--verdict|--same-as|--claim|--claims|--diff) prev=$arg; continue ;;
+    --*) continue ;;
+    *) cmd=$arg; break ;;
+  esac
+done
+case "$cmd" in
+  ticket) cat "$FAKE_TICKET"; exit 0 ;;
+  index) cat "$FAKE_INDEX"; exit 0 ;;
+  plan) cat "$FAKE_PLAN"; exit 0 ;;
+  run)
+    if [ -n "$FAKE_RUNS" ]; then
+      n=$(($(cat "$FAKE_RUNS/count" 2>/dev/null || echo 0) + 1))
+      echo "$n" > "$FAKE_RUNS/count"
+      cat "$FAKE_RUNS/$n.json"
+      exit "$(cat "$FAKE_RUNS/$n.exit")"
+    fi
+    cat "$FAKE_RUN"; exit "$FAKE_RUN_EXIT" ;;
+  runs) echo '[]'; exit 0 ;;
+  *) echo "fake verilex: unexpected $cmd" >&2; exit 2 ;;
+esac
+`
 
 func writeFake(t *testing.T, dir string, files fakeFiles) string {
 	t.Helper()
 	path := filepath.Join(dir, "fake-verilex")
-	script := "#!/bin/sh\ncmd=\nprev=\nfor arg in \"$@\"; do\n  case \"$prev\" in\n    --project|--continue|--ticket|--intent|--changed|--implements|--verdict|--same-as|--claim|--claims|--diff) prev=; continue ;;\n  esac\n  case \"$arg\" in\n    --project|--continue|--ticket|--intent|--changed|--implements|--verdict|--same-as|--claim|--claims|--diff) prev=$arg; continue ;;\n    --*) continue ;;\n    *) cmd=$arg; break ;;\n  esac\ndone\ncase \"$cmd\" in\n  ticket) cat \"$FAKE_TICKET\"; exit 0 ;;\n  plan) cat \"$FAKE_PLAN\"; exit 0 ;;\n  run) cat \"$FAKE_RUN\"; exit \"$FAKE_RUN_EXIT\" ;;\n  runs) echo '[]'; exit 0 ;;\n  *) echo \"fake verilex: unexpected $cmd\" >&2; exit 2 ;;\nesac\n"
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	if err := os.WriteFile(path, []byte(fakeScript), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	write := func(name string, body []byte) string {
@@ -371,10 +411,26 @@ func writeFake(t *testing.T, dir string, files fakeFiles) string {
 		}
 		return p
 	}
+	if files.index == nil {
+		files.index = []byte(`[{"claim":"store-opened"}]` + "\n")
+	}
 	t.Setenv("FAKE_TICKET", write("ticket.json", files.ticket))
+	t.Setenv("FAKE_INDEX", write("index.json", files.index))
 	t.Setenv("FAKE_PLAN", write("plan.json", files.plan))
 	t.Setenv("FAKE_RUN", write("run.json", files.run))
 	t.Setenv("FAKE_RUN_EXIT", fmt.Sprint(files.runExit))
+	t.Setenv("FAKE_RUNS", "")
+	if len(files.runs) > 0 {
+		runs := filepath.Join(dir, "runs")
+		if err := os.MkdirAll(runs, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for i, run := range files.runs {
+			write(filepath.Join("runs", fmt.Sprintf("%d.json", i+1)), run.body)
+			write(filepath.Join("runs", fmt.Sprintf("%d.exit", i+1)), []byte(fmt.Sprintf("%d\n", run.exit)))
+		}
+		t.Setenv("FAKE_RUNS", runs)
+	}
 	return path
 }
 
@@ -409,27 +465,10 @@ func launchRaw(dir, verilex, brain string, args ...string) (string, string, int,
 
 // launchEnv runs the launcher with env added to the test's environment.
 func launchEnv(dir, verilex, brain string, env []string, args ...string) (string, string, int, error) {
-	skill := filepath.Join(dir, "skill.md")
-	if _, err := os.Stat(skill); err != nil {
-		if err = os.WriteFile(skill, []byte("skill text\n"), 0o600); err != nil {
-			return "", "", 0, err
-		}
+	argv, err := launcherArgs(dir, verilex, brain, args...)
+	if err != nil {
+		return "", "", 0, err
 	}
-	// A test that passes no --project gets dir/project, a git repository beside its fake files.
-	project := filepath.Join(dir, "project")
-	if _, err := os.Stat(filepath.Join(project, ".git")); err != nil && !slices.Contains(args, "--project") {
-		if err = os.MkdirAll(project, 0o700); err != nil {
-			return "", "", 0, err
-		}
-		if err = commitAll(project); err != nil {
-			return "", "", 0, err
-		}
-	}
-	argv := []string{"--verilex", verilex, "--skill", skill, "--project", project}
-	if brain != "" {
-		argv = append(argv, "--brain", brain)
-	}
-	argv = append(argv, args...)
 	cmd := exec.Command(agentBin, argv...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
@@ -442,6 +481,31 @@ func launchEnv(dir, verilex, brain string, env []string, args ...string) (string
 		return string(out), "", 0, err
 	}
 	return string(out), string(exit.Stderr), exit.ExitCode(), nil
+}
+
+// launcherArgs is a test's launcher command line, with a skill and, unless args name one, a
+// project: dir/project, a git repository beside the test's fake files.
+func launcherArgs(dir, verilex, brain string, args ...string) ([]string, error) {
+	skill := filepath.Join(dir, "skill.md")
+	if _, err := os.Stat(skill); err != nil {
+		if err = os.WriteFile(skill, []byte("skill text\n"), 0o600); err != nil {
+			return nil, err
+		}
+	}
+	project := filepath.Join(dir, "project")
+	if _, err := os.Stat(filepath.Join(project, ".git")); err != nil && !slices.Contains(args, "--project") {
+		if err = os.MkdirAll(project, 0o700); err != nil {
+			return nil, err
+		}
+		if err = commitAll(project); err != nil {
+			return nil, err
+		}
+	}
+	argv := []string{"--verilex", verilex, "--skill", skill, "--project", project}
+	if brain != "" {
+		argv = append(argv, "--brain", brain)
+	}
+	return append(argv, args...), nil
 }
 
 // kept is a launcher run whose run directory the test reads afterwards.

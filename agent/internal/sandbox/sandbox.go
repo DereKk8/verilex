@@ -142,7 +142,9 @@ func start(ctx context.Context, spec Spec, v *view, self string, eg *egress.Prox
 	cmd.Stdin = spec.Stdin
 	cmd.Stdout = spec.Stdout
 	cmd.Stderr = spec.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// A session of its own: the brain has no controlling terminal, so it cannot write into the
+	// terminal the launcher runs in. The session is also the process group Kill ends.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	err = cmd.Start()
 	cfgRead.Close()
 	readyWrite.Close()

@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "summary": "Adds verilex-agent, a launcher in its own agent/ module that returns verilex's own claim-run verdict, refuses a green when the brain edited the project, bypassed the proxy or outran the budget, and keeps harness code out of the core through a CI check.",
+  "files": [
+    {
+      "path": "agent/internal/tree/tree.go",
+      "summary": "Records each file git tracks or would track, with its stat, so the launcher sees any edit by the brain.",
+      "annotations": [
+        {
+          "newRange": [17, 45],
+          "summary": "Snapshot keys every non-ignored file by mode, size, mtime, inode change time, inode and device.",
+          "rationale": "The inode change time cannot be set back by an unprivileged process, so an edit that restores the bytes and mtime is still seen (tester finding F1). Git ignore rules exclude build output a run may write; if a brain edits an ignored file, that is not detected. Verified by TestBrainThatEditsTheProjectGetsNoVerdict, including the edit-and-restore case, and by a mutation that disabled the check.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/verdict/verdict.go",
+      "summary": "Decides whether the brain's last verilex run may be returned as the spec's verdict.",
+      "annotations": [
+        {
+          "newRange": [74, 117],
+          "summary": "Exit requires verilex's exit to equal its verdict code; Check refuses a green that is not a claim run covering every launcher claim and diff path.",
+          "rationale": "A brain can run a narrow or unrelated chain that is truly green, so returning it would be a false green for the spec. verilex's requested field is read instead of the brain's flags. Verified by TestGreenThatDoesNotCoverTheSpecIsInconclusive against the real core, and by a mutation that disabled Check.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/run/run.go",
+      "summary": "One launcher invocation: resolve the spec, snapshot the project, run the brain, check the project and home, return verilex's verdict.",
+      "annotations": [
+        {
+          "newRange": [169, 190],
+          "summary": "After the brain, the proxy closes first, then the project and the run's home are checked before any verdict is read.",
+          "rationale": "Closing the proxy first means no verilex run can finish after the checks. A changed project or a home with a kept instance or a run the proxy did not start makes the result inconclusive (tester findings F1 and F5). Verified by TestBrainThatEditsTheProjectGetsNoVerdict and TestBrainThatBypassesTheLauncherGetsNoVerdict.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [227, 260],
+          "summary": "cleanHome tears down every kept or pending instance in the home and names runs the proxy did not start.",
+          "rationale": "The brain is the same user with a shell, so it can call the real binary; the launcher cannot stop that without a sandbox (finding F2, pending a decision), but it can see and undo what lands in its own home.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [323, 370],
+          "summary": "runBrain kills the process group when the brain exits or the deadline passes, and WaitDelay stops held pipes from blocking.",
+          "rationale": "Before, cmd.Wait waited for every holder of the stderr pipe, so a background or setsid child stretched or overran the budget (finding F4). One deadline now covers --suggest too. Verified by TestBudgetBoundsTheRunWhateverTheBrainStarts; removing WaitDelay fails it.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [446, 465],
+          "summary": "changedFiles uses -z and --no-renames, so paths are unquoted and both sides of a rename count.",
+          "rationale": "With renames on, only the new path was required, so verilex lost the missed-claim warning for the old one; quotePath turned non-ASCII names into quoted literals (finding F3). Verified by TestDiffKeepsRenamesAndNonASCIIPaths.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "scripts/boundary.go",
+      "summary": "CI check that fails if cmd/ or internal/ import the agent module or name a harness.",
+      "annotations": [
+        {
+          "newRange": [1, 98],
+          "summary": "The check parses Go and scans only imports, string literals and comments.",
+          "rationale": "A bash version matched identifiers, so the claim planner's loop index pi was reported as the pi harness. Verified by the boundary table test in agent/e2e_test.go.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    }
+  ]
+}

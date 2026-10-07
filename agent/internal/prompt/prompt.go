@@ -18,8 +18,19 @@ type Input struct {
 	Suggestions []string
 }
 
-// Build returns the prompt. Skill bytes are copied as written.
-func Build(in Input) string {
+// Verify returns the prompt of the run phase: the skill, the run spec, the rules and the task.
+func Verify(in Input) string {
+	return shared(in) + "\n# Task\nProve the intent now. Run verilex yourself, by the rules above, until your last verilex run prints its verdict. Do not ask for instructions: nobody reads your reply.\n"
+}
+
+// Suggest returns the prompt of the suggest phase, which asks for extra claims and must not run
+// verilex.
+func Suggest(in Input) string {
+	return shared(in) + "\n# Suggest\nReply with one JSON object and nothing else: {\"claims\":[\"name\"]}.\nDo not call verilex. A suggestion is not a verdict and not a ceiling.\n"
+}
+
+// shared is what both phases are given. Skill bytes are copied as written.
+func shared(in Input) string {
 	var b strings.Builder
 	b.WriteString("# verilex agent skill\n")
 	b.Write(in.Skill)

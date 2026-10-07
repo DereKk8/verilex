@@ -384,20 +384,69 @@ verilex-agent --ticket deep.yaml --project . --skill skills/verilex/SKILL.md
 verilex-agent --diff main...HEAD --claim item-listed --harness claude-code --model <model> --allow-harness
 ```
 
-The project must be in a git work tree. The brain's `verilex` command is the launcher's: it may run `index`, `plan`, `run`, `words`, `claims`, `runs`, `ticket` and `check`, never with `--keep` or `--continue`; every `run` and `plan` carries the run spec as `--ticket`, so the run record names the brain. A green is returned only from a `verilex-claim-run-1` run whose `requested` holds every `--claim` given to the launcher (`named` or `claims`) and every path the diff changes (`git diff --name-only -z --no-renames --relative <diff>` in the project, so both sides of a rename count).
+The project must be in a git work tree. The brain's `verilex` command is the launcher's, and the only one its sandbox shows: it may run `index`, `plan`, `run`, `words`, `claims`, `runs`, `ticket` and `check`, never with `--keep` or `--continue`; every `run` and `plan` carries the run spec as `--ticket`, so the run record names the brain. A green is returned only from a `verilex-claim-run-1` run whose `requested` holds every `--claim` given to the launcher (`named` or `claims`) and every path the diff changes (`git diff --name-only -z --no-renames --relative <diff>` in the project, so both sides of a rename count).
 
 The launcher returns no verdict, but prints `verilex-agent: inconclusive: <reason>` on stderr, nothing on stdout, and exits `2`, when:
 
 - the green does not cover the spec as above, or verilex's exit does not match its verdict;
 - the brain ran no verilex run, or `time_budget` ended. One deadline covers `--suggest` and the run, and no child the brain started holds the launcher past it;
-- the brain changed the project: a file git tracks or would track (ignored files are not checked) was added, removed, written or touched between the start of the brain and its end, even if the bytes were put back;
+- the sandbox could not start or did not hold (see [Sandbox](#sandbox));
+- the project changed during the run: a file git tracks or would track (ignored files are not checked) was added, removed, written or touched between the start of the brain and its end, even if the bytes were put back;
 - the run's home holds a run that did not come through the launcher, or a kept instance. The launcher tears down every instance left in the home.
 
 A red or inconclusive verdict is returned as verilex printed it. Exit codes are verilex's: `0` green, `1` red, `2` inconclusive or refused. `--text` prints the verdict line and each gap instead of the JSON.
 
 With `--suggest`, the brain is first asked, with the launcher's `verilex` blocked, for extra claims; they reach the run prompt as suggestions, never as a verdict or a ceiling. Each run gets its own state home, so two runs do not share a mutable instance. Pass the same `--ledger` to keep skip savings. A second run that reuses a home still in use is refused.
 
-The launcher does not sandbox the brain. The brain runs as the same user with a shell, so it can still call the real `verilex` binary with another home, or write the shared ledger directly; a forged pass in the ledger can make a run skip to green. The checks above catch a brain that edits the code under test or leaves state in its own home, not one that sets out to forge evidence.
+### Sandbox
+
+The brain runs untrusted, in a sandbox: bubblewrap (`bwrap`) on Linux, `sandbox-exec` on macOS. In the sandbox, the brain:
+
+- reads the project, the system directories, the directories on its `PATH`, its own executable or install directory, and its harness's credential files, all read-only;
+- writes only `<run>/brain`, which holds its `HOME` and its `TMPDIR` (`/tmp` on Linux);
+- cannot reach the verilex home, the ledger, the real `verilex` binary (`--verilex`, and any other `verilex` on `PATH`), `VERILEX_HOME`, `VERILEX_LEDGER` or the run's logs. Each one is missing, or shows as an empty directory or as `/dev/null`;
+- runs verilex only through `<run>/share/bin/verilex`, which sends each command to the launcher. The launcher runs it with its own home and ledger;
+- reaches the network only through an egress proxy (`HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY`). The proxy serves `CONNECT` to public addresses only. It refuses loopback, private, link-local, CGNAT and reserved addresses, and the host's own addresses;
+- on Linux, sees only its own processes and has no host network, IPC or abstract sockets. Every process it starts ends with the run.
+
+Before the brain starts, a helper inside the sandbox checks that the project refuses a new file, that each hidden path shows nothing, and that a port on the host's loopback is out of reach. When the sandbox tool is missing or fails, or a check fails, the brain does not run, and the launcher prints `verilex-agent: inconclusive: the brain runs only in a sandbox, and the sandbox is not available here: <reason>`. The launcher never runs a brain without the sandbox.
+
+Linux needs `bwrap` and unprivileged user namespaces. Ubuntu 23.10 and later allow user namespaces only to a program that an AppArmor profile names. CI adds this profile:
+
+```
+printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile bwrap /usr/bin/bwrap flags=(unconfined) {\n  userns,\n}\n' | sudo tee /etc/apparmor.d/bwrap
+sudo apparmor_parser -r /etc/apparmor.d/bwrap
+```
+
+Containers often block user namespaces (Docker's default seccomp profile does), so run the launcher on the host or in a VM. macOS uses `/usr/bin/sandbox-exec`, which ships with the system. Other systems have no sandbox, so each run there is inconclusive.
+
+Each run keeps its files in one directory, `$TMPDIR/verilex-agent-*`, or under `/tmp` when `$TMPDIR` is longer than 40 characters (unix socket paths are short):
+
+```
+verilex-agent-*/
+  share/       prompt.txt, suggest.txt, bin/verilex   brain reads
+  brain/       home/, tmp/                            brain writes
+  log/         verify.out, verify.err, suggest.out, suggest.err,
+               verilex.log, egress.log
+  sock/        the socket behind bin/verilex
+  sandbox/     per phase: egress.sock (Linux) or sandbox.sb (macOS)
+  home/        the verilex home, when --home is not given
+  ticket.yaml  the run spec
+```
+
+The launcher removes the directory at the end. With `--keep-work`, it keeps the directory and prints `verilex-agent: run files kept in <dir>`. `log/verilex.log` lists each verilex command the brain sent to the launcher, with its exit code or the refusal. `log/egress.log` lists each network request and whether the proxy refused it.
+
+A built-in harness gets only its credential file, read-only, at the same place in its own home: `~/.claude/.credentials.json` for `claude` and `claude-code`, `~/.codex/auth.json` for `codex`, and `~/.pi/agent/auth.json` for `pi`. The user's other harness settings are not there. The built-in harnesses run with their own permission prompts and sandbox off (`--permission-mode bypassPermissions` for claude, `--dangerously-bypass-approvals-and-sandbox` for codex), because the launcher's sandbox is the boundary and a headless brain cannot answer a prompt. In a `--harnesses` file, a harness is an argv list or `{"argv": [...], "files": [...]}`. A `~/` file shows at the same place in the brain's home, and any other file at its own path.
+
+The sandbox does not cover these cases:
+
+- The brain can reach any public address, so a service that the project publishes on a public address is reachable.
+- On Linux, a unix socket inside a readable directory, such as the project, stays reachable.
+- On macOS, a process that the brain detaches from its process group can outlive the run. The process keeps the sandbox's limits.
+- The egress proxy serves only `CONNECT`. A client that sends plain HTTP requests to the proxy gets `405`.
+- A harness cannot save a token that it refreshes during a run. If the provider rotates refresh tokens, log in again on the host when the harness reports an expired login.
+
+The project check and the home check in the list above stay as defense in depth. The brain can no longer cause either one, but they still catch a change that something outside the sandbox makes during the run, and a run that something starts around the launcher in its home.
 
 ## The word lifecycle
 
@@ -616,6 +665,8 @@ go build -o verilex ./cmd/verilex
 
 The Go behavior tests drive the compiled CLI against tally. The sample product and its words
 use Python 3, so tests require `python3` and a POSIX shell. The verilex core does not require Python.
+The launcher's tests (`cd agent && go test ./...`) run each brain in the [sandbox](#sandbox), so they
+also need `bwrap` on Linux or `sandbox-exec` on macOS.
 
 `scripts/ci` runs the whole blocking set that CI runs. Its `canary` step has verilex prove its own
 claims: the repository's `.verilex/` holds words that build the verilex under test from the checkout and drive it

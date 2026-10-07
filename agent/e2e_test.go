@@ -115,7 +115,7 @@ func TestSkillIntentAndSuggestionsReachTheBrain(t *testing.T) {
 		ticket: []byte("{\"diff\":\"HEAD\",\"harness\":\"stub\",\"model\":\"stub\",\"effort\":\"low\"}\n"),
 		run:    claimRun("green", "r4", []string{"store-opened"}, []string{"notes.txt"}),
 	})
-	brain := writeBrain(t, dir, "#!/bin/sh\nif [ \"$VERILEX_AGENT_PHASE\" = suggest ]; then\n  printf '%s\\n' '{\"claims\":[\"item-added\"]}'\n  exit 0\nfi\ncat > \"$HOME/stdin\"\ncp \"$VERILEX_AGENT_PROMPT\" \"$HOME/prompt\"\nverilex run --named store-opened --changed notes.txt\n")
+	brain := writeBrain(t, dir, "#!/bin/sh\nif [ \"$VERILEX_AGENT_PHASE\" = suggest ]; then\n  cp \"$VERILEX_AGENT_PROMPT\" \"$HOME/suggest\"\n  printf '%s\\n' '{\"claims\":[\"item-added\"]}'\n  exit 0\nfi\ncat > \"$HOME/stdin\"\ncp \"$VERILEX_AGENT_PROMPT\" \"$HOME/prompt\"\nverilex run --named store-opened --changed notes.txt\n")
 	run := launchKept(t, dir, fake, brain, "--skill", skill, "--suggest", "--diff", "HEAD", "--claim", "store-opened", "--harness", "stub", "--model", "stub")
 	stdout := run.stdout
 	if run.code != 0 {
@@ -133,10 +133,15 @@ func TestSkillIntentAndSuggestionsReachTheBrain(t *testing.T) {
 		"changed: notes.txt",
 		"suggestion: item-added",
 		"The launcher returns verilex's own JSON verdict from your last verilex run and ignores your message.",
+		"# Task\nProve the intent now.",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("prompt missing %q\n%s", want, text)
 		}
+	}
+	// The suggest phase asks for claims only: it carries no task to run verilex.
+	if suggest := run.home(t, "suggest"); !strings.Contains(suggest, "# Suggest\n") || !strings.Contains(suggest, "Do not call verilex.") || strings.Contains(suggest, "# Task") {
+		t.Fatalf("suggest prompt:\n%s", suggest)
 	}
 	if strings.Contains(stdout, "item-added") {
 		t.Fatalf("suggestion JSON became the verdict: %s", stdout)

@@ -46,8 +46,8 @@ func command(spec Spec, v *view, self string, egressAddr net.Addr) (*exec.Cmd, [
 }
 
 // seatbelt is the profile. Seatbelt applies the last rule that matches, so the order is: read
-// everything, deny the user and temporary areas, allow what the view lists, then deny what must
-// stay hidden.
+// everything, deny the user and temporary areas, allow what the view lists, then deny reading,
+// writing and running what must stay hidden. Running needs its own rule: exec does not read.
 func seatbelt(spec Spec, v *view, port string) (string, error) {
 	var b strings.Builder
 	b.WriteString(base)
@@ -77,7 +77,7 @@ func seatbelt(spec Spec, v *view, port string) (string, error) {
 	if err := rule(&b, "allow file-read*", readable, nil); err != nil {
 		return "", err
 	}
-	if err := rule(&b, "deny file-read* file-write*", append(v.hide, v.checks...), nil); err != nil {
+	if err := rule(&b, "deny file-read* file-write* process-exec", append(v.hide, v.checks...), nil); err != nil {
 		return "", err
 	}
 	b.WriteString("(allow file-read-metadata (vnode-type DIRECTORY))\n")

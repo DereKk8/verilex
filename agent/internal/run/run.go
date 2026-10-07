@@ -182,7 +182,7 @@ func Run(opts Options) (result Result, err error) {
 		}
 		return Result{}, phaseError(err)
 	}
-	text := prompt.Build(prompt.Input{
+	text := prompt.Verify(prompt.Input{
 		Skill: skill, Intent: intent, Diff: spec.Diff,
 		Named: opts.Claims, Changed: changed, Suggestions: suggestions,
 	})
@@ -439,9 +439,7 @@ func (l *launch) suggest(ctx context.Context, skill []byte, intent, diff string,
 	if !l.suggestOn {
 		return nil, nil
 	}
-	ask := prompt.Build(prompt.Input{Skill: skill, Intent: intent, Diff: diff, Named: l.named, Changed: changed})
-	ask += "\n# Suggest\nReply with one JSON object and nothing else: {\"claims\":[\"name\"]}.\n"
-	ask += "Do not call verilex. A suggestion is not a verdict and not a ceiling.\n"
+	ask := prompt.Suggest(prompt.Input{Skill: skill, Intent: intent, Diff: diff, Named: l.named, Changed: changed})
 	path := filepath.Join(l.d.share, "suggest.txt")
 	if err := os.WriteFile(path, []byte(ask), 0o600); err != nil {
 		return nil, err

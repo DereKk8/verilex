@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "summary": "Adds verilex-agent, a launcher in its own agent/ module that starts the run spec's brain and returns verilex's own claim-run verdict, plus a CI check that keeps harness code out of the core.",
+  "files": [
+    {
+      "path": "agent/internal/verdict/verdict.go",
+      "summary": "Decides whether the brain's last verilex run may be returned as the spec's verdict.",
+      "annotations": [
+        {
+          "newRange": [74, 117],
+          "summary": "Exit requires verilex's exit to equal its verdict code; Check refuses a green that is not a claim run covering every launcher claim and diff path.",
+          "rationale": "A brain can run a narrow or unrelated chain that is truly green, so returning it would be a false green for the spec. verilex's requested field is read instead of the brain's flags. Red and inconclusive stand as verilex printed them because they already carry their own evidence. Verified by TestGreenThatDoesNotCoverTheSpecIsInconclusive against the real core, and by a mutation that disabled Check and failed three of its four cases.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/proxy/proxy.go",
+      "summary": "Runs the real verilex for the brain over a socket and keeps the last run's JSON.",
+      "annotations": [
+        {
+          "newRange": [44, 56],
+          "summary": "allowed limits the brain to read-only commands plus plan and run.",
+          "rationale": "onboard, admit, propose, new and gap change what verilex trusts, and cleanup tears down instances, so a model running them would be deciding outcomes. Verified by TestBrainCannotChangeTrustOrKeepAnInstance and the agent-brain-limits recipe.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [207, 269],
+          "summary": "pinArgs forces --project, --json and the run spec's --ticket, and refuses --keep and --continue.",
+          "rationale": "A kept instance would outlive the run's temporary home and break the stateless contract. The ticket makes each run record name the brain's harness and model. Flags go right after the subcommand so a literal -- cannot turn them into a chain.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/run/run.go",
+      "summary": "One launcher invocation: resolve the spec, start the brain, return verilex's verdict.",
+      "annotations": [
+        {
+          "newRange": [94, 101],
+          "summary": "The harness command is resolved before any home, socket or brain exists.",
+          "rationale": "A missing --allow-harness is a refused spec, not an inconclusive run, so it fails before any work. Verified by TestRealHarnessStaysOptIn and the agent-no-harness recipe.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [356, 377],
+          "summary": "changedFiles refuses a diff git cannot read instead of returning an empty list.",
+          "rationale": "An empty list would make the coverage check vacuous, so a bad revision could pass a green. --relative keeps paths relative to the project, as verilex reads --changed. Verified by TestUnreadableDiffIsRefusedBeforeTheBrain.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "scripts/boundary.go",
+      "summary": "CI check that fails if cmd/ or internal/ import the agent module or name a harness.",
+      "annotations": [
+        {
+          "newRange": [1, 98],
+          "summary": "The check parses Go and scans only imports, string literals and comments.",
+          "rationale": "The first bash version matched identifiers, so the merged claim planner's loop index pi was reported as the pi harness. A harness driver needs a string literal to exec, so identifiers carry no signal. Verified by the boundary table test in agent/e2e_test.go, including raw strings and the pi case.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    }
+  ]
+}

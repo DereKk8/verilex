@@ -87,7 +87,9 @@ func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
 		claimDeps[name] = deps
 	}
 	for name, deps := range claimDeps {
-		if covers(deps) || sectionHit(typed, runbook[name], hashes[name], mapped) {
+		pathHit := covers(deps)
+		refHit := sectionHit(typed, runbook[name], hashes[name], mapped)
+		if pathHit || refHit {
 			hit.claims[ix.groupOf(name)] = true
 		}
 	}
@@ -120,7 +122,9 @@ func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
 		}
 		refs = append(refs, w.Depends.Runbook...)
 		reason := declaredHit(w, typed, mapped)
-		if covers(deps) || reason != "" || sectionHit(typed, refs, digests, mapped) {
+		pathHit := covers(deps)
+		refHit := sectionHit(typed, refs, digests, mapped)
+		if pathHit || reason != "" || refHit {
 			hit.covered[w.Name] = true
 			if reason != "" {
 				hit.forcedWords[w.Name] = reason

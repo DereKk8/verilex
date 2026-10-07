@@ -415,6 +415,88 @@ func TestPlanSaysChainRunsLive(t *testing.T) {
 	}
 }
 
+// Rule: every matching runbook entry is mapped, even beside another dependency that hits
+// the same claim. Unrelated entries still warn beside a mapped path.
+func TestRunbookChangeMapsBesideClaimDependencies(t *testing.T) {
+	const claimRef = "runbook:verify-tally/features/items.md#item-add"
+	const wordRef = "runbook:verify-tally/features/items.md#word-only"
+	const feature = ".cursor/skills/verify-tally/features/items.md"
+	const claim = ".verilex/claims/item-added.yaml"
+	for _, tc := range []struct {
+		name, path, ref string
+		unmapped        []string
+	}{
+		{"feature-and-source", feature, claimRef, nil},
+		{"claim-and-source", claim, claimRef, nil},
+		{"feature-and-word-ref", feature, wordRef, nil},
+		{"claim-and-word-ref", claim, wordRef, nil},
+		{"config-and-word-ref", "config:tally.store", wordRef, nil},
+		{"unrelated-runbook", claim, "runbook:verify-tally/features/items.md#unrelated", []string{"runbook:verify-tally/features/items.md#unrelated"}},
+		{"unrelated-path", claim, "unrelated.txt", []string{"unrelated.txt"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := product(t)
+			word := filepath.Join(root, ".verilex", "words", "item-stored", "word.md")
+			replace(t, word, strings.Replace(read(t, word), "depends:\n", "depends:\n  runbook: [verify-tally/features/items.md#word-only]\n", 1))
+			admitted(t, root)
+			green(t, root, nil, chain)
+			green(t, root, nil, chain)
+			alone := planClaims(t, root, "--changed", wordRef)
+			equal(t, alone.Selected, []string{"item-added"})
+			equal(t, alone.Warning, "")
+			changes := []string{"--changed", tc.path, "--changed", tc.ref}
+			warning := ""
+			if len(tc.unmapped) != 0 {
+				warning = "1 change no word covers"
+			}
+			plan := planClaims(t, root, changes...)
+			contains(t, strings.Join(plan.Selected, ","), "item-added")
+			equal(t, plan.Unmapped, tc.unmapped)
+			equal(t, plan.Warning, warning)
+			for _, command := range []string{"plan", "run"} {
+				human := verilex(t, root, nil, append([]string{command}, changes...)...)
+				equal(t, human.code, 0)
+				if warning != "" {
+					contains(t, human.stdout, warning)
+					contains(t, human.stdout, "unmapped  "+tc.ref)
+				} else if strings.Contains(human.stdout, "unmapped") || strings.Contains(human.stdout, "change no word covers") {
+					t.Fatalf("false warning: %s", human.stdout)
+				}
+			}
+			type runRecord struct {
+				Run, Verdict, Warning string
+				Unmapped              []string
+			}
+			run := verilex(t, root, nil, append([]string{"run", "--json"}, changes...)...)
+			equal(t, run.code, 0)
+			var record runRecord
+			if err := json.Unmarshal([]byte(run.stdout), &record); err != nil {
+				t.Fatal(err)
+			}
+			equal(t, record.Verdict, "green")
+			equal(t, record.Unmapped, tc.unmapped)
+			equal(t, record.Warning, warning)
+			runs := verilex(t, root, nil, "runs", "--json")
+			equal(t, runs.code, 0)
+			var records []runRecord
+			if err := json.Unmarshal([]byte(runs.stdout), &records); err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, saved := range records {
+				if saved.Run == record.Run {
+					found = true
+					equal(t, saved.Verdict, "green")
+					equal(t, saved.Warning, warning)
+				}
+			}
+			if !found {
+				t.Fatalf("run %s missing from runs: %s", record.Run, runs.stdout)
+			}
+		})
+	}
+}
+
 // Rule: a diff entry no word depends on, a touched word with no claim, and a touched word the
 // chain does not drive are each counted in the verdict's warning, never dropped beside a
 // mapped entry. The tally here reads its defect from lib/mode, which no word declares.

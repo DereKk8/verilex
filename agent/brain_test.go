@@ -266,9 +266,12 @@ func TestBrainCannotForgeTheLedgerOrLeaveItsSandbox(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(sockDir) })
 	hostSock, sockHits := listen(t, "unix", filepath.Join(sockDir, "host.sock"))
 	_, port, _ := net.SplitHostPort(canary)
+	// Loopback by address and by name, private, link-local (the cloud metadata address) and
+	// carrier-grade NAT: none is public, so the egress proxy refuses each before it dials.
+	targets := []string{"127.0.0.1", "localhost", "[::1]", "10.0.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1"}
 	for key, value := range map[string]string{
 		"LEDGER": ledger, "AGENT_HOME": home, "PRODUCT": product, "REAL_VERILEX": coreBin,
-		"CANARY": port, "HOST_SOCK": hostSock,
+		"CANARY": port, "HOST_SOCK": hostSock, "PRIVATE_TARGETS": strings.Join(targets, " "),
 	} {
 		t.Setenv(key, value)
 	}
@@ -288,10 +291,10 @@ try "read home" sh -c 'find "$AGENT_HOME" -type f | grep -q .'
 try "run the real verilex" "$REAL_VERILEX" --help
 try "host loopback" python3 -c 'import os, socket; socket.create_connection(("127.0.0.1", int(os.environ["CANARY"])), 2)'
 try "host socket" python3 -c 'import os, socket; s = socket.socket(socket.AF_UNIX); s.connect(os.environ["HOST_SOCK"])'
-try "egress to loopback" python3 -c '
+try "egress to the host or a private network" python3 -c '
 import os, socket, sys
 host, port = os.environ["HTTPS_PROXY"].split("//")[1].rstrip("/").rsplit(":", 1)
-for target in ("127.0.0.1", "localhost"):
+for target in os.environ["PRIVATE_TARGETS"].split():
     s = socket.create_connection((host, int(port)), 5)
     s.sendall(("CONNECT %s:%s HTTP/1.1\r\nHost: %s\r\n\r\n" % (target, os.environ["CANARY"], target)).encode())
     if b" 200 " in s.recv(200):
@@ -346,8 +349,13 @@ verilex run --claim item-listed > /dev/null
 		}
 	}
 	egress, err := os.ReadFile(filepath.Join(run.root, "log", "egress.log"))
-	if err != nil || !strings.Contains(string(egress), "refused CONNECT 127.0.0.1:"+port) || !strings.Contains(string(egress), "refused CONNECT localhost:"+port) {
-		t.Fatalf("the egress log does not record the refusals: %v\n%s", err, egress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range targets {
+		if !strings.Contains(string(egress), "refused CONNECT "+target+":"+port+": ") {
+			t.Fatalf("the egress log does not record the refusal of %s:\n%s", target, egress)
+		}
 	}
 }
 

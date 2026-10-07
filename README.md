@@ -402,7 +402,7 @@ With `--suggest`, the brain is first asked, with the launcher's `verilex` blocke
 
 The brain runs untrusted, in a sandbox: bubblewrap (`bwrap`) on Linux, `sandbox-exec` on macOS. In the sandbox, the brain:
 
-- reads the project, the system directories, the directories on its `PATH`, its own executable or install directory, and its harness's credential files, all read-only;
+- reads, and cannot write, the project, the system directories, the directories on its `PATH`, its own executable or install directory, the launcher's executable, the project's git directory when it lives elsewhere (a worktree), and its harness's credential files. On macOS it may also read the rest of the system outside `/Users`, `/Volumes`, the temporary directories and the user's home;
 - writes only `<run>/brain`, which holds its `HOME` and its `TMPDIR` (`/tmp` on Linux);
 - cannot reach the verilex home, the ledger, the real `verilex` binary (`--verilex`, and any other `verilex` on `PATH`), `VERILEX_HOME`, `VERILEX_LEDGER` or the run's logs. Each one is missing, or shows as an empty directory or as `/dev/null`;
 - runs verilex only through `<run>/share/bin/verilex`, which sends each command to the launcher. The launcher runs it with its own home and ledger;
@@ -440,6 +440,7 @@ A built-in harness gets only its credential file, read-only, at the same place i
 
 The sandbox does not cover these cases:
 
+- The brain gets the launcher's environment, except `HOME`, `TMPDIR`, the `XDG_*` directories, `NO_PROXY`, `VERILEX_HOME` and `VERILEX_LEDGER`. A secret in that environment reaches the brain, so start the launcher with only the variables the harness needs.
 - The brain can reach any public address, so a service that the project publishes on a public address is reachable.
 - On Linux, a unix socket inside a readable directory, such as the project, stays reachable.
 - On macOS, a process that the brain detaches from its process group can outlive the run. The process keeps the sandbox's limits.

@@ -35,15 +35,15 @@ smoke() { scripts/smoke; }
 canary_driver=de9405b18d66fb652b5febf59e8efe713c301872
 canary() (
   # verilex proves its own claims (.verilex/) on this checkout: live, in throwaway state, so no ledger
-  # written by earlier code can skip a step, and red when an admitted canary word drifted.
+  # written by earlier code can skip a step, and red when a canary word drifted or is not admitted.
   state="$(mktemp -d)"
   mkdir "$state/driver"
   git archive "$canary_driver" | tar -x -C "$state/driver"
   (cd "$state/driver" && go build -o "$state/verilex" ./cmd/verilex)
   export VERILEX_HOME="$state/home" VERILEX_LEDGER="$state/ledger" XDG_CONFIG_HOME="$state/config" \
     CANARY_INSTANCES="$state/instances"
-  chain=""
-  for word in .verilex/words/*/; do word="${word%/}"; chain="${chain:+$chain | }${word##*/}"; done
+  chain="" words=0
+  for word in .verilex/words/*/; do word="${word%/}"; chain="${chain:+$chain | }${word##*/}"; words=$((words + 1)); done
   changed=()
   if base="$(git merge-base origin/main HEAD 2>/dev/null)"; then
     while IFS= read -r path; do changed+=(--changed "$path"); done < <(git diff --name-only "$base")
@@ -54,7 +54,8 @@ canary() (
   "$state/verilex" run --fresh "${changed[@]}" "$chain" || ok=false
   drift="$("$state/verilex" check)" || ok=false
   echo "$drift"
-  [[ "$drift" == "check: no drift"* ]] || ok=false
+  # Every canary word must be admitted: a word turned provisional is not drift, so the count is the check.
+  [ "$drift" = "check: no drift ($words admitted)" ] || ok=false
   if $ok; then rm -rf "$state"; return; fi
   echo "canary red: evidence kept in $state; reproduce with scripts/ci canary"
   return 1

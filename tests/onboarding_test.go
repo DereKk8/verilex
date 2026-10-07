@@ -542,6 +542,21 @@ func TestStepToClaimMappingIsChecked(t *testing.T) {
 	contains(t, onboard(t, root, "item-audit").stdout, "onboarded item-audit: variant of "+pinOf(t, root, "item-added")+" through claim item-audited, matched mechanically")
 }
 
+// A requirement sentence in a Sub-features bullet starts with its own id. The id names the step,
+// so it is no expected value: a claim that names the sentence's real values maps it.
+func TestLeadingSubFeatureLabelIsNoExpectedValue(t *testing.T) {
+	root := baseline(t)
+	write(t, feature(root, "label.md"), "# Label\n\nA user stores a named item.\n\n## Sub-features\n\n- `item-label` must print `added NAME`.\n\n## Driving it with the tally CLI\n\n- `item-label`: Run `bin/tally --store \"$STORE\" add NAME`. Expect exit 0 and `added NAME`; `store.json` lists NAME.\n", 0644)
+	labelled := claimLike(t, root, "item-labelled", [2]string{"  - ref: " + itemAdd + "\n    prose: 2948a95bd310\n    requirements:\n      - \"" + addRequirement + "\"", "  - ref: verify-tally/features/label.md#item-label\n    prose: 000000000000\n    requirements:\n      - \"`item-label` must print `added NAME`.\"\n      - \"" + addRequirement + "\""})
+	pinProse(t, root, "item-labelled")
+	variant(t, root, "item-label", labelled, storedRun(t, root))
+	done := verilex(t, root, nil, "onboard", "item-label")
+	if strings.Contains(done.stdout, "expected values") {
+		t.Fatalf("the sub-feature label was counted as an expected value: %q", done.stdout)
+	}
+	contains(t, done.stdout, "onboarded item-label: variant of "+pinOf(t, root, "item-added")+" through claim item-labelled, matched mechanically")
+}
+
 // pinProse pins each of a claim's sources to its sub-feature's prose as it is now, as the
 // claim's reviewer does.
 func pinProse(t *testing.T, root, name string) {

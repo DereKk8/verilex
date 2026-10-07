@@ -25,7 +25,7 @@ func mapping(c dictionary.Claim, anchors []featuremap.Anchor) string {
 	contract := strings.Join(append([]string{c.Sentence, c.Evidence.Action, c.Evidence.Observation}, c.Evidence.NonProofs...), "\n")
 	for _, anchor := range anchors {
 		for _, sentence := range anchor.Requirements {
-			literals := terms.Literals(sentence)
+			literals := terms.Literals(withoutLabel(sentence, anchor.Ref))
 			if len(literals) == 0 {
 				if len(terms.Shared(terms.Of(sentence), terms.Of(contract))) == 0 {
 					return fmt.Sprintf("claim %s maps %s to %q, which shares no term with the claim's sentence or evidence contract: map the step that proves the claim", c.Name, anchor.Ref, sentence)
@@ -39,6 +39,17 @@ func mapping(c dictionary.Claim, anchors []featuremap.Anchor) string {
 		}
 	}
 	return ""
+}
+
+// withoutLabel drops the sub-feature id a requirement sentence starts with, as in
+// "`item-add` must print ...": the id names the step, so it is not an expected value.
+func withoutLabel(sentence, ref string) string {
+	_, id, _ := strings.Cut(ref, "#")
+	rest, ok := strings.CutPrefix(sentence, "`"+id+"`")
+	if !ok || id == "" {
+		return sentence
+	}
+	return strings.TrimLeft(rest, ":. ")
 }
 
 // onlyNonProof returns the declared non-proof an observation shows when it shows nothing else

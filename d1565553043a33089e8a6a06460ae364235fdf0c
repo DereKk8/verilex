@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "summary": "Admission drift now covers the frame and the shared word files, the same binding the proof stamp hashes, so editing either makes every admitted word drift-suspect.",
+  "files": [
+    {
+      "path": "internal/fingerprint/fingerprint.go",
+      "summary": "New single owner of file hashing and of the binding: what every word runs with besides its own directory.",
+      "annotations": [
+        {
+          "newRange": [1, 161],
+          "summary": "Binding lists the frame directory and the non-word entries of .verilex/words; Tree and Part.Digest hash them exactly as stamp did before.",
+          "rationale": "Stamp, lifecycle drift, curation and index each read the set from here, so no copy can drift apart again. config.yaml is left out because renaming `project` models another product sharing the vocabulary (TestWordsAProductNeverUsedStayDormantForIt went red with it in). Interpreter caches are skipped because .pyc files differ between checkouts and would cause a permanent false red. Verified by go test ./... and scripts/ci; the cache rule is mutation-checked by TestInterpreterCacheBesideSharedWordFilesDriftsNothing.",
+          "author": "fm/verilex-drift-shared-files"
+        }
+      ]
+    },
+    {
+      "path": "internal/lifecycle/lifecycle.go",
+      "summary": "StatusOf compares the recorded binding fingerprints with the project now.",
+      "annotations": [
+        {
+          "newRange": [241, 273],
+          "summary": "bindingDrift adds one drift line per changed part, naming its paths, or one line when the judgment recorded no binding.",
+          "rationale": "A decision or admission written before this change has no binding, so it cannot show the word still runs with the current frame; it is drift-suspect until onboarded again, which is the safe direction under rule 4. Verified through verilex check in TestEditingSharedWordFilesOrFrameMarksEveryWordDriftSuspect, TestDecisionWithoutBindingIsDriftSuspect, and a verify-verilex session where the main build printed `check: no drift` and `plan: skip 3` after a forced-pass helper.",
+          "author": "fm/verilex-drift-shared-files"
+        }
+      ]
+    },
+    {
+      "path": "internal/onboarding/onboarding.go",
+      "summary": "Onboarding records the binding its trials ran with.",
+      "annotations": [
+        {
+          "newRange": [463, 465],
+          "summary": "record refuses when the binding changed between the start of onboarding and the decision.",
+          "rationale": "Without the guard, a frame edited while trials ran would be recorded as judged, so a false green could pass the gate. TestBindingChangedDuringOnboardingRecordsNothing fails when the guard is removed (mutation-checked). The word's own digest keeps its older record-time behavior; that race is unchanged.",
+          "author": "fm/verilex-drift-shared-files"
+        }
+      ]
+    },
+    {
+      "path": "internal/stamp/stamp.go",
+      "summary": "Stamp reads the binding from fingerprint and stamps config.yaml as its own component.",
+      "annotations": [
+        {
+          "newRange": [53, 62],
+          "summary": "config.yaml becomes the `config` stamp component, and `frame` now covers only the frame directory.",
+          "rationale": "The split keeps one binding owner while the stamp still covers config.yaml. Existing stamps stop matching once, so the first run after upgrade is live; old decisions are drift-suspect after upgrade anyway, so no extra cost. TestAnyChangedStampComponentForcesRerun now expects `config changed` for a config edit.",
+          "author": "fm/verilex-drift-shared-files"
+        }
+      ]
+    },
+    {
+      "path": "internal/curation/admit.go",
+      "summary": "Admit refuses a packet whose binding changed, and records the binding in admission.json.",
+      "annotations": [
+        {
+          "newRange": [92, 92],
+          "summary": "A changed frame or shared word file since the packet makes the verdict stale.",
+          "rationale": "The curator judged runs made with the packet's binding, so admitting after a change would admit something not judged. TestWordWithoutClaimDriftsWithSharedWordFilesAndFrame proves the refusal through verilex admit.",
+          "author": "fm/verilex-drift-shared-files"
+        }
+      ]
+    },
+    {
+      "path": "tests/rules_test.go",
+      "summary": "Stamp-change cases for the frame and shared files re-admit before expecting a skip.",
+      "annotations": [
+        {
+          "newRange": [227, 227],
+          "summary": "The shared, helper-directory and frame cases call admitted(t, root) after the edit, as the existing word-script case does.",
+          "rationale": "Those edits now make words drift-suspect, so the second identical run is only skipped after re-admission. The live-rerun assertion is unchanged, so no check is weaker.",
+          "author": "fm/verilex-drift-shared-files"
+        }
+      ]
+    }
+  ]
+}

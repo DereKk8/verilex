@@ -22,6 +22,7 @@ import (
 
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/featuremap"
+	"github.com/DereKk8/verilex/internal/fingerprint"
 	"github.com/DereKk8/verilex/internal/grouping"
 )
 
@@ -52,6 +53,8 @@ type Admission struct {
 	Runs       []string          `json:"runs"`
 	WordDigest string            `json:"word_digest"`
 	Sections   map[string]string `json:"sections"`
+	// Binding fingerprints the frame and the shared word files as the packet held them.
+	Binding map[string]string `json:"binding,omitempty"`
 }
 
 const admissionFile = "admission.json"
@@ -140,10 +143,11 @@ func Curated(g grouping.Grouping, w dictionary.Word) bool {
 }
 
 // StatusOf reports a word's lifecycle state. A word that proves a claim is admitted by its
-// onboarding decision in the grouping file, and drifts when its files, its claim version, the
-// claim it is grouped under, its claim's planted defects or the claim's review state no longer
-// match that decision. A word without a claim is admitted by its admission record, and drifts
-// when its files or stored section hashes no longer match the project.
+// onboarding decision in the grouping file, and drifts when its files, the frame or the shared
+// word files, its claim version, the claim it is grouped under, its claim's planted defects or
+// the claim's review state no longer match that decision. A word without a claim is admitted by
+// its admission record, and drifts when its files, the frame, the shared word files or stored
+// section hashes no longer match the project.
 func StatusOf(p dictionary.Project, w dictionary.Word) (Status, error) {
 	if w.Claim != nil {
 		return onboarded(p, w)
@@ -159,6 +163,9 @@ func StatusOf(p dictionary.Project, w dictionary.Word) (Status, error) {
 	}
 	if digest != a.WordDigest {
 		s.Drift = append(s.Drift, "the word's files changed since admission")
+	}
+	if err = s.bindingDrift(p, a.Binding, "admission", "propose it again"); err != nil {
+		return s, err
 	}
 	err = s.sectionDrift(p, w, a)
 	if len(s.Drift) > 0 {
@@ -187,6 +194,9 @@ func onboarded(p dictionary.Project, w dictionary.Word) (Status, error) {
 	}
 	if digest != d.Digest {
 		s.Drift = append(s.Drift, "the word's files changed since onboarding")
+	}
+	if err = s.bindingDrift(p, d.Binding, "onboarding", "onboard it again"); err != nil {
+		return s, err
 	}
 	switch {
 	case w.Stale != "":
@@ -226,6 +236,39 @@ func onboarded(p dictionary.Project, w dictionary.Word) (Status, error) {
 		s.State = Admitted
 	}
 	return s, err
+}
+
+// bindingDrift names each part of the binding, what every word runs with besides its own
+// directory, whose fingerprint differs from the one recorded when the word was judged at since.
+// A judgment recorded none, so it cannot say the word ran with the binding as it is now.
+func (s *Status) bindingDrift(p dictionary.Project, recorded map[string]string, since, again string) error {
+	parts, err := fingerprint.Binding(p)
+	if err != nil {
+		return err
+	}
+	if recorded == nil {
+		s.Drift = append(s.Drift, "the frame and the shared word files were not recorded at "+since+"; "+again)
+		return nil
+	}
+	for _, part := range parts {
+		digest, err := part.Digest()
+		if err != nil {
+			return fmt.Errorf("%s: %w", part.Label, err)
+		}
+		if digest == recorded[part.Name] {
+			continue
+		}
+		paths := make([]string, len(part.Names))
+		for i, path := range part.Paths() {
+			paths[i], _ = filepath.Rel(p.Root, path)
+		}
+		why := part.Label + " changed since " + since
+		if len(paths) > 0 {
+			why += " (" + strings.Join(paths, ", ") + ")"
+		}
+		s.Drift = append(s.Drift, why)
+	}
+	return nil
 }
 
 func (s *Status) sectionDrift(p dictionary.Project, w dictionary.Word, a *Admission) error {
@@ -305,7 +348,7 @@ func EachFile(w dictionary.Word, visit func(rel string, data []byte)) error {
 			return err
 		}
 		if d.IsDir() {
-			if d.Name() == "__pycache__" {
+			if fingerprint.Cache(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil

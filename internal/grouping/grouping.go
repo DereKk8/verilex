@@ -54,6 +54,10 @@ type Decision struct {
 	Entry string `yaml:"entry" json:"entry"`
 	// Digest fingerprints the word's files as onboarding judged them.
 	Digest string `yaml:"digest" json:"digest"`
+	// Binding fingerprints, by part, what the word ran with besides its own files as onboarding
+	// judged it: the frame and the shared word files (fingerprint.Binding). A decision recorded
+	// before verilex kept it has none.
+	Binding map[string]string `yaml:"binding,omitempty" json:"binding,omitempty"`
 	// Match says how the word was grouped: Same, Mechanical, Agent or New.
 	Match string `yaml:"match" json:"match"`
 	// Pending lists the grouped claims a New word's claim may say the same as, which only the
@@ -186,7 +190,7 @@ func (d Decision) normal() Decision {
 	for product, runs := range d.Uses {
 		uses[product] = append([]string{}, runs...)
 	}
-	d.Defects, d.Uses, d.GroupDefects = defects, uses, maps.Clone(d.GroupDefects)
+	d.Defects, d.Uses, d.GroupDefects, d.Binding = defects, uses, maps.Clone(d.GroupDefects), maps.Clone(d.Binding)
 	if len(d.Pending) == 0 {
 		d.Pending = nil
 	} else {

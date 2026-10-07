@@ -1,6 +1,6 @@
 # Check
 
-`verilex check` compares each admitted word with the project now: for a word that proves a claim, its onboarding decision (seal, word digest, claim version, planted defects) and the claim's review state; for a word without a claim, its admission record's word digest and stored section hashes. Changed word files, a decision edited by hand, a new planted defect, a claim that needs review, or a changed or missing section makes the word drift-suspect: it always runs and no earlier result is trusted for it. Drift is computed on every call, never cached.
+`verilex check` compares each admitted word with the project now: for a word that proves a claim, its onboarding decision (seal, word digest, frame and shared word files, claim version, planted defects) and the claim's review state; for a word without a claim, its admission record's word digest, frame and shared word files, and stored section hashes. Changed word files, a changed frame step or shared word file, a decision edited by hand, a new planted defect, a claim that needs review, or a changed or missing section makes the word drift-suspect: it always runs and no earlier result is trusted for it. Drift is computed on every call, never cached.
 
 ## Sub-features
 
@@ -8,6 +8,7 @@
 - `check-claim-review` reports a word whose claim needs review because a requirement sentence the claim maps to changed, and names the new sentence no claim maps yet (see [claims.md](claims.md)).
 - `check-section` reports a word without a claim whose implemented feature-map section changed.
 - `check-word` reports a word whose own files changed since onboarding.
+- `check-binding` reports every admitted word when a shared word file (a helper beside the word directories) or a frame step changed since onboarding, and nothing when only `config.yaml` changed.
 - `check-runs-live` makes a drift-suspect word's chain run live (`plan` names the drift).
 - `check-recovers` clears drift as soon as the requirement, section or files are restored.
 
@@ -28,6 +29,8 @@ Preconditions:
 - **No drift from prose.** Run `echo "- Drift probe" >> "$S/tally/.cursor/skills/verify-tally/features/store.md"`, then `"$S/vx" chk-prose verilex check`: `check: no drift (3 admitted)`, because the line is outside every sub-feature: it opens with no sub-feature id. Restore with `sed -i '$d' "$S/tally/.cursor/skills/verify-tally/features/store.md"`.
 - **Section drift (word without a claim).** Run `"$S/vx" chk-legacy-new verilex new probe-word --implements verify-tally/features/store.md#store-open` and write `$S/tally/.verilex/words/probe-word/run` as `#!/bin/sh` plus `echo '{"verdict": "pass", "observation": "probe saw the store"}'`. Run `"$S/vx" chk-legacy-use-1 verilex run 'store-open | probe-word'` and `chk-legacy-use-2` the same way, then `propose` and `admit` `probe-word` as in [admit.md](admit.md). Run `echo "- Drift probe" >> "$S/tally/.cursor/skills/verify-tally/features/store.md"`, then `"$S/vx" chk-section verilex check`. Stdout `check: 1 of 4 admitted drift-suspect; they always run` and `  probe-word: verify-tally/features/store.md#store-open: section changed`: a word without a claim is anchored on its whole section (for a sub-feature id, the whole file). Restore with `sed -i '$d' "$S/tally/.cursor/skills/verify-tally/features/store.md"` and `command rm -rf "$S/tally/.verilex/words/probe-word"`.
 - **Word drift.** Run `echo "probe" >> "$S/tally/.verilex/words/item-listed/word.md"`, then `"$S/vx" chk-word verilex check`. Stdout names `item-listed: the word's files changed since onboarding`. Restore with `sed -i '$d' "$S/tally/.verilex/words/item-listed/word.md"` and confirm `check: no drift (3 admitted)`.
+
+- **Binding drift.** Run `echo "# probe" >> "$S/tally/.verilex/words/tally_word.py"`, then `"$S/vx" chk-shared verilex check`. Stdout `check: 3 of 3 admitted drift-suspect; they always run` and, for each of `item-listed`, `item-stored` and `store-open`, `  <word>: the shared word files changed since onboarding (.verilex/words/tally_word.py)`. Restore with `sed -i '$d' "$S/tally/.verilex/words/tally_word.py"`. Run `echo "# probe" >> "$S/tally/.verilex/frame/launch"`, then `"$S/vx" chk-frame verilex check`: the same three lines with `the frame changed since onboarding (.verilex/frame)`. Restore with `sed -i '$d' "$S/tally/.verilex/frame/launch"`. Run `echo "secret_patterns: ['NEVER-[0-9]+']" >> "$S/tally/.verilex/config.yaml"`, then `"$S/vx" chk-config verilex check`: `check: no drift (3 admitted)`, because `config.yaml` names the product. Restore with `sed -i '$d' "$S/tally/.verilex/config.yaml"` and confirm `check: no drift (3 admitted)`.
 
 ## Gotchas
 

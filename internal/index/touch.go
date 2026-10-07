@@ -1,13 +1,13 @@
 package index
 
 import (
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/featuremap"
+	"github.com/DereKk8/verilex/internal/fingerprint"
 	"github.com/DereKk8/verilex/internal/grouping"
 	"github.com/DereKk8/verilex/internal/lifecycle"
 	"github.com/DereKk8/verilex/internal/runner"
@@ -193,17 +193,14 @@ func (ix Index) claimName(w dictionary.Word) string {
 	return ix.groupOf(w.Claim.Name)
 }
 
+// sharedDeps lists config.yaml and the binding's paths: what every word runs with besides its own
+// directory.
 func sharedDeps(p dictionary.Project) []string {
-	wordsDir := filepath.Join(p.Dir(), "words")
-	shared := []string{filepath.Join(p.Dir(), "config.yaml"), filepath.Join(p.Dir(), "frame")}
-	entries, err := os.ReadDir(wordsDir)
-	if err != nil {
-		return shared
-	}
-	for _, entry := range entries {
-		if _, err := os.Stat(filepath.Join(wordsDir, entry.Name(), "word.md")); err != nil {
-			shared = append(shared, filepath.Join(wordsDir, entry.Name()))
-		}
+	// An unreadable words directory lists no shared word files; the stamp reports why.
+	parts, _ := fingerprint.Binding(p)
+	shared := []string{filepath.Join(p.Dir(), "config.yaml")}
+	for _, part := range parts {
+		shared = append(shared, part.Paths()...)
 	}
 	return shared
 }

@@ -2,18 +2,16 @@
 package stamp
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
+	"github.com/DereKk8/verilex/internal/fingerprint"
 	"github.com/DereKk8/verilex/internal/grouping"
 	"github.com/DereKk8/verilex/internal/lifecycle"
 )
@@ -29,7 +27,7 @@ type Stamp struct {
 	// Digest covers every component; it is empty when the step cannot be stamped.
 	Digest string
 	// Components maps each thing the result depended on to its fingerprint:
-	// verilex, frame, shared, word, "word admission", claim, "claim sources", "input <path>",
+	// verilex, config, frame, shared, word, "word admission", claim, "claim sources", "input <path>",
 	// "env <NAME>" and upstream.
 	Components map[string]string
 	// Unclear says why the step has no stamp.
@@ -52,15 +50,15 @@ func Chain(project dictionary.Project, steps []dictionary.Step) []Stamp {
 	} else if common["verilex"], err = h.path(exe); err != nil {
 		unclear = "verilex executable: " + err.Error()
 	}
-	if digest, err := h.paths(project.Dir(), "config.yaml", "frame"); err != nil {
-		unclear = "frame: " + err.Error()
+	if digest, err := h.path(filepath.Join(project.Dir(), "config.yaml")); err != nil {
+		unclear = "config.yaml: " + err.Error()
 	} else {
-		common["frame"] = digest
+		common["config"] = digest
 	}
-	if digest, err := h.shared(filepath.Join(project.Dir(), "words")); err != nil {
-		unclear = "shared word files: " + err.Error()
+	if binding, err := fingerprint.Digests(project); err != nil {
+		unclear = err.Error()
 	} else {
-		common["shared"] = digest
+		maps.Copy(common, binding)
 	}
 	stamps := make([]Stamp, len(steps))
 	holds := map[string]string{}
@@ -69,7 +67,7 @@ func Chain(project dictionary.Project, steps []dictionary.Step) []Stamp {
 	for i, step := range steps {
 		prefix = append(prefix, append([]string{step.Word.Name}, step.Argv...))
 		slot, _ := json.Marshal(prefix)
-		s := Stamp{Slot: digestOf(string(slot)), Components: map[string]string{"upstream": upstream}}
+		s := Stamp{Slot: fingerprint.Of(string(slot)), Components: map[string]string{"upstream": upstream}}
 		for key, value := range common {
 			s.Components[key] = value
 		}
@@ -81,7 +79,7 @@ func Chain(project dictionary.Project, steps []dictionary.Step) []Stamp {
 			s.Unclear = "upstream " + steps[i-1].Label() + " has no stamp"
 		}
 		if s.Unclear == "" {
-			s.Digest = digestOf(s.Slot + "\n" + lines(s.Components))
+			s.Digest = fingerprint.Of(s.Slot + "\n" + lines(s.Components))
 		}
 		hold, seen := holds[step.Word.Name]
 		if !seen {
@@ -184,39 +182,9 @@ func (h hasher) word(word dictionary.Word, root string, components map[string]st
 	}
 	for _, name := range word.Env {
 		value, set := os.LookupEnv(name)
-		components["env "+name] = digestOf(fmt.Sprintf("%t\x00%s", set, value))
+		components["env "+name] = fingerprint.Of(fmt.Sprintf("%t\x00%s", set, value))
 	}
 	return ""
-}
-
-// paths fingerprints named entries of a directory together.
-func (h hasher) paths(dir string, names ...string) (string, error) {
-	parts := []string{}
-	for _, name := range names {
-		digest, err := h.path(filepath.Join(dir, name))
-		if err != nil {
-			return "", err
-		}
-		parts = append(parts, name+"="+digest)
-	}
-	return digestOf(strings.Join(parts, "\n")), nil
-}
-
-// shared fingerprints everything in the words directory outside word directories, such as
-// helpers that words import.
-func (h hasher) shared(dir string) (string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", err
-	}
-	names := []string{}
-	for _, entry := range entries {
-		if _, err := os.Stat(filepath.Join(dir, entry.Name(), "word.md")); err == nil {
-			continue
-		}
-		names = append(names, entry.Name())
-	}
-	return h.paths(dir, names...)
 }
 
 // path fingerprints a file or a whole directory tree: names, permissions and contents.
@@ -224,70 +192,9 @@ func (h hasher) path(path string) (string, error) {
 	if cached, ok := h.cache[path]; ok {
 		return cached.digest, cached.err
 	}
-	digest, err := tree(path)
+	digest, err := fingerprint.Tree(path)
 	h.cache[path] = result{digest, err}
 	return digest, err
-}
-
-func tree(root string) (string, error) {
-	info, err := os.Stat(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("%s is missing", root)
-		}
-		return "", err
-	}
-	if !info.IsDir() {
-		return file(root, info)
-	}
-	var lines strings.Builder
-	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		info, err := os.Stat(path)
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if entry.Type()&fs.ModeSymlink != 0 {
-				return fmt.Errorf("%s links to a directory", path)
-			}
-			fmt.Fprintf(&lines, "%q dir %o\n", rel, info.Mode().Perm())
-			return nil
-		}
-		digest, err := file(path, info)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(&lines, "%q %s\n", rel, digest)
-		return nil
-	})
-	if err != nil {
-		return "", err
-	}
-	return digestOf(lines.String()), nil
-}
-
-func file(path string, info fs.FileInfo) (string, error) {
-	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("%s is not a regular file", path)
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	sum := sha256.New()
-	fmt.Fprintf(sum, "file %o\n", info.Mode().Perm())
-	if _, err = io.Copy(sum, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(sum.Sum(nil)), nil
 }
 
 func lines(components map[string]string) string {
@@ -301,9 +208,4 @@ func lines(components map[string]string) string {
 		fmt.Fprintf(&b, "%q=%s\n", key, components[key])
 	}
 	return b.String()
-}
-
-func digestOf(text string) string {
-	sum := sha256.Sum256([]byte(text))
-	return hex.EncodeToString(sum[:])
 }

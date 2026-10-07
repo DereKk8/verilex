@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -49,6 +50,11 @@ func TestMain(m *testing.M) {
 	}
 	build(agentBin, "./agent/cmd/verilex-agent")
 	build(coreBin, "./cmd/verilex")
+	if _, err = exec.LookPath(sandboxTool()); err != nil {
+		fmt.Fprintf(os.Stderr, "the agent tests run each brain in the launcher's sandbox and need %s on PATH\n", sandboxTool())
+		os.RemoveAll(dir)
+		os.Exit(1)
+	}
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
@@ -105,22 +111,20 @@ func TestSkillIntentAndSuggestionsReachTheBrain(t *testing.T) {
 	if err := os.WriteFile(skill, []byte("SKILL-MARKER-7\nwhen to use verilex\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	seen := filepath.Join(dir, "seen-prompt")
 	fake := writeFake(t, dir, fakeFiles{
 		ticket: []byte("{\"diff\":\"HEAD\",\"harness\":\"stub\",\"model\":\"stub\",\"effort\":\"low\"}\n"),
 		run:    claimRun("green", "r4", []string{"store-opened"}, []string{"notes.txt"}),
 	})
-	brain := writeBrain(t, dir, "#!/bin/sh\nif [ \"$VERILEX_AGENT_PHASE\" = suggest ]; then\n  printf '%s\\n' '{\"claims\":[\"item-added\"]}'\n  exit 0\nfi\ncp \"$VERILEX_AGENT_PROMPT\" \"$PROMPT_COPY\"\nverilex run --named store-opened --changed notes.txt\n")
-	t.Setenv("PROMPT_COPY", seen)
-	stdout, stderr, code := launch(t, dir, fake, brain, "--skill", skill, "--suggest", "--diff", "HEAD", "--claim", "store-opened", "--harness", "stub", "--model", "stub")
-	if code != 0 {
-		t.Fatalf("exit %d stdout %s stderr %s", code, stdout, stderr)
+	brain := writeBrain(t, dir, "#!/bin/sh\nif [ \"$VERILEX_AGENT_PHASE\" = suggest ]; then\n  printf '%s\\n' '{\"claims\":[\"item-added\"]}'\n  exit 0\nfi\ncat > \"$HOME/stdin\"\ncp \"$VERILEX_AGENT_PROMPT\" \"$HOME/prompt\"\nverilex run --named store-opened --changed notes.txt\n")
+	run := launchKept(t, dir, fake, brain, "--skill", skill, "--suggest", "--diff", "HEAD", "--claim", "store-opened", "--harness", "stub", "--model", "stub")
+	stdout := run.stdout
+	if run.code != 0 {
+		t.Fatalf("exit %d stdout %s stderr %s", run.code, stdout, run.stderr)
 	}
-	body, err := os.ReadFile(seen)
-	if err != nil {
-		t.Fatal(err)
+	text := run.home(t, "prompt")
+	if stdin := run.home(t, "stdin"); stdin != text {
+		t.Fatalf("stdin is not the prompt:\n%s", stdin)
 	}
-	text := string(body)
 	for _, want := range []string{
 		"SKILL-MARKER-7",
 		"intent: prove nothing this change touched broke",
@@ -178,38 +182,12 @@ func TestSameHomeIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")
 	fake := writeFake(t, dir, fakeFiles{ticket: ticketJSON("stub", "stub"), run: claimRun("green", "hold", nil, nil)})
-	hold := filepath.Join(dir, "hold")
-	release := filepath.Join(dir, "release")
-	brain := writeBrain(t, dir, "#!/bin/sh\ntouch \"$HOLD\"\nwhile [ ! -f \"$RELEASE\" ]; do sleep 0.02; done\nverilex run --json 'store-open'\n")
-	t.Setenv("HOLD", hold)
-	t.Setenv("RELEASE", release)
-	firstErr := make(chan error, 1)
-	go func() {
-		_, stderr, code, err := launchRaw(dir, fake, brain, "--home", home, "--intent", "prove the store opens", "--harness", "stub", "--model", "stub")
-		if err != nil {
-			firstErr <- err
-			return
-		}
-		if code != 0 {
-			firstErr <- fmt.Errorf("first exit %d: %s", code, stderr)
-			return
-		}
-		firstErr <- nil
-	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(hold); err == nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if _, err := os.Stat(hold); err != nil {
-		t.Fatal("first run did not start")
-	}
+	brain := writeBrain(t, dir, holdBrain+"verilex run --json 'store-open'\n")
+	held := launchHeld(t, dir, fake, brain, "--home", home, "--intent", "prove the store opens", "--harness", "stub", "--model", "stub")
 	_, stderr, code := launch(t, dir, fake, brain, "--home", home, "--intent", "prove the store opens", "--harness", "stub", "--model", "stub")
-	os.WriteFile(release, []byte("go\n"), 0o600)
-	if err := <-firstErr; err != nil {
-		t.Fatal(err)
+	first := held.release(t)
+	if first.code != 0 {
+		t.Fatalf("first exit %d: %s", first.code, first.stderr)
 	}
 	if code != 2 || !strings.Contains(stderr, "in use") {
 		t.Fatalf("exit %d stderr %s", code, stderr)
@@ -421,6 +399,11 @@ func launch(t *testing.T, dir, verilex, brain string, args ...string) (string, s
 }
 
 func launchRaw(dir, verilex, brain string, args ...string) (string, string, int, error) {
+	return launchEnv(dir, verilex, brain, nil, args...)
+}
+
+// launchEnv runs the launcher with env added to the test's environment.
+func launchEnv(dir, verilex, brain string, env []string, args ...string) (string, string, int, error) {
 	skill := filepath.Join(dir, "skill.md")
 	if _, err := os.Stat(skill); err != nil {
 		if err = os.WriteFile(skill, []byte("skill text\n"), 0o600); err != nil {
@@ -444,7 +427,7 @@ func launchRaw(dir, verilex, brain string, args ...string) (string, string, int,
 	argv = append(argv, args...)
 	cmd := exec.Command(agentBin, argv...)
 	cmd.Dir = dir
-	cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(), env...)
 	out, err := cmd.Output()
 	if err == nil {
 		return string(out), "", 0, nil
@@ -454,6 +437,112 @@ func launchRaw(dir, verilex, brain string, args ...string) (string, string, int,
 		return string(out), "", 0, err
 	}
 	return string(out), string(exit.Stderr), exit.ExitCode(), nil
+}
+
+// kept is a launcher run whose run directory the test reads afterwards.
+type kept struct {
+	stdout, stderr string
+	code           int
+	root           string
+}
+
+// home reads a file the brain wrote in its own home, the one place its sandbox lets it write.
+func (k kept) home(t *testing.T, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(k.root, "brain", "home", name))
+	if err != nil {
+		t.Fatalf("%v\nstdout: %s\nstderr: %s", err, k.stdout, k.stderr)
+	}
+	return string(data)
+}
+
+// launchKept runs the launcher with --keep-work and a TMPDIR of its own, so the test finds the
+// run directory.
+func launchKept(t *testing.T, dir, verilex, brain string, args ...string) kept {
+	t.Helper()
+	tmp := runTemp(t)
+	stdout, stderr, code, err := launchEnv(dir, verilex, brain, []string{"TMPDIR=" + tmp}, append(args, "--keep-work")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kept{stdout: stdout, stderr: stderr, code: code, root: runRoot(t, tmp)}
+}
+
+// holdBrain is the start of a brain that waits, after it touched hold in its home, until the
+// test writes release there.
+const holdBrain = "#!/bin/sh\ntouch \"$HOME/hold\"\nwhile [ ! -f \"$HOME/release\" ]; do sleep 0.02; done\n"
+
+// held is a launcher run whose brain waits in holdBrain.
+type held struct {
+	root string
+	done chan kept
+}
+
+// launchHeld starts the launcher and returns once its brain is holding.
+func launchHeld(t *testing.T, dir, verilex, brain string, args ...string) held {
+	t.Helper()
+	tmp := runTemp(t)
+	done := make(chan kept, 1)
+	go func() {
+		stdout, stderr, code, err := launchEnv(dir, verilex, brain, []string{"TMPDIR=" + tmp}, append(args, "--keep-work")...)
+		if err != nil {
+			stderr += err.Error()
+			code = -1
+		}
+		done <- kept{stdout: stdout, stderr: stderr, code: code}
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if matches, _ := filepath.Glob(filepath.Join(tmp, "verilex-agent-*", "brain", "home", "hold")); len(matches) == 1 {
+			return held{root: filepath.Dir(filepath.Dir(filepath.Dir(matches[0]))), done: done}
+		}
+		select {
+		case run := <-done:
+			t.Fatalf("the brain never held: exit %d\n%s\n%s", run.code, run.stdout, run.stderr)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	t.Fatal("the brain never held")
+	return held{}
+}
+
+// release lets the held brain go on and waits for the launcher.
+func (h held) release(t *testing.T) kept {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(h.root, "brain", "home", "release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := <-h.done
+	run.root = h.root
+	return run
+}
+
+// runTemp is a short TMPDIR for one launcher run: its run directory lands there.
+func runTemp(t *testing.T) string {
+	t.Helper()
+	tmp, err := os.MkdirTemp("/tmp", "vxt-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tmp) })
+	return tmp
+}
+
+func runRoot(t *testing.T, tmp string) string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(tmp, "verilex-agent-*"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("run directories in %s: %v", tmp, matches)
+	}
+	return matches[0]
+}
+
+// sandboxTool is what the launcher sandboxes the brain with on this platform.
+func sandboxTool() string {
+	if runtime.GOOS == "darwin" {
+		return "sandbox-exec"
+	}
+	return "bwrap"
 }
 
 func copyProduct(t *testing.T, dir string) string {

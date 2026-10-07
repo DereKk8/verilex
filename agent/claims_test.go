@@ -46,31 +46,26 @@ func changedProduct(t *testing.T) (dir, product, ledger string) {
 // launcher returns verilex's own green with verilex's missed-claim warning, byte for byte.
 func TestMissedClaimWarningIsVerilexsOwn(t *testing.T) {
 	dir, product, ledger := changedProduct(t)
-	printed := filepath.Join(dir, "printed.json")
-	t.Setenv("PRINTED", printed)
 	brain := writeBrain(t, dir, `#!/bin/sh
 printf '%s\n' 'BRAIN SAYS EVERYTHING IS COVERED'
 set --
 for path in $(sed -n 's/^changed: //p' "$VERILEX_AGENT_PROMPT"); do set -- "$@" --changed "$path"; done
 verilex plan --claim store-opened "$@" > /dev/null
-verilex run --claim store-opened "$@" > "$PRINTED"
+verilex run --claim store-opened "$@" > "$HOME/printed"
 `)
 	home := filepath.Join(dir, "home")
-	stdout, stderr, code := launch(t, dir, coreBin, brain,
+	run := launchKept(t, dir, coreBin, brain,
 		"--project", product, "--home", home, "--ledger", ledger,
 		"--intent", "prove the store opens", "--diff", "HEAD", "--harness", "stub", "--model", "stub")
-	if code != 0 {
-		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
+	stdout := run.stdout
+	if run.code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", run.code, stdout, run.stderr)
 	}
-	want, err := os.ReadFile(printed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stdout != string(want) {
+	if want := run.home(t, "printed"); stdout != want {
 		t.Fatalf("stdout is not what verilex printed\nstdout: %s\nverilex: %s", stdout, want)
 	}
 	var doc runDoc
-	if err = json.Unmarshal([]byte(stdout), &doc); err != nil {
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
 		t.Fatal(err)
 	}
 	if doc.Format != "verilex-claim-run-1" || doc.Verdict != "green" || doc.Warning != "2 touched claims not covered" {
@@ -144,25 +139,20 @@ func TestGreenThatDoesNotCoverTheSpecIsInconclusive(t *testing.T) {
 // verilex trusts or keep an instance past the run.
 func TestBrainCannotChangeTrustOrKeepAnInstance(t *testing.T) {
 	dir, product, ledger := changedProduct(t)
-	log := filepath.Join(dir, "refusals")
-	t.Setenv("REFUSALS", log)
 	brain := writeBrain(t, dir, `#!/bin/sh
-verilex onboard item-listed 2>> "$REFUSALS"; echo "exit $?" >> "$REFUSALS"
-verilex run --keep --claim store-opened --changed bin/tally 2>> "$REFUSALS"; echo "exit $?" >> "$REFUSALS"
-verilex run --continue someone-else 'store-open' 2>> "$REFUSALS"; echo "exit $?" >> "$REFUSALS"
+log="$HOME/refusals"
+verilex onboard item-listed 2>> "$log"; echo "exit $?" >> "$log"
+verilex run --keep --claim store-opened --changed bin/tally 2>> "$log"; echo "exit $?" >> "$log"
+verilex run --continue someone-else 'store-open' 2>> "$log"; echo "exit $?" >> "$log"
 verilex run --changed bin/tally > /dev/null
 `)
-	stdout, stderr, code := launch(t, dir, coreBin, brain,
+	run := launchKept(t, dir, coreBin, brain,
 		"--project", product, "--ledger", ledger, "--diff", "HEAD", "--harness", "stub", "--model", "stub")
 	var doc runDoc
-	if code != 0 || json.Unmarshal([]byte(stdout), &doc) != nil || doc.Warning != "" {
-		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
+	if run.code != 0 || json.Unmarshal([]byte(run.stdout), &doc) != nil || doc.Warning != "" {
+		t.Fatalf("exit %d\n%s\n%s", run.code, run.stdout, run.stderr)
 	}
-	body, err := os.ReadFile(log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(body)
+	text := run.home(t, "refusals")
 	for _, want := range []string{
 		"verilex-agent: refused: verilex onboard is not available to the brain",
 		"verilex-agent: refused: --keep is not available to the brain",

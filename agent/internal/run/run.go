@@ -3,6 +3,7 @@ package run
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/DereKk8/verilex/agent/internal/harness"
 	"github.com/DereKk8/verilex/agent/internal/prompt"
 	"github.com/DereKk8/verilex/agent/internal/proxy"
+	"github.com/DereKk8/verilex/agent/internal/sandbox"
 	"github.com/DereKk8/verilex/agent/internal/tree"
 	"github.com/DereKk8/verilex/agent/internal/verdict"
 )
@@ -31,9 +33,11 @@ type Options struct {
 }
 
 // Result is what the command prints. Stdout is verilex's document, never the brain's message.
+// Work is the run's directory when KeepWork kept it, also when the run returns an error.
 type Result struct {
 	Stdout []byte
 	Exit   int
+	Work   string
 }
 
 // Inconclusive is a run that produced no verdict the launcher may return. It is exit 2, like
@@ -64,8 +68,40 @@ type ticket struct {
 	TimeBudget string `json:"time_budget"`
 }
 
-// Run resolves the spec through the verilex CLI, starts the brain, and returns verilex's verdict.
-func Run(opts Options) (Result, error) {
+// dirs is one run's directory. Everything the run creates lives under root, so one removal
+// cleans it up and one listing audits it. The brain may read share and sock, may write only
+// brain, and cannot see the rest.
+type dirs struct {
+	root    string
+	share   string // prompt, the brain's verilex command
+	brain   string // the brain's home and temporary files
+	log     string // the brain's output, its verilex commands and its network requests
+	sock    string // the launcher's verilex socket
+	sandbox string // each phase's sandbox profile and egress socket
+	home    string // the verilex home when --home is not given
+}
+
+func newDirs() (dirs, error) {
+	root, err := os.MkdirTemp(shortTemp(), "verilex-agent-")
+	if err != nil {
+		return dirs{}, err
+	}
+	d := dirs{
+		root: root, share: filepath.Join(root, "share"), brain: filepath.Join(root, "brain"),
+		log: filepath.Join(root, "log"), sock: filepath.Join(root, "sock"),
+		sandbox: filepath.Join(root, "sandbox"), home: filepath.Join(root, "home"),
+	}
+	for _, dir := range []string{d.share, d.brain, d.log, d.sock, d.sandbox} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return d, err
+		}
+	}
+	return d, nil
+}
+
+// Run resolves the spec through the verilex CLI, starts the brain in the sandbox, and returns
+// verilex's verdict.
+func Run(opts Options) (result Result, err error) {
 	project, err := abs(opts.Project)
 	if err != nil {
 		return Result{}, err
@@ -79,18 +115,20 @@ func Run(opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	work, err := os.MkdirTemp("", "verilex-agent-")
+	d, err := newDirs()
 	if err != nil {
 		return Result{}, err
 	}
-	if !opts.KeepWork {
-		defer os.RemoveAll(work)
+	if opts.KeepWork {
+		defer func() { result.Work = d.root }()
+	} else {
+		defer os.RemoveAll(d.root)
 	}
-	spec, ticketPath, err := resolve(verilex, project, work, opts)
+	spec, ticketPath, err := resolve(verilex, project, d.root, opts)
 	if err != nil {
 		return Result{}, err
 	}
-	argv, err := harness.Argv(harness.Spec{
+	brain, err := harness.Resolve(harness.Spec{
 		Name: spec.Harness, Model: spec.Model, Effort: spec.Effort,
 		Brain: opts.Brain, AllowHarness: opts.AllowHarness, TemplatesPath: opts.Harnesses,
 	})
@@ -112,46 +150,52 @@ func Run(opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("time_budget: %v", err)
 	}
+	home, err := homeDir(opts.Home, d.home)
+	if err != nil {
+		return Result{}, err
+	}
+	if opts.Ledger != "" {
+		// The ledger exists before the brain starts, so the sandbox can hide it.
+		if err = os.MkdirAll(opts.Ledger, 0o700); err != nil {
+			return Result{}, err
+		}
+	}
 	before, err := tree.Snapshot(project)
 	if err != nil {
 		return Result{}, err
 	}
-	// One deadline covers both brain phases, so --suggest cannot stretch the budget.
-	var deadline time.Time
-	if budget > 0 {
-		deadline = time.Now().Add(budget)
+	l, err := newLaunch(d, opts, brain, verilex, home)
+	if err != nil {
+		return Result{}, err
 	}
-	suggestions, err := suggest(opts, argv, work, skill, intent, spec.Diff, changed, deadline)
+	defer l.close()
+	// One deadline covers both brain phases, so --suggest cannot stretch the budget.
+	ctx, cancel := context.WithCancel(context.Background())
+	if budget > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), budget)
+	}
+	defer cancel()
+	suggestions, err := l.suggest(ctx, skill, intent, spec.Diff, changed)
 	if err != nil {
 		if edited := tree.Changed(before, snapshotOrNil(project)); len(edited) > 0 {
 			return Result{}, changedProject(edited)
 		}
-		if isBudget(err) {
-			return Result{}, inconclusive("%v", err)
-		}
-		return Result{}, err
+		return Result{}, phaseError(err)
 	}
 	text := prompt.Build(prompt.Input{
 		Skill: skill, Intent: intent, Diff: spec.Diff,
 		Named: opts.Claims, Changed: changed, Suggestions: suggestions,
 	})
-	promptPath := filepath.Join(work, "prompt.txt")
+	promptPath := filepath.Join(d.share, "prompt.txt")
 	if err = os.WriteFile(promptPath, []byte(text), 0o600); err != nil {
 		return Result{}, err
-	}
-	home, created, err := homeDir(opts.Home)
-	if err != nil {
-		return Result{}, err
-	}
-	if created && !opts.KeepWork {
-		defer os.RemoveAll(home)
 	}
 	release, err := lockHome(home)
 	if err != nil {
 		return Result{}, err
 	}
 	defer release()
-	px, err := proxy.Listen(shortDir())
+	px, err := proxy.Listen(d.sock)
 	if err != nil {
 		return Result{}, err
 	}
@@ -162,13 +206,21 @@ func Run(opts Options) (Result, error) {
 	px.Ledger = opts.Ledger
 	px.Ticket = ticketPath
 	px.Env = os.Environ()
+	px.Log = l.verilexLog
 	go px.Serve()
-	if err = writeWrapper(work, px.Socket()); err != nil {
+	bin := filepath.Join(d.share, "bin")
+	if err = writeWrapper(bin, px.Socket()); err != nil {
 		return Result{}, err
 	}
-	brainErr := startBrain(opts, argv, work, promptPath, text, "verify", deadline)
+	brainErr := l.brain(ctx, phase{name: "verify", prompt: promptPath, bin: bin, sockets: []string{px.Socket()}})
 	// Stop the proxy first: no verilex run may finish after the checks below.
 	px.Close()
+	var unavailable *sandbox.Unavailable
+	if errors.As(brainErr, &unavailable) {
+		return Result{}, phaseError(brainErr)
+	}
+	// The brain cannot write the project, but anything else on the host can: a verdict on code
+	// that changed during the run is not the verdict on the code under test.
 	if edited := tree.Changed(before, snapshotOrNil(project)); len(edited) > 0 {
 		cleanHome(px)
 		return Result{}, changedProject(edited)
@@ -203,14 +255,27 @@ func Run(opts Options) (Result, error) {
 	return Result{Stdout: doc.Raw, Exit: code}, nil
 }
 
-// changedProject is the answer when the brain edited the project: whatever verilex printed was
-// about code the brain wrote, not the code under test.
+// phaseError is the answer when a brain phase could not finish: the sandbox could not be
+// established, or the budget ended.
+func phaseError(err error) error {
+	var unavailable *sandbox.Unavailable
+	switch {
+	case errors.As(err, &unavailable):
+		return inconclusive("the brain runs only in a sandbox, and the sandbox is not available here: %s", unavailable.Reason)
+	case isBudget(err):
+		return inconclusive("%v", err)
+	}
+	return err
+}
+
+// changedProject is the answer when the project changed during the run: whatever verilex printed
+// may be about code that is no longer the code under test.
 func changedProject(paths []string) error {
 	shown := paths
 	if len(shown) > 10 {
 		shown = append(slices.Clone(shown[:10]), fmt.Sprintf("and %d more", len(paths)-10))
 	}
-	return inconclusive("the brain changed the project during the run, so no verdict covers the code under test: %s", strings.Join(shown, ", "))
+	return inconclusive("the project changed during the run, so no verdict covers the code under test: %s", strings.Join(shown, ", "))
 }
 
 func snapshotOrNil(project string) tree.State {
@@ -258,37 +323,149 @@ func cleanHome(px *proxy.Proxy) error {
 	return nil
 }
 
-func suggest(opts Options, argv []string, work string, skill []byte, intent, diff string, changed []string, deadline time.Time) ([]string, error) {
-	if !opts.Suggest {
+// launch holds what both brain phases share: the brain command, what it may read and what it
+// must not reach.
+type launch struct {
+	d          dirs
+	argv       []string
+	read       []string
+	files      map[string]string
+	hide       []string
+	project    string
+	named      []string
+	suggestOn  bool
+	verilexLog *os.File
+	egressLog  *os.File
+}
+
+func newLaunch(d dirs, opts Options, brain harness.Brain, verilex, home string) (*launch, error) {
+	l := &launch{d: d, argv: brain.Argv, project: opts.Project, files: map[string]string{}, named: opts.Claims, suggestOn: opts.Suggest}
+	l.read = []string{d.share}
+	if opts.Brain != "" {
+		l.read = append(l.read, opts.Brain)
+	} else if dir := harness.InstallDir(brain.Argv[0], os.Getenv("PATH")); dir != "" {
+		l.read = append(l.read, dir)
+	}
+	userHome, _ := os.UserHomeDir()
+	for _, file := range brain.Files {
+		if rel, ok := strings.CutPrefix(file, "~/"); ok {
+			if userHome != "" {
+				l.files[rel] = filepath.Join(userHome, rel)
+			}
+		} else {
+			l.read = append(l.read, file)
+		}
+	}
+	// The brain must not reach what decides a verdict: the verilex home and ledger of this run
+	// and the caller's, the real verilex binary, and this run's own records.
+	l.hide = []string{home, opts.Ledger, verilex, os.Getenv("VERILEX_HOME"), os.Getenv("VERILEX_LEDGER"), d.log, d.home}
+	var err error
+	if l.verilexLog, err = os.Create(filepath.Join(d.log, "verilex.log")); err != nil {
+		return nil, err
+	}
+	if l.egressLog, err = os.Create(filepath.Join(d.log, "egress.log")); err != nil {
+		l.verilexLog.Close()
+		return nil, err
+	}
+	return l, nil
+}
+
+func (l *launch) close() {
+	l.verilexLog.Close()
+	l.egressLog.Close()
+}
+
+// phase is one run of the brain: the suggest phase or the verify phase.
+type phase struct {
+	name, prompt string
+	// bin holds the brain's verilex command.
+	bin     string
+	sockets []string
+}
+
+// brain runs one phase in the sandbox until the brain exits or ctx ends. Its output goes to the
+// run's log, so a child the brain left running holds no pipe of the launcher's.
+func (l *launch) brain(ctx context.Context, ph phase) error {
+	if ctx.Err() != nil {
+		return &budgetError{}
+	}
+	stdout, err := os.Create(filepath.Join(l.d.log, ph.name+".out"))
+	if err != nil {
+		return err
+	}
+	defer stdout.Close()
+	stderr, err := os.Create(filepath.Join(l.d.log, ph.name+".err"))
+	if err != nil {
+		return err
+	}
+	defer stderr.Close()
+	// The prompt goes in as a file, not a pipe: no copy can wait on a child the brain left running.
+	stdin, err := os.Open(ph.prompt)
+	if err != nil {
+		return err
+	}
+	defer stdin.Close()
+	proc, err := sandbox.Start(ctx, sandbox.Spec{
+		Argv: l.argv, Env: brainEnv(ph), Project: l.project,
+		Brain: l.d.brain, State: filepath.Join(l.d.sandbox, ph.name),
+		Read: l.read, HomeFiles: l.files, Hide: l.hide, Sockets: ph.sockets,
+		Stdin: stdin, Stdout: stdout, Stderr: stderr, EgressLog: l.egressLog,
+	})
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &budgetError{}
+	}
+	if err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- proc.Wait() }()
+	select {
+	case err = <-done:
+	case <-ctx.Done():
+		proc.Kill()
+		<-done
+		return &budgetError{}
+	}
+	if err != nil {
+		if detail := tail(stderr.Name()); detail != "" {
+			return fmt.Errorf("brain exited: %v: %s", err, detail)
+		}
+		return fmt.Errorf("brain exited: %v", err)
+	}
+	return nil
+}
+
+func (l *launch) suggest(ctx context.Context, skill []byte, intent, diff string, changed []string) ([]string, error) {
+	if !l.suggestOn {
 		return nil, nil
 	}
-	ask := prompt.Build(prompt.Input{Skill: skill, Intent: intent, Diff: diff, Named: opts.Claims, Changed: changed})
+	ask := prompt.Build(prompt.Input{Skill: skill, Intent: intent, Diff: diff, Named: l.named, Changed: changed})
 	ask += "\n# Suggest\nReply with one JSON object and nothing else: {\"claims\":[\"name\"]}.\n"
 	ask += "Do not call verilex. A suggestion is not a verdict and not a ceiling.\n"
-	path := filepath.Join(work, "suggest.txt")
+	path := filepath.Join(l.d.share, "suggest.txt")
 	if err := os.WriteFile(path, []byte(ask), 0o600); err != nil {
 		return nil, err
 	}
-	block := filepath.Join(work, "suggest-bin")
-	if err := os.MkdirAll(block, 0o700); err != nil {
+	bin := filepath.Join(l.d.share, "suggest-bin")
+	if err := os.MkdirAll(bin, 0o700); err != nil {
 		return nil, err
 	}
 	body := "#!/bin/sh\necho 'verilex-agent: refused: verilex is not available during intent formulation' >&2\nexit 2\n"
-	if err := os.WriteFile(filepath.Join(block, "verilex"), []byte(body), 0o700); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "verilex"), []byte(body), 0o700); err != nil {
 		return nil, err
 	}
-	var stdout bytes.Buffer
-	if err := runBrain(opts, argv, block+string(os.PathListSeparator)+os.Getenv("PATH"), path, ask, "suggest", deadline, &stdout); err != nil {
-		if isBudget(err) {
+	if err := l.brain(ctx, phase{name: "suggest", prompt: path, bin: bin}); err != nil {
+		var unavailable *sandbox.Unavailable
+		if isBudget(err) || errors.As(err, &unavailable) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("intent formulation: %v", err)
 	}
-	claims, err := suggestedClaims(stdout.Bytes())
+	out, err := os.ReadFile(filepath.Join(l.d.log, "suggest.out"))
 	if err != nil {
 		return nil, err
 	}
-	return claims, nil
+	return suggestedClaims(out)
 }
 
 func suggestedClaims(raw []byte) ([]string, error) {
@@ -312,60 +489,9 @@ func suggestedClaims(raw []byte) ([]string, error) {
 	return out, nil
 }
 
-func startBrain(opts Options, argv []string, work, promptPath, text, phase string, deadline time.Time) error {
-	path := filepath.Join(work, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
-	return runBrain(opts, argv, path, promptPath, text, phase, deadline, nil)
-}
-
-// runBrain runs one brain phase until it exits or deadline passes. The process group is killed
-// as soon as the brain exits, and pipes a child that left the group still holds are closed after
-// a short delay, so neither a background nor a setsid child can hold the launcher.
-func runBrain(opts Options, argv []string, path, promptPath, text, phase string, deadline time.Time, stdout *bytes.Buffer) error {
-	if !deadline.IsZero() && !time.Now().Before(deadline) {
-		return &budgetError{}
-	}
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Dir = opts.Project
-	cmd.Env = brainEnv(path, promptPath, phase)
-	cmd.Stdin = strings.NewReader(text)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.WaitDelay = 200 * time.Millisecond
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if stdout != nil {
-		cmd.Stdout = stdout
-	}
-	err := cmd.Start()
-	if err != nil {
-		return err
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	var expired <-chan time.Time
-	if !deadline.IsZero() {
-		timer := time.NewTimer(time.Until(deadline))
-		defer timer.Stop()
-		expired = timer.C
-	}
-	select {
-	case err = <-done:
-		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	case <-expired:
-		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-done
-		return &budgetError{}
-	}
-	if err != nil {
-		detail := oneLine(stderr.String())
-		if detail == "" {
-			return fmt.Errorf("brain exited: %v", err)
-		}
-		return fmt.Errorf("brain exited: %v: %s", err, detail)
-	}
-	return nil
-}
-
-func brainEnv(path, prompt, phase string) []string {
+// brainEnv is the launcher's environment without verilex's own variables, with the brain's
+// verilex command first on PATH. The sandbox sets HOME, TMPDIR and the proxy.
+func brainEnv(ph phase) []string {
 	var env []string
 	for _, entry := range os.Environ() {
 		if strings.HasPrefix(entry, "VERILEX_HOME=") || strings.HasPrefix(entry, "VERILEX_LEDGER=") || strings.HasPrefix(entry, "PATH=") {
@@ -374,10 +500,23 @@ func brainEnv(path, prompt, phase string) []string {
 		env = append(env, entry)
 	}
 	return append(env,
-		"PATH="+path,
-		"VERILEX_AGENT_PROMPT="+prompt,
-		"VERILEX_AGENT_PHASE="+phase,
+		"PATH="+ph.bin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"VERILEX_AGENT_PROMPT="+ph.prompt,
+		"VERILEX_AGENT_PHASE="+ph.name,
 	)
+}
+
+// tail is the end of a brain's stderr on one line, enough to say why it failed.
+func tail(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	text := oneLine(string(data))
+	if len(text) > 400 {
+		text = "..." + text[len(text)-400:]
+	}
+	return text
 }
 
 func resolve(verilex, project, work string, opts Options) (ticket, string, error) {
@@ -432,13 +571,9 @@ func ticketYAML(opts Options) string {
 
 func yamlString(value string) string {
 	if value == "" || strings.ContainsAny(value, ":#{}[]&*!|>'\"%@`\n") || strings.HasPrefix(value, " ") {
-		return strconvQuote(value)
+		return fmt.Sprintf("%q", value)
 	}
 	return value
-}
-
-func strconvQuote(value string) string {
-	return fmt.Sprintf("%q", value)
 }
 
 // changedFiles lists the paths diff changes under project, relative to it, unquoted, with both
@@ -490,12 +625,14 @@ func loadSkill(path, project string) ([]byte, error) {
 	return data, nil
 }
 
-func writeWrapper(work, socket string) error {
+func writeWrapper(dir, socket string) error {
 	bin, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	dir := filepath.Join(work, "bin")
+	if real, err := filepath.EvalSymlinks(bin); err == nil {
+		bin = real
+	}
 	if err = os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -518,15 +655,15 @@ func lockHome(home string) (func(), error) {
 	}, nil
 }
 
-func homeDir(path string) (string, bool, error) {
+// homeDir is the run's verilex home: the given path, or the run directory's own home.
+func homeDir(path, fallback string) (string, error) {
 	if path == "" {
-		dir, err := os.MkdirTemp("", "verilex-agent-home-")
-		return dir, true, err
+		path = fallback
 	}
 	if err := os.MkdirAll(path, 0o700); err != nil {
-		return "", false, err
+		return "", err
 	}
-	return path, false, nil
+	return abs(path)
 }
 
 func verilexPath(path string) (string, error) {
@@ -535,13 +672,13 @@ func verilexPath(path string) (string, error) {
 		if err != nil {
 			return "", errors.New("verilex is not on PATH; pass --verilex")
 		}
-		return found, nil
+		return abs(found)
 	}
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
 		return "", fmt.Errorf("%s is not an executable file", path)
 	}
-	return path, nil
+	return abs(path)
 }
 
 func abs(path string) (string, error) {
@@ -558,7 +695,8 @@ func abs(path string) (string, error) {
 	return full, nil
 }
 
-func shortDir() string {
+// shortTemp is where run directories go: a unix socket path must stay under about 100 bytes.
+func shortTemp() string {
 	dir := os.TempDir()
 	if len(dir) > 40 {
 		return "/tmp"

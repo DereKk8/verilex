@@ -10,6 +10,7 @@ import (
 
 	"github.com/DereKk8/verilex/agent/internal/proxy"
 	"github.com/DereKk8/verilex/agent/internal/run"
+	"github.com/DereKk8/verilex/agent/internal/sandbox"
 )
 
 const usage = `usage: verilex-agent [--text] [--project DIR] [--verilex PATH] (--ticket FILE | --intent TEXT | --diff REV) [--claim NAME] [--harness NAME] [--model NAME] [--effort LEVEL] [--profile NAME] [--ledger DIR] [--home DIR] [--skill FILE] [--brain PATH] [--harnesses FILE] [--suggest] [--allow-harness] [--keep-work]
@@ -23,6 +24,9 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	if len(argv) > 0 && argv[0] == "relay" {
 		return relay(argv[1:], stdout, stderr)
 	}
+	if len(argv) > 0 && argv[0] == "sandbox-init" {
+		return sandbox.Init(argv[1:], stderr)
+	}
 	opts, help, err := parse(argv)
 	if help {
 		fmt.Fprint(stdout, usage)
@@ -34,6 +38,9 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	result, err := run.Run(opts)
+	if result.Work != "" {
+		defer fmt.Fprintf(stderr, "verilex-agent: run files kept in %s\n", result.Work)
+	}
 	if inconclusive := (*run.Inconclusive)(nil); errors.As(err, &inconclusive) {
 		fmt.Fprintf(stderr, "verilex-agent: inconclusive: %v\n", err)
 		return 2

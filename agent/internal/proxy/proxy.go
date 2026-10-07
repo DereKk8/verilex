@@ -32,6 +32,8 @@ type Proxy struct {
 	// brain choice in the run itself.
 	Ticket string
 	Env    []string
+	// Log, when set, receives one line per command the brain asked for, for the run's audit.
+	Log io.Writer
 
 	ln      net.Listener
 	mu      sync.Mutex
@@ -148,10 +150,12 @@ func (p *Proxy) handle(conn net.Conn) {
 	}
 	args, sub, err := pinArgs(req.Args, p.Project, p.Ticket)
 	if err != nil {
+		p.logf("refused verilex %s: %v", strings.Join(req.Args, " "), err)
 		writeJSON(conn, response{Stderr: "verilex-agent: refused: " + err.Error() + "\n", Exit: 2})
 		return
 	}
 	stdout, stderr, code := p.exec(args, req.Stdin)
+	p.logf("verilex %s -> exit %d", strings.Join(args, " "), code)
 	if sub == "run" && bytes.HasPrefix(bytes.TrimSpace(stdout), []byte("{")) {
 		var doc struct {
 			Run string `json:"run"`
@@ -168,6 +172,15 @@ func (p *Proxy) handle(conn net.Conn) {
 		p.mu.Unlock()
 	}
 	writeJSON(conn, response{Stdout: string(stdout), Stderr: string(stderr), Exit: code})
+}
+
+func (p *Proxy) logf(format string, args ...any) {
+	if p.Log == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	fmt.Fprintf(p.Log, "%s %s\n", time.Now().UTC().Format(time.RFC3339), fmt.Sprintf(format, args...))
 }
 
 func (p *Proxy) exec(args []string, stdin string) ([]byte, []byte, int) {

@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "summary": "verilex proves its own claims in CI: a pinned known-good verilex runs four canary words against the checkout, live, and fails on red, inconclusive or drift.",
+  "files": [
+    {
+      "path": "scripts/ci",
+      "summary": "Owns the canary step that CI and developers run.",
+      "annotations": [
+        {
+          "newRange": [33, 63],
+          "summary": "canary builds the driver from canary_driver, runs every .verilex word live in a temp state dir, then requires `check: no drift`.",
+          "rationale": "A build that grades itself printed red but exited 0 (reproduced: red-exits-0 planted, self-built driver exit 0), so the driver is a pinned main commit. A ledger kept between runs can be forged, so state is a fresh mktemp dir and the run uses --fresh. `verilex check` exits 0 on drift, so stdout is matched. Verified: four planted regressions and one weakened word each made `scripts/ci canary` exit 1; clean tree exits 0. The pin is de9405b because it carries the onboarding fix for leading sub-feature ids.",
+          "author": "fm/verilex-canary-next"
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "summary": "Runs the canary inside the test job, so the required ci gate covers it.",
+      "annotations": [
+        {
+          "newRange": [46, 47],
+          "summary": "checkout fetches full history so git archive finds the pinned driver commit and origin/main exists for the diff.",
+          "rationale": "The repository is private, so go install of a SHA needs auth; git archive of a fetched commit does not. Not yet observed on a GitHub runner until this PR's CI runs.",
+          "author": "fm/verilex-canary-next"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/features/run.md",
+      "summary": "Labels the existing Live, Refused order and Skip steps with their sub-feature ids so canary claims cite them.",
+      "annotations": [
+        {
+          "newRange": [34, 35],
+          "summary": "The Skip step now says `Expect the second to print ...`, which makes it a requirement sentence a claim can map.",
+          "rationale": "verilex counts only sentences with a requirement word (Expect, must, exits) as requirements, and a claim source needs at least one. Labelling the existing steps, not adding a fifth section, keeps the feature entry contract of four H2 sections and one owner per step.",
+          "author": "fm/verilex-canary-next"
+        }
+      ]
+    },
+    {
+      "path": ".verilex/frame/launch",
+      "summary": "Builds the verilex under test, with a planted defect when CANARY_DEFECT is set, into an instance dir owned by the run.",
+      "annotations": [
+        {
+          "newRange": [1, 31],
+          "summary": "launch plants each defect as a literal edit on a source copy and exits 2 when the edited line moved.",
+          "rationale": "Defect hooks stay out of verilex's product code. If a refactor moves a patched line, the onboarding trial becomes inconclusive, never a silent healthy pass.",
+          "author": "fm/verilex-canary-next"
+        }
+      ]
+    },
+    {
+      "path": ".verilex/words/canary_word.py",
+      "summary": "Shared helper that runs the verilex under test on the scratch tally.",
+      "annotations": [
+        {
+          "newRange": [1, 63],
+          "summary": "verilex() strips every outer VERILEX_* and TALLY_* variable before it calls the inner build.",
+          "rationale": "Otherwise the inner build inherits the outer VERILEX_HOME and VERILEX_LEDGER and writes its passes into the outer ledger, which could skip inner steps and give a false red.",
+          "author": "fm/verilex-canary-next"
+        }
+      ]
+    }
+  ]
+}

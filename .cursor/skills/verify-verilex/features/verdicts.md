@@ -29,8 +29,8 @@ Preconditions:
 
 - **Green.** Run `"$S/vx" green verilex run 'store-open | item-stored apple | item-listed apple'`. Output is `green: 3 green; run <RUN>` and exit `0`.
 - **Green, second view.** Run `"$S/vx" green-runs verilex runs`. The line for `<RUN>` reads `green  cleanup=done`.
-- **Red.** Run `TALLY_DEFECT=drop-adds "$S/vx" red verilex run 'store-open | item-stored apple | item-listed apple'`. Output starts `red: 1 green, 1 red, 1 not run`, names `item-stored apple: tally said 'added apple' but store.json lacks apple`, and exit is `1`.
-- **Red, second view.** Run `"$S/vx" red-store cat "$S/home/tally/runs/<RUN>/02-item-stored/store.json"` with the red run id. It prints `[]`: the item really was not stored.
+- `verdict-red`: **Red.** Run `TALLY_DEFECT=drop-adds "$S/vx" red verilex run 'store-open | item-stored apple | item-listed apple'`. Output starts `red: 1 green, 1 red, 1 not run`, names `item-stored apple: tally said 'added apple' but store.json lacks apple`, and exit is `1`.
+- `verdict-red`: **Red, second view.** Run `"$S/vx" red-store cat "$S/home/tally/runs/<RUN>/02-item-stored/store.json"` with the red run id. It prints `[]`: the item really was not stored.
 - **Environment trouble.** Run `TALLY_SIMULATE_LOCK=1 "$S/vx" env-blocked verilex run 'store-open | item-stored apple'`. Output starts `inconclusive: 1 inconclusive, 1 not run` with cause `... is locked by another process`, and exit is `2`, not `1`.
 - **Doctor refuses.** Run `mkdir -p "$S/foreign"`, then `TALLY_ADOPT_STORE="$S/foreign" "$S/vx" doctor-refuses verilex run --fresh 'store-open | item-stored apple'`. Output is `inconclusive: 0 green, 2 not run` with `inconclusive  doctor: refused the instance (exit 1)` and exit `2`.
 - **Doctor refuses, second view.** Run `"$S/vx" foreign-untouched ls -A "$S/foreign"`. It prints nothing: verilex neither drove nor removed a store it did not launch.

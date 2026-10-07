@@ -18,6 +18,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 - Treat commands as literal. Keep the quoted chain and flags unchanged.
 - Restore any edit to `$S/tally` before the next recipe, and confirm with `verilex check` (no drift) or `"$S/vx" restored diff -r "$S/tally/.verilex" "$PWD/tests/fixtures/tally/.verilex"` (only `grouping.yaml`, `gaps/` and any `admission.json` of a probe word differ).
 - The default chain is `store-open | item-stored apple | item-listed apple`. `item-listed` is the only `read_only` word.
+- A step that opens with a sub-feature id (`` `run-live`: ``) is a source of one of verilex's own canary claims in `.verilex/claims/`. After editing one, run `scripts/ci canary` and do what `verilex claims` asks.
 
 ## Proof and skip reporting
 

@@ -1,0 +1,13 @@
+claim: chain-order-refused
+sentence: A chain whose order breaks a pinned requirement is refused before anything runs.
+entry: [cli]
+evidence:
+  action: "`verilex run 'item-stored apple | store-open'` exits `2` with stderr `verilex: refused: item-stored apple requires store, pinned by claim item-added; nothing earlier provides it`."
+  observation: "`verilex runs` lists no new run."
+defects:
+  no-order-check: {CANARY_DEFECT: no-order-check}
+sources:
+  - ref: verify-verilex/features/run.md#run-refused
+    prose: a258baa3883c
+    requirements:
+      - "Stderr `verilex: refused: item-stored apple requires store, pinned by claim item-added; nothing earlier provides it`, exit `2`."

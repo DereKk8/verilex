@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Canary Launch: build the verilex under test from this checkout, with CANARY_DEFECT planted if set,
+# into an instance directory owned by this run, beside a scratch copy of the tally sample product.
+set -euo pipefail
+root="${CANARY_INSTANCES:-${TMPDIR:-/tmp}/verilex-canary}"
+inst="$root/$VERILEX_RUN"
+mkdir -p "$root"
+mkdir "$inst"
+echo "$VERILEX_RUN" > "$inst/owner"
+src="$VERILEX_PROJECT_ROOT"
+if [ -n "${CANARY_DEFECT:-}" ]; then
+  mkdir "$inst/src"
+  cp -R "$src/cmd" "$src/internal" "$src/go.mod" "$src/go.sum" "$inst/src/"
+  src="$inst/src"
+  case "$CANARY_DEFECT" in
+    skipped-cleanup) f=internal/runner/runner.go; from='[]string{project.Frame("cleanup")}'; to='[]string{"true"}' ;;
+    no-order-check)  f=internal/dictionary/dictionary.go; from='if !available[state] {'; to='if false && !available[state] {' ;;
+    never-skip)      f=internal/runner/plan.go; from='p.entries, p.Rerun = ledger.At(LedgerDir(project)).Reuse(labels, claims, p.stamps)'; to='p.entries, p.Rerun = nil, "canary defect never-skip"' ;;
+    fail-is-green)   f=internal/verdict/verdict.go; from='"fail": {Red, 1}'; to='"fail": {Green, 1}' ;;
+    *) echo "launch: unknown CANARY_DEFECT $CANARY_DEFECT" >&2; exit 2 ;;
+  esac
+  # A literal edit: when a refactor moves the line, the trial is inconclusive, never silently healthy.
+  code="$(<"$src/$f")"
+  [[ "$code" == *"$from"* ]] || { echo "launch: defect $CANARY_DEFECT no longer applies to $f" >&2; exit 2; }
+  printf '%s\n' "${code/"$from"/"$to"}" > "$src/$f"
+  echo "planted $CANARY_DEFECT in $f" >&2
+fi
+(cd "$src" && go build -o "$inst/bin/verilex" ./cmd/verilex) >&2
+cp -R "$VERILEX_PROJECT_ROOT/tests/fixtures/tally" "$inst/tally"
+mkdir "$inst/home" "$inst/stores" "$inst/config"
+printf '{"instance": {"dir": "%s"}}\n' "$inst"

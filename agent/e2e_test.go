@@ -71,7 +71,7 @@ func TestLauncherReturnsVerilexJSONNotTheBrain(t *testing.T) {
 }
 
 func TestBrainExitDoesNotReplaceTheVerdict(t *testing.T) {
-	runJSON := []byte("{\"verdict\":\"green\",\"run\":\"r9\"}\n")
+	runJSON := claimRun("green", "r9", nil, nil)
 	dir := t.TempDir()
 	fake := writeFake(t, dir, fakeFiles{run: runJSON, ticket: ticketJSON("stub", "stub")})
 	brain := writeBrain(t, dir, "#!/bin/sh\nverilex run --json 'store-open'\nexit 1\n")
@@ -97,51 +97,19 @@ func TestNoVerilexRunIsNotGreen(t *testing.T) {
 	}
 }
 
-func TestMissingWarningRefusesGreen(t *testing.T) {
-	dir := t.TempDir()
-	fake := writeFake(t, dir, fakeFiles{
-		ticket:  ticketJSON("stub", "stub"),
-		plan:    []byte("{\"format\":\"claim-plan\",\"unpicked\":[\"item-added\"],\"warning\":\"1 touched claim not covered\"}"),
-		run:     []byte("{\"verdict\":\"green\",\"run\":\"r2\"}"),
-		runExit: 0,
-	})
-	brain := writeBrain(t, dir, "#!/bin/sh\nverilex plan --json 'store-open'\nverilex run --json 'store-open'\n")
-	stdout, stderr, code := launch(t, dir, fake, brain, "--intent", "prove the store opens", "--harness", "stub", "--model", "stub")
-	if code != 2 {
-		t.Fatalf("exit %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
-	}
-	if !strings.Contains(stderr, "item-added") || !strings.Contains(stderr, "missed-claim") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-	if !strings.Contains(stdout, `"verdict":"green"`) {
-		t.Fatalf("stdout dropped verilex JSON: %s", stdout)
-	}
-}
-
-func TestWarningInVerdictIsReturned(t *testing.T) {
-	runJSON := []byte("{\"verdict\":\"green\",\"run\":\"r3\",\"uncovered\":[{\"claim\":\"item-added\",\"next\":\"verilex run --claim item-added\"}],\"warning\":\"1 touched claim not covered\"}\n")
-	dir := t.TempDir()
-	fake := writeFake(t, dir, fakeFiles{
-		ticket: ticketJSON("stub", "stub"),
-		plan:   []byte("{\"unpicked\":[\"item-added\"]}"),
-		run:    runJSON,
-	})
-	brain := writeBrain(t, dir, "#!/bin/sh\nverilex plan --json\nverilex run --json 'store-open'\nprintf '%s\\n' 'I decided green'\n")
-	stdout, stderr, code := launch(t, dir, fake, brain, "--intent", "prove the store opens", "--claim", "store-opened", "--harness", "stub", "--model", "stub")
-	if code != 0 || stdout != string(runJSON) {
-		t.Fatalf("exit %d stdout %q stderr %s", code, stdout, stderr)
-	}
-}
-
 func TestSkillIntentAndSuggestionsReachTheBrain(t *testing.T) {
 	dir := t.TempDir()
+	gitRepo(t, dir, "notes.txt")
 	skill := filepath.Join(dir, "SKILL.md")
 	if err := os.WriteFile(skill, []byte("SKILL-MARKER-7\nwhen to use verilex\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	seen := filepath.Join(dir, "seen-prompt")
-	fake := writeFake(t, dir, fakeFiles{ticket: []byte("{\"diff\":\"HEAD\",\"harness\":\"stub\",\"model\":\"stub\",\"effort\":\"low\"}\n"), run: []byte("{\"verdict\":\"green\",\"run\":\"r4\"}\n")})
-	brain := writeBrain(t, dir, "#!/bin/sh\nif [ \"$VERILEX_AGENT_PHASE\" = suggest ]; then\n  printf '%s\\n' '{\"claims\":[\"item-added\"]}'\n  exit 0\nfi\ncp \"$VERILEX_AGENT_PROMPT\" \"$PROMPT_COPY\"\nverilex run --json 'store-open'\n")
+	fake := writeFake(t, dir, fakeFiles{
+		ticket: []byte("{\"diff\":\"HEAD\",\"harness\":\"stub\",\"model\":\"stub\",\"effort\":\"low\"}\n"),
+		run:    claimRun("green", "r4", []string{"store-opened"}, []string{"notes.txt"}),
+	})
+	brain := writeBrain(t, dir, "#!/bin/sh\nif [ \"$VERILEX_AGENT_PHASE\" = suggest ]; then\n  printf '%s\\n' '{\"claims\":[\"item-added\"]}'\n  exit 0\nfi\ncp \"$VERILEX_AGENT_PROMPT\" \"$PROMPT_COPY\"\nverilex run --named store-opened --changed notes.txt\n")
 	t.Setenv("PROMPT_COPY", seen)
 	stdout, stderr, code := launch(t, dir, fake, brain, "--skill", skill, "--suggest", "--diff", "HEAD", "--claim", "store-opened", "--harness", "stub", "--model", "stub")
 	if code != 0 {
@@ -157,15 +125,32 @@ func TestSkillIntentAndSuggestionsReachTheBrain(t *testing.T) {
 		"intent: prove nothing this change touched broke",
 		"diff: HEAD",
 		"floor: store-opened",
+		"changed: notes.txt",
 		"suggestion: item-added",
-		"The launcher ignores your message and returns verilex's own JSON verdict.",
+		"The launcher returns verilex's own JSON verdict from your last verilex run and ignores your message.",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("prompt missing %q\n%s", want, text)
 		}
 	}
-	if strings.Contains(stdout, "item-added") && strings.Contains(stdout, "claims") {
+	if strings.Contains(stdout, "item-added") {
 		t.Fatalf("suggestion JSON became the verdict: %s", stdout)
+	}
+}
+
+func TestUnreadableDiffIsRefusedBeforeTheBrain(t *testing.T) {
+	dir := t.TempDir()
+	gitRepo(t, dir, "notes.txt")
+	started := filepath.Join(dir, "started")
+	t.Setenv("STARTED", started)
+	fake := writeFake(t, dir, fakeFiles{ticket: []byte("{\"diff\":\"no-such-rev\",\"harness\":\"stub\",\"model\":\"stub\"}\n")})
+	brain := writeBrain(t, dir, "#!/bin/sh\ntouch \"$STARTED\"\n")
+	stdout, stderr, code := launch(t, dir, fake, brain, "--diff", "no-such-rev", "--harness", "stub", "--model", "stub")
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "refused: diff no-such-rev") {
+		t.Fatalf("exit %d stdout %q stderr %s", code, stdout, stderr)
+	}
+	if _, err := os.Stat(started); !os.IsNotExist(err) {
+		t.Fatal("the brain started on a diff git could not read")
 	}
 }
 
@@ -180,7 +165,7 @@ func TestRealHarnessStaysOptIn(t *testing.T) {
 	}
 	fake := writeFake(t, dir, fakeFiles{ticket: ticketJSON("claude-code", "claude-opus")})
 	_, stderr, code := launch(t, dir, fake, "", "--harnesses", templates, "--intent", "prove the store opens", "--harness", "claude-code", "--model", "claude-opus")
-	if code != 2 || !strings.Contains(stderr, "--allow-harness") {
+	if code != 2 || !strings.Contains(stderr, "verilex-agent: refused: harness claude-code is not started unless --allow-harness") {
 		t.Fatalf("exit %d stderr %s", code, stderr)
 	}
 	if _, err := os.Stat(touched); !os.IsNotExist(err) {
@@ -191,7 +176,7 @@ func TestRealHarnessStaysOptIn(t *testing.T) {
 func TestSameHomeIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")
-	fake := writeFake(t, dir, fakeFiles{ticket: ticketJSON("stub", "stub"), run: []byte("{\"verdict\":\"green\",\"run\":\"hold\"}\n")})
+	fake := writeFake(t, dir, fakeFiles{ticket: ticketJSON("stub", "stub"), run: claimRun("green", "hold", nil, nil)})
 	hold := filepath.Join(dir, "hold")
 	release := filepath.Join(dir, "release")
 	brain := writeBrain(t, dir, "#!/bin/sh\ntouch \"$HOLD\"\nwhile [ ! -f \"$RELEASE\" ]; do sleep 0.02; done\nverilex run --json 'store-open'\n")
@@ -231,137 +216,129 @@ func TestSameHomeIsRefused(t *testing.T) {
 }
 
 func TestParallelRunsKeepSeparateHomesAndSharedLedger(t *testing.T) {
-	if _, err := exec.LookPath("python3"); err != nil {
-		t.Fatal("python3 is required for the tally product")
-	}
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	stores := t.TempDir()
+	t.Setenv("TALLY_STORES", stores)
 	dir := t.TempDir()
 	product := copyProduct(t, dir)
 	ledger := filepath.Join(dir, "ledger")
-	if err := os.MkdirAll(ledger, 0o700); err != nil {
-		t.Fatal(err)
-	}
 	admit(t, product, ledger)
-	homes := []string{filepath.Join(dir, "home-a"), filepath.Join(dir, "home-b")}
-	brains := []string{
-		writeBrain(t, filepath.Join(dir, "brain-a"), "#!/bin/sh\nprintf '%s\\n' 'BRAIN SAYS GREEN'\nverilex run --json 'store-open | item-stored apple | item-listed apple'\n"),
-		writeBrain(t, filepath.Join(dir, "brain-b"), "#!/bin/sh\nprintf '%s\\n' 'BRAIN SAYS GREEN'\nverilex run --json 'store-open | item-stored apple | item-listed apple'\n"),
+	brain := writeBrain(t, dir, "#!/bin/sh\nprintf '%s\\n' 'BRAIN SAYS GREEN'\nverilex run --claim item-listed\n")
+	launchOne := func(home string) (runDoc, error) {
+		stdout, stderr, code, err := launchRaw(dir, coreBin, brain,
+			"--project", product, "--home", home, "--ledger", ledger,
+			"--intent", "prove a stored apple is listed", "--harness", "stub", "--model", "stub")
+		if err != nil {
+			return runDoc{}, err
+		}
+		if code != 0 || strings.Contains(stdout, "BRAIN") {
+			return runDoc{}, fmt.Errorf("exit %d\n%s\n%s", code, stdout, stderr)
+		}
+		var doc runDoc
+		if err = json.Unmarshal([]byte(stdout), &doc); err != nil {
+			return runDoc{}, fmt.Errorf("%v\n%s", err, stdout)
+		}
+		if doc.Verdict != "green" || doc.Run == "" {
+			return runDoc{}, fmt.Errorf("verdict %+v", doc)
+		}
+		return doc, nil
 	}
-	errc := make(chan error, 2)
+	homes := []string{filepath.Join(dir, "home-a"), filepath.Join(dir, "home-b")}
+	docs := make([]runDoc, len(homes))
+	errc := make(chan error, len(homes))
 	for i, home := range homes {
-		home, brain, i := home, brains[i], i
 		go func() {
-			stdout, stderr, code, err := launchRaw(dir, coreBin, brain,
-				"--project", product, "--home", home, "--ledger", ledger,
-				"--intent", "prove a stored apple is listed", "--harness", "stub", "--model", "stub")
-			if err != nil {
-				errc <- err
-				return
-			}
-			if code != 0 {
-				errc <- fmt.Errorf("run %d exit %d\n%s\n%s", i, code, stdout, stderr)
-				return
-			}
-			if strings.Contains(stdout, "BRAIN") {
-				errc <- fmt.Errorf("run %d leaked the brain: %s", i, stdout)
-				return
-			}
-			var doc struct {
-				Verdict string `json:"verdict"`
-				Run     string `json:"run"`
-				Skipped bool   `json:"skipped"`
-			}
-			if err = json.Unmarshal([]byte(stdout), &doc); err != nil {
-				errc <- fmt.Errorf("run %d: %v\n%s", i, err, stdout)
-				return
-			}
-			if doc.Verdict != "green" || doc.Run == "" {
-				errc <- fmt.Errorf("run %d verdict %+v", i, doc)
-				return
-			}
-			record := filepath.Join(home, "tally", "runs", doc.Run, "run.json")
-			body, err := os.ReadFile(record)
-			if err != nil {
-				errc <- fmt.Errorf("run %d record: %v", i, err)
-				return
-			}
-			if !strings.Contains(string(body), `"verdict": "green"`) || !strings.Contains(string(body), doc.Run) {
-				errc <- fmt.Errorf("run %d record does not match stdout", i)
-				return
-			}
-			if !doc.Skipped && !strings.Contains(string(body), filepath.Join(home, "stores")) {
-				errc <- fmt.Errorf("run %d instance is not under its home: %s", i, body)
-				return
-			}
-			errc <- nil
+			var err error
+			docs[i], err = launchOne(home)
+			errc <- err
 		}()
 	}
-	for range 2 {
+	for range homes {
 		if err := <-errc; err != nil {
 			t.Fatal(err)
 		}
 	}
-	other := filepath.Join(dir, "home-c")
-	brain := writeBrain(t, dir, "#!/bin/sh\nprintf '%s\\n' 'BRAIN SAYS RED'\nverilex run --json 'store-open | item-stored apple | item-listed apple'\n")
-	stdout, stderr, code := launch(t, dir, coreBin, brain,
-		"--project", product, "--home", other, "--ledger", ledger,
-		"--intent", "prove a stored apple is listed", "--harness", "stub", "--model", "stub")
-	if code != 0 {
-		t.Fatalf("skip run exit %d\n%s\n%s", code, stdout, stderr)
+	for i, home := range homes {
+		if docs[i].Skipped {
+			t.Fatalf("run %d skipped before any pass of this word admission was recorded", i)
+		}
+		if got := runIDs(t, home); len(got) != 1 || got[0] != docs[i].Run {
+			t.Fatalf("home %d holds runs %v, want only %s", i, got, docs[i].Run)
+		}
 	}
-	var doc struct {
-		Skipped bool   `json:"skipped"`
-		Verdict string `json:"verdict"`
-		Run     string `json:"run"`
+	if docs[0].Run == docs[1].Run {
+		t.Fatalf("parallel runs share run %s", docs[0].Run)
 	}
-	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
-		t.Fatalf("skip JSON: %v\n%s", err, stdout)
-	}
-	if !doc.Skipped || doc.Verdict != "green" {
-		t.Fatalf("third run did not skip: %+v\n%s", doc, stdout)
-	}
-	stores, err := os.ReadDir(filepath.Join(other, "stores"))
+	third := filepath.Join(dir, "home-c")
+	doc, err := launchOne(third)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(stores) != 0 {
-		t.Fatalf("skipped run launched a store: %v", stores)
+	if !doc.Skipped {
+		t.Fatalf("a run on a new home did not skip through the shared ledger: %+v", doc)
 	}
-	if strings.Contains(stdout, "BRAIN") {
-		t.Fatalf("brain text in skip verdict: %s", stdout)
+	record := readRecord(t, third, doc.Run)
+	if record["instance"] != nil {
+		t.Fatalf("skipped run launched an instance: %v", record["instance"])
+	}
+	if _, err = os.Stat(filepath.Join(stores, "tally-"+doc.Run)); !os.IsNotExist(err) {
+		t.Fatalf("skipped run left a store: %v", err)
 	}
 }
 
 func TestBoundaryPassesOnThisRepoAndFailsOnAHarnessNameOrImport(t *testing.T) {
-	script := filepath.Join(repo, "scripts", "boundary")
-	out, err := exec.Command(script, repo).CombinedOutput()
-	if err != nil {
-		t.Fatalf("repo boundary: %v\n%s", err, out)
+	boundary := func(root string) (string, int) {
+		t.Helper()
+		cmd := exec.Command("go", "run", filepath.Join(repo, "scripts", "boundary.go"), root)
+		cmd.Dir = repo
+		out, err := cmd.CombinedOutput()
+		if exit, ok := err.(*exec.ExitError); ok {
+			return string(out), exit.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		return string(out), 0
 	}
-	if !strings.Contains(string(out), "boundary: ok") {
-		t.Fatalf("stdout = %s", out)
+	fixture := func(files map[string]string) string {
+		t.Helper()
+		root := t.TempDir()
+		for name, body := range files {
+			path := filepath.Join(root, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return root
 	}
-	bad := t.TempDir()
-	if err = os.MkdirAll(filepath.Join(bad, "internal"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(filepath.Join(bad, "internal", "driver.go"), []byte("package internal\n\nvar harness = \"claude-code\"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out, err = exec.Command(script, bad).CombinedOutput()
-	if err == nil || !strings.Contains(string(out), "claude-code") {
-		t.Fatalf("harness fixture err=%v\n%s", err, out)
-	}
-	imp := t.TempDir()
-	if err = os.MkdirAll(filepath.Join(imp, "cmd"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(filepath.Join(imp, "cmd", "main.go"), []byte("package main\nimport _ \"github.com/DereKk8/verilex/agent/internal/cli\"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out, err = exec.Command(script, imp).CombinedOutput()
-	if err == nil || !strings.Contains(string(out), "imports the agent module") {
-		t.Fatalf("import fixture err=%v\n%s", err, out)
+	for _, tc := range []struct {
+		name  string
+		root  string
+		exit  int
+		wants string
+	}{
+		{"this repository", repo, 0, "boundary: ok"},
+		{"identifiers and skill directories are not harnesses", fixture(map[string]string{
+			"internal/x.go": "package x\n\nvar dirs = []string{\".cursor/skills\", \".claude/skills\"}\n\nfunc f() int {\n\tpi := 0\n\treturn pi\n}\n",
+		}), 0, "boundary: ok"},
+		{"a harness name in a string", fixture(map[string]string{
+			"internal/driver.go": "package internal\n\nvar harness = \"claude-code\"\n",
+		}), 1, "internal/driver.go:3: claude-code"},
+		{"a harness name in a raw string", fixture(map[string]string{
+			"cmd/x/main.go": "package main\n\nvar argv = `\nexec codex exec\n`\n",
+		}), 1, "core names a specific harness"},
+		{"an import of the agent module", fixture(map[string]string{
+			"cmd/main.go": "package main\n\nimport _ \"github.com/DereKk8/verilex/agent/internal/cli\"\n",
+		}), 1, "core imports the agent module"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, exit := boundary(tc.root)
+			if exit != tc.exit || !strings.Contains(out, tc.wants) {
+				t.Fatalf("exit %d, want %d\n%s", exit, tc.exit, out)
+			}
+		})
 	}
 }
 

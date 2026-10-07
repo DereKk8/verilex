@@ -1,98 +1,120 @@
-// Package verdict reads the JSON a verilex process printed and decides what the launcher may report.
-// It never invents a verdict. It only refuses to call a run green when verilex's own plan and
-// verdict disagree, or when the process exit disagrees with the document.
+// Package verdict reads the JSON a verilex run printed and decides whether the launcher may return
+// it. It never invents a verdict. It refuses a green that does not cover the run spec, and any
+// document whose process exit disagrees with it.
 package verdict
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"slices"
 	"strings"
 )
 
-// Doc is the machine-readable document verilex printed for one run.
+// RunFormat is the claim-run contract the launcher reads. Any other format is a breaking change.
+const RunFormat = "verilex-claim-run-1"
+
+// Doc is the document verilex printed for one run. Raw is returned unchanged.
 type Doc struct {
-	Raw     []byte
-	Verdict string
-	Run     string
-	Warning string
-	Missed  []string
-	Skipped bool
+	Raw       []byte      `json:"-"`
+	Format    string      `json:"format"`
+	Verdict   string      `json:"verdict"`
+	Run       string      `json:"run"`
+	Reason    *string     `json:"reason"`
+	Skipped   bool        `json:"skipped"`
+	Requested *Request    `json:"requested"`
+	Warning   string      `json:"warning"`
+	Uncovered []Uncovered `json:"uncovered"`
+	Unmapped  []string    `json:"unmapped"`
+	Unclaimed []string    `json:"unclaimed"`
+	Unrun     []string    `json:"unrun"`
 }
 
-// DefaultIntent is the intent a run uses when the spec names a diff and no intent.
-const DefaultIntent = "prove nothing this change touched broke"
+// Request is what verilex says it was asked, read from verilex rather than from the brain.
+type Request struct {
+	Claims  []string `json:"claims"`
+	Named   []string `json:"named"`
+	Changed []string `json:"changed"`
+}
 
-// Parse reads one JSON object. It keeps Raw so the launcher can return those bytes unchanged.
+// Uncovered is a touched claim the run did not prove.
+type Uncovered struct {
+	Claim string `json:"claim"`
+	Next  string `json:"next"`
+}
+
+// Want is what the run spec requires a green to cover: the named claims and every changed path,
+// relative to Project.
+type Want struct {
+	Project string
+	Named   []string
+	Changed []string
+}
+
+// Parse reads one JSON object and keeps its bytes.
 func Parse(raw []byte) (Doc, error) {
 	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || trimmed[0] != '{' {
-		return Doc{}, fmt.Errorf("verilex returned no JSON verdict")
+	var doc Doc
+	if err := json.Unmarshal(trimmed, &doc); err != nil {
+		return Doc{}, fmt.Errorf("verilex printed no JSON verdict: %v", err)
 	}
-	var fields map[string]any
-	if err := json.Unmarshal(trimmed, &fields); err != nil {
-		return Doc{}, fmt.Errorf("verilex verdict is not JSON: %v", err)
+	if doc.Format != "" && doc.Format != RunFormat {
+		return Doc{}, fmt.Errorf("verilex printed format %q; this launcher reads %s", doc.Format, RunFormat)
 	}
-	doc := Doc{Raw: append([]byte(nil), trimmed...)}
-	doc.Verdict, _ = fields["verdict"].(string)
-	doc.Run, _ = fields["run"].(string)
-	doc.Warning, _ = fields["warning"].(string)
-	doc.Skipped, _ = fields["skipped"].(bool)
-	doc.Missed = names(fields, "missed_claims", "unpicked", "uncovered", "uncovered_claims", "touched_unpicked")
-	if doc.Warning == "" {
-		doc.Warning = warningText(fields["warnings"])
-	}
-	if doc.Verdict == "" {
+	if code(doc.Verdict) < 0 {
 		return Doc{}, fmt.Errorf("verilex JSON has no verdict")
 	}
+	doc.Raw = append(slices.Clone(trimmed), '\n')
 	return doc, nil
 }
 
-// Unpicked reads a plan document and returns claims verilex says the run did not pick.
-// An empty list means the plan did not report any, not that coverage was checked here.
-func Unpicked(raw []byte) []string {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || trimmed[0] != '{' {
-		return nil
-	}
-	var fields map[string]any
-	if err := json.Unmarshal(trimmed, &fields); err != nil {
-		return nil
-	}
-	found := names(fields, "missed_claims", "unpicked", "uncovered_claims", "touched_unpicked")
-	found = append(found, disposed(fields["claims"])...)
-	return unique(found)
-}
-
-// Normalize keeps the document's bytes and ends them with one newline.
-func Normalize(raw []byte) []byte {
-	return append(bytes.TrimRight(raw, "\n"), '\n')
-}
-
-// Exit is the process code for doc. A green document whose verilex process did not exit 0 is
-// not reported as green.
+// Exit is the process code for doc. verilex exits 0, 1 or 2 for green, red or inconclusive; any
+// other pairing is an environment failure, never a product verdict.
 func Exit(doc Doc, verilexExit int) (int, error) {
 	want := code(doc.Verdict)
-	if want == 0 && verilexExit != 0 {
+	if want != verilexExit {
 		return 2, fmt.Errorf("verilex printed %s but exited %d", doc.Verdict, verilexExit)
-	}
-	if want == 1 && verilexExit == 0 {
-		return 2, fmt.Errorf("verilex printed red but exited 0")
 	}
 	return want, nil
 }
 
-// MissingWarning returns plan claims that the verdict document does not warn about.
-// A verdict that carries any missed-claim warning is treated as having warned.
-func MissingWarning(planRaw []byte, doc Doc) []string {
-	unpicked := Unpicked(planRaw)
-	if len(unpicked) == 0 || warned(doc) {
+// Check refuses a green that does not prove the spec: a run that was not a claim run, or whose
+// request left out a named claim or a changed path. A red or inconclusive verdict stands as
+// verilex printed it.
+func Check(doc Doc, want Want) error {
+	if doc.Verdict != "green" {
 		return nil
 	}
-	return unpicked
+	if doc.Format != RunFormat || doc.Requested == nil {
+		return fmt.Errorf("run %s is green but is not a claim run, so it does not show what it was asked", doc.Run)
+	}
+	asked := append(slices.Clone(doc.Requested.Claims), doc.Requested.Named...)
+	var missing []string
+	for _, name := range want.Named {
+		if !slices.Contains(asked, name) {
+			missing = append(missing, "claim "+name)
+		}
+	}
+	changed := map[string]bool{}
+	for _, entry := range doc.Requested.Changed {
+		if path, ok := pathOf(entry); ok {
+			changed[resolve(want.Project, path)] = true
+		}
+	}
+	for _, path := range want.Changed {
+		if !changed[resolve(want.Project, path)] {
+			missing = append(missing, "change "+path)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("run %s is green but was not asked about %s", doc.Run, strings.Join(missing, ", "))
+	}
+	return nil
 }
 
-// Summary is the quiet human line. It is built only from doc.
+// Summary is the quiet human form, built only from doc: the verdict line, then each gap verilex
+// reported with the command that would close it.
 func Summary(doc Doc) string {
 	line := doc.Verdict
 	if doc.Run != "" {
@@ -101,21 +123,53 @@ func Summary(doc Doc) string {
 	if doc.Skipped {
 		line += "; skipped"
 	}
-	switch {
-	case len(doc.Missed) > 0:
-		line += fmt.Sprintf("; missed claims: %d", len(doc.Missed))
-	case doc.Warning != "":
-		line += "; " + oneLine(doc.Warning)
+	if doc.Warning != "" {
+		line += "; " + doc.Warning
 	}
-	return line
+	if doc.Reason != nil && *doc.Reason != "" {
+		line += "; " + *doc.Reason
+	}
+	lines := []string{line}
+	for _, u := range doc.Uncovered {
+		lines = append(lines, "  uncovered  "+u.Claim+"  "+u.Next)
+	}
+	for _, gap := range []struct {
+		label string
+		items []string
+	}{{"unmapped", doc.Unmapped}, {"unclaimed", doc.Unclaimed}, {"unrun", doc.Unrun}} {
+		for _, item := range gap.items {
+			lines = append(lines, "  "+gap.label+"  "+item)
+		}
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
-func warned(doc Doc) bool {
-	if doc.Warning != "" || len(doc.Missed) > 0 {
-		return true
+// pathOf returns the path of a diff entry, as verilex classifies it.
+func pathOf(entry string) (string, bool) {
+	for _, kind := range []string{"config:", "image:", "runbook:"} {
+		if strings.HasPrefix(entry, kind) && len(entry) > len(kind) {
+			return "", false
+		}
 	}
-	text := strings.ToLower(string(doc.Raw))
-	return strings.Contains(text, "not covered") || strings.Contains(text, "not picked")
+	if strings.HasPrefix(entry, "path:") && len(entry) > len("path:") {
+		return entry[len("path:"):], true
+	}
+	return entry, true
+}
+
+// resolve matches verilex: a relative path is under the project, and symlinks are followed.
+func resolve(project, path string) string {
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(project, path)
+	}
+	path = filepath.Clean(path)
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	if dir, err := filepath.EvalSymlinks(filepath.Dir(path)); err == nil {
+		return filepath.Join(dir, filepath.Base(path))
+	}
+	return path
 }
 
 func code(verdict string) int {
@@ -124,124 +178,8 @@ func code(verdict string) int {
 		return 0
 	case "red":
 		return 1
-	default:
+	case "inconclusive":
 		return 2
 	}
-}
-
-func names(fields map[string]any, keys ...string) []string {
-	var found []string
-	for _, key := range keys {
-		found = append(found, listNames(fields[key])...)
-	}
-	return unique(found)
-}
-
-func listNames(value any) []string {
-	switch v := value.(type) {
-	case string:
-		if v != "" {
-			return []string{v}
-		}
-	case []any:
-		var found []string
-		for _, item := range v {
-			switch n := item.(type) {
-			case string:
-				if n != "" {
-					found = append(found, n)
-				}
-			case map[string]any:
-				if name := claimName(n); name != "" {
-					found = append(found, name)
-				}
-			}
-		}
-		return found
-	}
-	return nil
-}
-
-func disposed(value any) []string {
-	items, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	var found []string
-	for _, item := range items {
-		fields, ok := item.(map[string]any)
-		if !ok || !unpickedDisposition(fields) {
-			continue
-		}
-		if name := claimName(fields); name != "" {
-			found = append(found, name)
-		}
-	}
-	return found
-}
-
-func unpickedDisposition(fields map[string]any) bool {
-	for _, key := range []string{"disposition", "status", "decision"} {
-		switch strings.ToLower(fmt.Sprint(fields[key])) {
-		case "unpicked", "missed", "uncovered", "not_picked", "not picked":
-			return true
-		}
-	}
-	if v, ok := fields["picked"].(bool); ok && !v {
-		return true
-	}
-	if v, ok := fields["unpicked"].(bool); ok && v {
-		return true
-	}
-	return false
-}
-
-func claimName(fields map[string]any) string {
-	for _, key := range []string{"claim", "name", "id"} {
-		if s, ok := fields[key].(string); ok && s != "" {
-			return s
-		}
-	}
-	return ""
-}
-
-func warningText(value any) string {
-	switch v := value.(type) {
-	case string:
-		return v
-	case []any:
-		var parts []string
-		for _, item := range v {
-			switch n := item.(type) {
-			case string:
-				parts = append(parts, n)
-			case map[string]any:
-				if text, ok := n["text"].(string); ok {
-					parts = append(parts, text)
-				} else if text, ok := n["warning"].(string); ok {
-					parts = append(parts, text)
-				}
-			}
-		}
-		return strings.Join(parts, "; ")
-	default:
-		return ""
-	}
-}
-
-func unique(in []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, name := range in {
-		if name == "" || seen[name] {
-			continue
-		}
-		seen[name] = true
-		out = append(out, name)
-	}
-	return out
-}
-
-func oneLine(s string) string {
-	return strings.Join(strings.Fields(s), " ")
+	return -1
 }

@@ -376,14 +376,17 @@ A run records its resolved ticket in its own run record (`ticket` in `--json` an
 
 ## Companion launcher
 
-`verilex-agent` is a separate module in `agent/`. The core does not import it and does not start a harness. The launcher reads the run spec through `verilex ticket`, starts the brain that spec names, and prints the JSON from `verilex run`. That JSON is verilex's own verdict, including any missed-claim warning verilex printed. The brain's message is not the verdict. A real harness starts only with `--allow-harness`. A named executable (`--brain`) is how tests and bots supply a brain without one.
+`verilex-agent` is a separate module in `agent/`. The core does not import it and does not start a harness. The launcher reads the run spec through `verilex ticket`, starts the brain that spec names with the verilex skill and the intent, and prints the JSON from the brain's last `verilex run`. That JSON is verilex's own verdict, byte for byte, including its missed-claim warning (`warning`, `uncovered`, `unmapped`, `unclaimed`, `unrun`). The brain's message is not the verdict. A real harness starts only with `--allow-harness`. A named executable (`--brain`) is how tests and bots supply a brain without one.
 
 ```
 go build -o verilex-agent ./agent/cmd/verilex-agent
 verilex-agent --ticket deep.yaml --project . --skill skills/verilex/SKILL.md
+verilex-agent --diff main...HEAD --claim item-listed --harness claude-code --model <model> --allow-harness
 ```
 
-Each run gets its own state home, so two runs do not share a mutable instance. Pass the same `--ledger` to keep skip savings. A second run that reuses a home still in use is refused.
+The brain reaches verilex only through the launcher. It may run `index`, `plan`, `run`, `words`, `claims`, `runs`, `ticket` and `check`, never with `--keep` or `--continue`; every `run` and `plan` carries the run spec as `--ticket`, so the run record names the brain. A green is returned only from a `verilex-claim-run-1` run whose `requested` holds every `--claim` given to the launcher (`named` or `claims`) and every path the diff changes (`git diff --name-only --relative <diff>` in the project). Otherwise, or when the brain ran no verilex run, ran out of `time_budget`, or verilex's exit does not match its verdict, the launcher prints `verilex-agent: inconclusive: <reason>` on stderr, nothing on stdout, and exits `2`. A red or inconclusive verdict is returned as verilex printed it. Exit codes are verilex's: `0` green, `1` red, `2` inconclusive or refused. `--text` prints the verdict line and each gap instead of the JSON.
+
+With `--suggest`, the brain is first asked, with verilex blocked, for extra claims; they reach the run prompt as suggestions, never as a verdict or a ceiling. Each run gets its own state home, so two runs do not share a mutable instance. Pass the same `--ledger` to keep skip savings. A second run that reuses a home still in use is refused.
 
 ## The word lifecycle
 

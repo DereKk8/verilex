@@ -28,19 +28,31 @@ type Proxy struct {
 	Project string
 	Home    string
 	Ledger  string
-	Env     []string
+	// Ticket is the resolved run spec. Every run and plan is given it, so verilex records the
+	// brain choice in the run itself.
+	Ticket string
+	Env    []string
 
 	ln   net.Listener
 	mu   sync.Mutex
 	cmds []*exec.Cmd
 	run  capture
-	plan capture
 }
 
 type capture struct {
 	stdout []byte
 	exit   int
 	ok     bool
+}
+
+// allowed are the commands the brain may run. The rest change what verilex trusts (onboard,
+// admit, propose, new, gap) or tear down instances (cleanup), which no model may decide.
+var allowed = map[string]bool{"index": true, "plan": true, "run": true, "words": true, "claims": true, "runs": true, "ticket": true, "check": true}
+
+// values are the subcommand flags that take a value, as verilex parses them.
+var values = map[string]bool{
+	"--continue": true, "--ticket": true, "--claim": true, "--named": true, "--changed": true,
+	"--intent": true, "--implements": true, "--same-as": true, "--verdict": true,
 }
 
 type request struct {
@@ -81,18 +93,12 @@ func (p *Proxy) Serve() {
 	}
 }
 
-// LastRun is the last verilex run the brain asked for.
+// LastRun is the last verilex run the brain asked for that printed a JSON document. A refused
+// run prints none, so it does not hide an earlier verdict.
 func (p *Proxy) LastRun() (stdout []byte, exit int, ok bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]byte(nil), p.run.stdout...), p.run.exit, p.run.ok
-}
-
-// LastPlan is the last verilex plan the brain asked for.
-func (p *Proxy) LastPlan() []byte {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return append([]byte(nil), p.plan.stdout...)
 }
 
 // Close stops the listener and kills any verilex process the proxy still holds.
@@ -122,17 +128,17 @@ func (p *Proxy) handle(conn net.Conn) {
 		writeJSON(conn, response{Stderr: "verilex-agent: refused: stdin is too large\n", Exit: 2})
 		return
 	}
-	args := pinArgs(req.Args, p.Project)
-	stdout, stderr, code := p.exec(args, req.Stdin)
-	sub := subcommand(args)
-	p.mu.Lock()
-	switch sub {
-	case "run":
-		p.run = capture{stdout: append([]byte(nil), stdout...), exit: code, ok: true}
-	case "plan":
-		p.plan = capture{stdout: append([]byte(nil), stdout...), exit: code, ok: true}
+	args, sub, err := pinArgs(req.Args, p.Project, p.Ticket)
+	if err != nil {
+		writeJSON(conn, response{Stderr: "verilex-agent: refused: " + err.Error() + "\n", Exit: 2})
+		return
 	}
-	p.mu.Unlock()
+	stdout, stderr, code := p.exec(args, req.Stdin)
+	if sub == "run" && bytes.HasPrefix(bytes.TrimSpace(stdout), []byte("{")) {
+		p.mu.Lock()
+		p.run = capture{stdout: append([]byte(nil), stdout...), exit: code, ok: true}
+		p.mu.Unlock()
+	}
 	writeJSON(conn, response{Stdout: string(stdout), Stderr: string(stderr), Exit: code})
 }
 
@@ -155,13 +161,12 @@ func (p *Proxy) exec(args []string, stdin string) ([]byte, []byte, int) {
 func (p *Proxy) childEnv() []string {
 	var env []string
 	for _, entry := range p.Env {
-		if strings.HasPrefix(entry, "VERILEX_HOME=") || strings.HasPrefix(entry, "VERILEX_LEDGER=") || strings.HasPrefix(entry, "TALLY_STORES=") {
+		if strings.HasPrefix(entry, "VERILEX_HOME=") || strings.HasPrefix(entry, "VERILEX_LEDGER=") {
 			continue
 		}
 		env = append(env, entry)
 	}
 	env = append(env, "VERILEX_HOME="+p.Home)
-	env = append(env, "TALLY_STORES="+filepath.Join(p.Home, "stores"))
 	if p.Ledger != "" {
 		env = append(env, "VERILEX_LEDGER="+p.Ledger)
 	}
@@ -199,8 +204,11 @@ func Relay(socket string, args []string, stdin io.Reader, stdout, stderr io.Writ
 	return resp.Exit
 }
 
-func pinArgs(args []string, project string) []string {
-	var out []string
+// pinArgs points every command at the launcher's project and refuses what a stateless run may
+// not do. run and plan always print JSON, carry the run spec, and never keep or continue an
+// instance: a kept instance would outlive this run's home.
+func pinArgs(args []string, project, ticket string) ([]string, string, error) {
+	var rest []string
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--project" && i+1 < len(args) {
 			i++
@@ -209,48 +217,55 @@ func pinArgs(args []string, project string) []string {
 		if strings.HasPrefix(args[i], "--project=") {
 			continue
 		}
-		out = append(out, args[i])
+		rest = append(rest, args[i])
 	}
-	out = append([]string{"--project", project}, out...)
-	if sub := subcommand(out); (sub == "run" || sub == "plan") && !hasFlag(out, "--json") {
-		out = append(out, "--json")
+	pinned := []string{"--project", project}
+	if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+		return append(pinned, rest...), "", nil
 	}
-	return out
-}
-
-func subcommand(args []string) string {
-	values := map[string]bool{
-		"--project": true, "--continue": true, "--ticket": true, "--intent": true,
-		"--changed": true, "--implements": true, "--verdict": true, "--same-as": true,
-		"--claim": true, "--claims": true, "--named": true, "--diff": true, "--from": true,
+	sub := rest[0]
+	if !allowed[sub] {
+		return nil, sub, fmt.Errorf("verilex %s is not available to the brain; it may run index, plan, run, words, claims, runs, ticket and check", sub)
 	}
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			if i+1 < len(args) {
-				return args[i+1]
-			}
-			return ""
+	if sub != "run" && sub != "plan" {
+		return append(pinned, rest...), sub, nil
+	}
+	var kept []string
+	hasJSON, literal := false, false
+	for i := 1; i < len(rest); i++ {
+		arg := rest[i]
+		if literal {
+			kept = append(kept, arg)
+			continue
 		}
-		if strings.HasPrefix(arg, "-") {
-			name, _, cut := strings.Cut(arg, "=")
-			if !cut && values[name] {
+		name, _, inline := strings.Cut(arg, "=")
+		switch {
+		case arg == "--":
+			literal = true
+		case arg == "--keep" || name == "--continue":
+			return nil, sub, fmt.Errorf("%s is not available to the brain: each launcher run owns one instance and leaves none behind", name)
+		case arg == "--json":
+			hasJSON = true
+		case name == "--ticket":
+			if !inline {
 				i++
 			}
 			continue
+		case values[name] && !inline && i+1 < len(rest):
+			kept = append(kept, arg, rest[i+1])
+			i++
+			continue
 		}
-		return arg
+		kept = append(kept, arg)
 	}
-	return ""
-}
-
-func hasFlag(args []string, flag string) bool {
-	for _, arg := range args {
-		if arg == flag || strings.HasPrefix(arg, flag+"=") {
-			return true
-		}
+	pinned = append(pinned, sub)
+	if ticket != "" {
+		pinned = append(pinned, "--ticket", ticket)
 	}
-	return false
+	if !hasJSON {
+		pinned = append(pinned, "--json")
+	}
+	return append(pinned, kept...), sub, nil
 }
 
 func writeJSON(w io.Writer, value any) error {

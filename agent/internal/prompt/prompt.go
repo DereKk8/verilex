@@ -5,6 +5,9 @@ import (
 	"strings"
 )
 
+// DefaultIntent is the intent of a run whose spec names a diff and no intent.
+const DefaultIntent = "prove nothing this change touched broke"
+
 // Input is everything the brain is given before it drives verilex.
 type Input struct {
 	Skill       []byte
@@ -35,12 +38,13 @@ func Build(in Input) string {
 	writeList(&b, "suggestion", in.Suggestions)
 	b.WriteString("\n# Rules\n")
 	b.WriteString("You are the brain. verilex is a model-free tool. Drive it only through the verilex command on PATH.\n")
-	b.WriteString("Derive claims from the intent. Named claims are a floor, never a ceiling.\n")
+	b.WriteString("Derive claims from the intent. Named claims are a floor, never a ceiling: pass each floor claim with --named.\n")
 	b.WriteString("When the intent is the default, it means: prove nothing this change touched broke.\n")
-	b.WriteString("Call verilex plan --json with --claim, --named and --changed, then verilex run --json with the same flags.\n")
+	b.WriteString("Pass every changed path with --changed. Call verilex plan with --claim, --named and --changed, then verilex run with the same flags and no chain.\n")
 	b.WriteString("If the plan lists unpicked, or the verdict says a touched claim is not covered, add that claim with --claim and run again.\n")
-	b.WriteString("Do not decide the verdict. The launcher ignores your message and returns verilex's own JSON verdict.\n")
-	b.WriteString("Do not share an instance with another run. Do not set VERILEX_HOME or VERILEX_LEDGER.\n")
+	b.WriteString("The launcher returns verilex's own JSON verdict from your last verilex run and ignores your message.\n")
+	b.WriteString("It returns green only from a claim run whose request holds every floor claim and every changed path; otherwise the result is inconclusive.\n")
+	b.WriteString("You may run index, plan, run, words, claims, runs, ticket and check, never with --keep or --continue.\n")
 	return b.String()
 }
 

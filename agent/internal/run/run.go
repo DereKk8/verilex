@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +35,16 @@ type Result struct {
 	Exit   int
 }
 
+// Inconclusive is a run that produced no verdict the launcher may return. It is exit 2, like
+// verilex's own inconclusive, and never a product failure.
+type Inconclusive struct{ Reason string }
+
+func (e *Inconclusive) Error() string { return e.Reason }
+
+func inconclusive(format string, args ...any) error {
+	return &Inconclusive{Reason: fmt.Sprintf(format, args...)}
+}
+
 type budgetError struct{ budget time.Duration }
 
 func (e *budgetError) Error() string {
@@ -46,13 +57,12 @@ func isBudget(err error) bool {
 }
 
 type ticket struct {
-	Intent      string `json:"intent"`
-	Diff        string `json:"diff"`
-	Harness     string `json:"harness"`
-	Model       string `json:"model"`
-	Effort      string `json:"effort"`
-	TokenBudget int    `json:"token_budget"`
-	TimeBudget  string `json:"time_budget"`
+	Intent     string `json:"intent"`
+	Diff       string `json:"diff"`
+	Harness    string `json:"harness"`
+	Model      string `json:"model"`
+	Effort     string `json:"effort"`
+	TimeBudget string `json:"time_budget"`
 }
 
 // Run resolves the spec through the verilex CLI, starts the brain, and returns verilex's verdict.
@@ -66,11 +76,10 @@ func Run(opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	skillPath, skill, err := loadSkill(opts.Skill, project)
+	skill, err := loadSkill(opts.Skill, project)
 	if err != nil {
 		return Result{}, err
 	}
-	_ = skillPath
 	work, err := os.MkdirTemp("", "verilex-agent-")
 	if err != nil {
 		return Result{}, err
@@ -78,19 +87,29 @@ func Run(opts Options) (Result, error) {
 	if !opts.KeepWork {
 		defer os.RemoveAll(work)
 	}
-	spec, err := resolve(verilex, project, work, opts)
+	spec, ticketPath, err := resolve(verilex, project, work, opts)
+	if err != nil {
+		return Result{}, err
+	}
+	argv, err := harness.Argv(harness.Spec{
+		Name: spec.Harness, Model: spec.Model, Effort: spec.Effort,
+		Brain: opts.Brain, AllowHarness: opts.AllowHarness, TemplatesPath: opts.Harnesses,
+	})
 	if err != nil {
 		return Result{}, err
 	}
 	intent := spec.Intent
 	if intent == "" {
-		intent = verdict.DefaultIntent
+		intent = prompt.DefaultIntent
 	}
 	changed, err := changedFiles(project, spec.Diff)
 	if err != nil {
 		return Result{}, err
 	}
-	suggestions, err := suggest(opts, spec, work, skill, intent, changed)
+	if spec.Diff != "" && len(changed) == 0 && spec.Intent == "" && len(opts.Claims) == 0 {
+		return Result{}, inconclusive("diff %s changes no file under %s, so there is nothing to prove", spec.Diff, project)
+	}
+	suggestions, err := suggest(opts, argv, work, skill, intent, spec.Diff, changed)
 	if err != nil {
 		return Result{}, err
 	}
@@ -114,9 +133,6 @@ func Run(opts Options) (Result, error) {
 		return Result{}, err
 	}
 	defer release()
-	if err = os.MkdirAll(filepath.Join(home, "stores"), 0o700); err != nil {
-		return Result{}, err
-	}
 	px, err := proxy.Listen(shortDir())
 	if err != nil {
 		return Result{}, err
@@ -126,6 +142,7 @@ func Run(opts Options) (Result, error) {
 	px.Project = project
 	px.Home = home
 	px.Ledger = opts.Ledger
+	px.Ticket = ticketPath
 	px.Env = os.Environ()
 	go px.Serve()
 	if err = writeWrapper(work, px.Socket()); err != nil {
@@ -135,43 +152,39 @@ func Run(opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("time_budget: %v", err)
 	}
-	brainErr := startBrain(opts, spec, work, promptPath, text, "verify", budget)
+	brainErr := startBrain(opts, argv, work, promptPath, text, "verify", budget)
 	if isBudget(brainErr) {
-		return Result{}, brainErr
+		return Result{}, inconclusive("%v", brainErr)
 	}
 	stdout, verilexExit, ok := px.LastRun()
 	if !ok {
 		if brainErr != nil {
-			return Result{}, brainErr
+			return Result{}, inconclusive("%v, and ran no verilex run, so there is no verdict", brainErr)
 		}
-		return Result{}, errors.New("the brain exited without a verilex run, so there is no verdict")
+		return Result{}, inconclusive("the brain exited without a verilex run, so there is no verdict")
 	}
 	doc, err := verdict.Parse(stdout)
 	if err != nil {
-		return Result{}, err
+		return Result{}, inconclusive("%v", err)
 	}
 	code, err := verdict.Exit(doc, verilexExit)
-	out := verdict.Normalize(stdout)
 	if err != nil {
-		return Result{Stdout: out}, err
+		return Result{}, inconclusive("run %s: %v", doc.Run, err)
 	}
-	if missed := verdict.MissingWarning(px.LastPlan(), doc); len(missed) > 0 {
-		return Result{Stdout: out}, fmt.Errorf("plan listed uncovered claim %s but the verdict carried no missed-claim warning", strings.Join(missed, ", "))
+	if err = verdict.Check(doc, verdict.Want{Project: project, Named: opts.Claims, Changed: changed}); err != nil {
+		return Result{}, inconclusive("%v", err)
 	}
 	if !opts.JSON {
-		out = []byte(verdict.Summary(doc) + "\n")
-		for _, name := range doc.Missed {
-			out = append(out, []byte("  "+name+"\n")...)
-		}
+		return Result{Stdout: []byte(verdict.Summary(doc)), Exit: code}, nil
 	}
-	return Result{Stdout: out, Exit: code}, nil
+	return Result{Stdout: doc.Raw, Exit: code}, nil
 }
 
-func suggest(opts Options, spec ticket, work string, skill []byte, intent string, changed []string) ([]string, error) {
+func suggest(opts Options, argv []string, work string, skill []byte, intent, diff string, changed []string) ([]string, error) {
 	if !opts.Suggest {
 		return nil, nil
 	}
-	ask := prompt.Build(prompt.Input{Skill: skill, Intent: intent, Diff: spec.Diff, Named: opts.Claims, Changed: changed})
+	ask := prompt.Build(prompt.Input{Skill: skill, Intent: intent, Diff: diff, Named: opts.Claims, Changed: changed})
 	ask += "\n# Suggest\nReply with one JSON object and nothing else: {\"claims\":[\"name\"]}.\n"
 	ask += "Do not call verilex. A suggestion is not a verdict and not a ceiling.\n"
 	path := filepath.Join(work, "suggest.txt")
@@ -187,7 +200,7 @@ func suggest(opts Options, spec ticket, work string, skill []byte, intent string
 		return nil, err
 	}
 	var stdout bytes.Buffer
-	if err := runBrain(opts, spec, block+string(os.PathListSeparator)+os.Getenv("PATH"), path, ask, "suggest", 0, &stdout); err != nil {
+	if err := runBrain(opts, argv, block+string(os.PathListSeparator)+os.Getenv("PATH"), path, ask, "suggest", 0, &stdout); err != nil {
 		return nil, fmt.Errorf("intent formulation: %v", err)
 	}
 	claims, err := suggestedClaims(stdout.Bytes())
@@ -218,19 +231,12 @@ func suggestedClaims(raw []byte) ([]string, error) {
 	return out, nil
 }
 
-func startBrain(opts Options, spec ticket, work, promptPath, text, phase string, budget time.Duration) error {
+func startBrain(opts Options, argv []string, work, promptPath, text, phase string, budget time.Duration) error {
 	path := filepath.Join(work, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
-	return runBrain(opts, spec, path, promptPath, text, phase, budget, nil)
+	return runBrain(opts, argv, path, promptPath, text, phase, budget, nil)
 }
 
-func runBrain(opts Options, spec ticket, path, promptPath, text, phase string, budget time.Duration, stdout *bytes.Buffer) error {
-	argv, err := harness.Argv(harness.Spec{
-		Name: spec.Harness, Model: spec.Model, Effort: spec.Effort,
-		Brain: opts.Brain, AllowHarness: opts.AllowHarness, TemplatesPath: opts.Harnesses,
-	})
-	if err != nil {
-		return err
-	}
+func runBrain(opts Options, argv []string, path, promptPath, text, phase string, budget time.Duration, stdout *bytes.Buffer) error {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = opts.Project
 	cmd.Env = brainEnv(path, promptPath, phase)
@@ -241,9 +247,10 @@ func runBrain(opts Options, spec ticket, path, promptPath, text, phase string, b
 	if stdout != nil {
 		cmd.Stdout = stdout
 	} else {
-		cmd.Stdout = ioDiscard{}
+		cmd.Stdout = io.Discard
 	}
-	if err = cmd.Start(); err != nil {
+	err := cmd.Start()
+	if err != nil {
 		return err
 	}
 	done := make(chan error, 1)
@@ -285,13 +292,17 @@ func brainEnv(path, prompt, phase string) []string {
 	)
 }
 
-func resolve(verilex, project, work string, opts Options) (ticket, error) {
+func resolve(verilex, project, work string, opts Options) (ticket, string, error) {
 	path := opts.Ticket
 	if path == "" {
 		path = filepath.Join(work, "ticket.yaml")
 		if err := os.WriteFile(path, []byte(ticketYAML(opts)), 0o600); err != nil {
-			return ticket{}, err
+			return ticket{}, "", err
 		}
+	}
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return ticket{}, "", err
 	}
 	cmd := exec.Command(verilex, "--project", project, "ticket", "--json", path)
 	cmd.Env = os.Environ()
@@ -303,16 +314,16 @@ func resolve(verilex, project, work string, opts Options) (ticket, error) {
 		if detail == "" {
 			detail = err.Error()
 		}
-		return ticket{}, errors.New(strings.TrimPrefix(detail, "verilex: refused: "))
+		return ticket{}, "", errors.New(strings.TrimPrefix(detail, "verilex: refused: "))
 	}
 	var spec ticket
 	if err := json.Unmarshal(stdout.Bytes(), &spec); err != nil {
-		return ticket{}, fmt.Errorf("verilex ticket JSON: %v", err)
+		return ticket{}, "", fmt.Errorf("verilex ticket JSON: %v", err)
 	}
 	if spec.Harness == "" || spec.Model == "" {
-		return ticket{}, errors.New("resolved ticket names no harness or model")
+		return ticket{}, "", errors.New("resolved ticket names no harness or model")
 	}
-	return spec, nil
+	return spec, path, nil
 }
 
 func ticketYAML(opts Options) string {
@@ -342,14 +353,19 @@ func strconvQuote(value string) string {
 	return fmt.Sprintf("%q", value)
 }
 
+// changedFiles lists the paths diff changes under project, relative to it. A diff git cannot
+// read is refused: an empty list would let a green skip the change.
 func changedFiles(project, diff string) ([]string, error) {
 	if diff == "" {
 		return nil, nil
 	}
-	cmd := exec.Command("git", "-C", project, "diff", "--name-only", diff)
+	cmd := exec.Command("git", "diff", "--name-only", "--relative", diff, "--")
+	cmd.Dir = project
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("diff %s: %s", diff, or(oneLine(stderr.String()), err.Error()))
 	}
 	var files []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -360,7 +376,7 @@ func changedFiles(project, diff string) ([]string, error) {
 	return files, nil
 }
 
-func loadSkill(path, project string) (string, []byte, error) {
+func loadSkill(path, project string) ([]byte, error) {
 	if path == "" {
 		for _, candidate := range []string{
 			filepath.Join(project, "skills", "verilex", "SKILL.md"),
@@ -373,16 +389,16 @@ func loadSkill(path, project string) (string, []byte, error) {
 		}
 	}
 	if path == "" {
-		return "", nil, errors.New("skill file not found; pass --skill or add skills/verilex/SKILL.md")
+		return nil, errors.New("skill file not found; pass --skill or add skills/verilex/SKILL.md")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", nil, fmt.Errorf("skill %s: %v", path, err)
+		return nil, fmt.Errorf("skill %s: %v", path, err)
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return "", nil, fmt.Errorf("skill %s is empty", path)
+		return nil, fmt.Errorf("skill %s is empty", path)
 	}
-	return path, data, nil
+	return data, nil
 }
 
 func writeWrapper(work, socket string) error {
@@ -475,7 +491,3 @@ func oneLine(s string) string {
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
-
-type ioDiscard struct{}
-
-func (ioDiscard) Write(p []byte) (int, error) { return len(p), nil }

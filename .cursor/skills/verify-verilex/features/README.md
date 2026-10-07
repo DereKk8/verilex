@@ -54,4 +54,4 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Claims](claims.md) - `verilex claims`: claim versions, stale pins, review of changed, moved and unmapped requirements and of changed prose, drift after a remap, coverage only through admitted words, and pinned rules.
 - [Parallel runs](parallel.md) - concurrent runs each own an instance; cleanup and `--continue` refuse a run still going; one taker per kept instance; a run that died.
 - [Shared ledger](ledger.md) - stateless instances share passes through `VERILEX_LEDGER`; concurrent recording with none lost or forged; refusal of unowned, off-contract, other-version and damaged passes; age-out.
-- [Launcher](agent.md) - `verilex-agent` returns verilex's own JSON verdict, keeps each run's home private, and shares skip savings through one ledger.
+- [Launcher](agent.md) - `verilex-agent` returns verilex's own JSON verdict and missed-claim warning, is inconclusive on a green that does not cover the spec, limits what the brain may run, keeps each run's home private, and shares skip savings through one ledger.

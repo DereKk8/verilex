@@ -10,15 +10,16 @@ lint() {
   go vet ./...
   go tool staticcheck ./...
   go tool actionlint
-  shellcheck .cursor/skills/verify-verilex/scripts/* .verilex/frame/* scripts/ci scripts/canary-guards scripts/smoke scripts/boundary
-  (cd agent && go vet ./...)
+  shellcheck .cursor/skills/verify-verilex/scripts/* .verilex/frame/* scripts/ci scripts/canary-guards scripts/smoke
+  go vet ./agent/...
+  go tool staticcheck ./agent/...
 }
 mod() {
   go mod verify
   go mod tidy -diff || { echo "go.mod or go.sum is stale (run go mod tidy)"; return 1; }
   (cd agent && go mod tidy -diff) || { echo "agent/go.mod is stale (run go mod tidy in agent)"; return 1; }
 }
-boundary() { scripts/boundary; }
+boundary() { go run scripts/boundary.go; }
 vuln() { go tool govulncheck ./...; }
 test_() {
   # tests/ builds verilex itself; the instrumented binary writes coverage to GOCOVERDIR, which go test would override

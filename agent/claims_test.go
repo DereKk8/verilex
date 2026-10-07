@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -197,21 +198,16 @@ func orEmpty(list []string) []string {
 func gitRepo(t *testing.T, dir, file string) {
 	t.Helper()
 	path := filepath.Join(dir, file)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err = os.WriteFile(path, []byte("first\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, args := range [][]string{
-		{"init", "-q"},
-		{"add", "-A"},
-		{"-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "base"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+	if err := commitAll(dir); err != nil {
+		t.Fatal(err)
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
@@ -221,6 +217,22 @@ func gitRepo(t *testing.T, dir, file string) {
 	if _, err = f.WriteString("# changed\n"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// commitAll makes dir a git repository whose HEAD holds every file in it.
+func commitAll(dir string) error {
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"add", "-A"},
+		{"-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "base"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return nil
 }
 
 func runIDs(t *testing.T, home string) []string {

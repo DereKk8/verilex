@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -99,7 +100,7 @@ func TestNoVerilexRunIsNotGreen(t *testing.T) {
 
 func TestSkillIntentAndSuggestionsReachTheBrain(t *testing.T) {
 	dir := t.TempDir()
-	gitRepo(t, dir, "notes.txt")
+	gitRepo(t, filepath.Join(dir, "project"), "notes.txt")
 	skill := filepath.Join(dir, "SKILL.md")
 	if err := os.WriteFile(skill, []byte("SKILL-MARKER-7\nwhen to use verilex\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -140,7 +141,7 @@ func TestSkillIntentAndSuggestionsReachTheBrain(t *testing.T) {
 
 func TestUnreadableDiffIsRefusedBeforeTheBrain(t *testing.T) {
 	dir := t.TempDir()
-	gitRepo(t, dir, "notes.txt")
+	gitRepo(t, filepath.Join(dir, "project"), "notes.txt")
 	started := filepath.Join(dir, "started")
 	t.Setenv("STARTED", started)
 	fake := writeFake(t, dir, fakeFiles{ticket: []byte("{\"diff\":\"no-such-rev\",\"harness\":\"stub\",\"model\":\"stub\"}\n")})
@@ -373,7 +374,7 @@ type fakeFiles struct {
 func writeFake(t *testing.T, dir string, files fakeFiles) string {
 	t.Helper()
 	path := filepath.Join(dir, "fake-verilex")
-	script := "#!/bin/sh\ncmd=\nprev=\nfor arg in \"$@\"; do\n  case \"$prev\" in\n    --project|--continue|--ticket|--intent|--changed|--implements|--verdict|--same-as|--claim|--claims|--diff) prev=; continue ;;\n  esac\n  case \"$arg\" in\n    --project|--continue|--ticket|--intent|--changed|--implements|--verdict|--same-as|--claim|--claims|--diff) prev=$arg; continue ;;\n    --*) continue ;;\n    *) cmd=$arg; break ;;\n  esac\ndone\ncase \"$cmd\" in\n  ticket) cat \"$FAKE_TICKET\"; exit 0 ;;\n  plan) cat \"$FAKE_PLAN\"; exit 0 ;;\n  run) cat \"$FAKE_RUN\"; exit \"$FAKE_RUN_EXIT\" ;;\n  *) echo \"fake verilex: unexpected $cmd\" >&2; exit 2 ;;\nesac\n"
+	script := "#!/bin/sh\ncmd=\nprev=\nfor arg in \"$@\"; do\n  case \"$prev\" in\n    --project|--continue|--ticket|--intent|--changed|--implements|--verdict|--same-as|--claim|--claims|--diff) prev=; continue ;;\n  esac\n  case \"$arg\" in\n    --project|--continue|--ticket|--intent|--changed|--implements|--verdict|--same-as|--claim|--claims|--diff) prev=$arg; continue ;;\n    --*) continue ;;\n    *) cmd=$arg; break ;;\n  esac\ndone\ncase \"$cmd\" in\n  ticket) cat \"$FAKE_TICKET\"; exit 0 ;;\n  plan) cat \"$FAKE_PLAN\"; exit 0 ;;\n  run) cat \"$FAKE_RUN\"; exit \"$FAKE_RUN_EXIT\" ;;\n  runs) echo '[]'; exit 0 ;;\n  *) echo \"fake verilex: unexpected $cmd\" >&2; exit 2 ;;\nesac\n"
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +427,17 @@ func launchRaw(dir, verilex, brain string, args ...string) (string, string, int,
 			return "", "", 0, err
 		}
 	}
-	argv := []string{"--verilex", verilex, "--skill", skill, "--project", dir}
+	// A test that passes no --project gets dir/project, a git repository beside its fake files.
+	project := filepath.Join(dir, "project")
+	if _, err := os.Stat(filepath.Join(project, ".git")); err != nil && !slices.Contains(args, "--project") {
+		if err = os.MkdirAll(project, 0o700); err != nil {
+			return "", "", 0, err
+		}
+		if err = commitAll(project); err != nil {
+			return "", "", 0, err
+		}
+	}
+	argv := []string{"--verilex", verilex, "--skill", skill, "--project", project}
 	if brain != "" {
 		argv = append(argv, "--brain", brain)
 	}
@@ -472,6 +483,9 @@ func copyProduct(t *testing.T, dir string) string {
 		return os.WriteFile(dest, data, info.Mode().Perm())
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err = commitAll(root); err != nil {
 		t.Fatal(err)
 	}
 	return root

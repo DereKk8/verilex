@@ -8,6 +8,9 @@
 - `agent-skill` hands the brain the skill file, the intent and each changed path. With a diff and no intent, the intent line is `prove nothing this change touched broke`.
 - `agent-missed-claim` returns verilex's own missed-claim warning: a brain that derives one claim from a diff touching three gets verilex's green with `warning` `2 touched claims not covered` and both `uncovered` claims, and `--text` lists them.
 - `agent-uncovered-spec` is inconclusive, exit `2` and no stdout, when the green run left out a changed path, left out a launcher `--claim`, or was a chain run that was given no diff.
+- `agent-edited-project` is inconclusive, exit `2`, when the brain changes a file in the project during the run, even when the same defect gives the honest brain verilex's red.
+- `agent-bypass` is inconclusive, exit `2`, when the brain runs the real `verilex` in the launcher's home, and tears down the instance that run kept.
+- `agent-budget` ends the run at `time_budget` even when the brain started a child in its own session.
 - `agent-brain-limits` refuses, exit `2`, a brain's `onboard`, `run --keep` and `run --continue`, and nothing they would change changes.
 - `agent-ticket` accepts a ticket file instead of intent flags, and still returns verilex's JSON.
 - `agent-same-home` refuses a second run whose `--home` is still in use, exit `2`, with no second verdict.
@@ -24,7 +27,7 @@
 
 Preconditions:
 
-- A fresh session that passes the doctor, then `admit-all`. Build the launcher into the session bin: `go build -o "$S/bin/verilex-agent" ./agent/cmd/verilex-agent` from the repository root.
+- A fresh session that passes the doctor, then `admit-all`. The launcher needs the project in a git work tree, so commit the product: `"$S/vx" agent-git-init git init -q`, `"$S/vx" agent-git-add git add -A`, `"$S/vx" agent-git-commit git -c user.name=v -c user.email=v@example.com commit -qm base`. Build the launcher into the session bin: `go build -o "$S/bin/verilex-agent" ./agent/cmd/verilex-agent` from the repository root.
 - `A` is the common launcher flags: `--project "$S/tally" --skill "$S/skill.md" --harness stub --model stub`.
 - Write the skill and the brains, then `chmod +x "$S"/brain*`. `brain` proves the item-listed claim; `brain-one` derives only `store-opened` and passes each changed path the prompt lists.
 
@@ -48,7 +51,7 @@ EOF
 - **Verdict.** Run `PROMPT_COPY="$S/seen-prompt" "$S/vx" agent-verdict verilex-agent $A --home "$S/agent-home" --brain "$S/brain" --intent 'prove a stored apple is listed' --effort low`. Exit `0`. Stdout is one JSON object whose `format` is `verilex-claim-run-1`, `verdict` is `green` and `run` is `<A>`. It does not contain `BRAIN SAYS`.
 - **Verdict, second view.** Run `"$S/vx" agent-verdict-record python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"], r["run"], r["ticket"]["harness"], r["ticket"]["model"])' "$S/agent-home/tally/runs/<A>/run.json"`. It prints `green <A> stub stub`.
 - **Skill.** Run `"$S/vx" agent-skill cat "$S/seen-prompt"`. The file contains `SKILL-MARKER`, `intent: prove a stored apple is listed` and `The launcher returns verilex's own JSON verdict from your last verilex run and ignores your message.`
-- **A diff.** Commit the product and change one file every claim depends on: `"$S/vx" agent-git sh -c 'git init -q && git add -A && git -c user.name=v -c user.email=v@example.com commit -qm base && printf "# changed\n" >> bin/tally && git diff --name-only'`. It prints `bin/tally`.
+- **A diff.** Change one file every claim depends on: `printf '# changed\n' >> "$S/tally/bin/tally"`. Then `"$S/vx" agent-git-diff git diff --name-only` prints `bin/tally`.
 - **Default intent.** Write a brain that only copies the prompt, `cat > "$S/brain-intent" << 'EOF'` then the two lines `#!/bin/sh` and `cp "$VERILEX_AGENT_PROMPT" "$PROMPT_COPY"`, and `chmod +x "$S/brain-intent"`. Run `PROMPT_COPY="$S/seen-default" "$S/vx" agent-default verilex-agent $A --home "$S/agent-default-home" --brain "$S/brain-intent" --diff HEAD`. Exit `2`, stderr `verilex-agent: inconclusive: the brain exited without a verilex run`, empty stdout. Run `"$S/vx" agent-default-prompt cat "$S/seen-default"`. It contains `intent: prove nothing this change touched broke`, `diff: HEAD` and `changed: bin/tally`.
 - **Missed claim.** Run `"$S/vx" agent-missed verilex-agent $A --home "$S/agent-missed-home" --ledger "$S/ledger" --brain "$S/brain-one" --intent 'prove the store opens' --diff HEAD`. Exit `0`. JSON `verdict` `green`, `warning` `2 touched claims not covered`, `uncovered` claims `item-added` and `item-listed`, each with a `next` command; `requested.changed` is `["bin/tally"]`. No `BRAIN SAYS`.
 - **Missed claim, second view.** `"$S/vx" agent-missed-record python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["warning"]); print(*[u["claim"] for u in r["uncovered"]])' "$S/agent-missed-home/tally/runs/<M>/run.json"` prints the same warning and `item-added item-listed`. `"$S/vx" agent-missed-text verilex-agent $A --ledger "$S/ledger" --brain "$S/brain-one" --intent 'prove the store opens' --diff HEAD --text` prints `green; run <id>...; 2 touched claims not covered` and one `uncovered` line per claim.
@@ -68,7 +71,25 @@ verilex run --changed bin/tally > /dev/null
 ```
 
   Pass `REFUSALS="$S/refusals"` in front of `"$S/vx"`.
-- **Undo the diff.** `"$S/vx" agent-git-undo sh -c 'git checkout -q bin/tally && git diff --name-only'` before the next recipe prints nothing.
+- **Edited project.** Write `$S/brain-fix` as below and `chmod +x` it. Run `TALLY_DEFECT=hide-lists "$S/vx" agent-honest-red verilex-agent $A --brain "$S/brain" --intent 'prove a stored apple is listed'`: exit `1`, verilex's red. Then `TALLY_DEFECT=hide-lists "$S/vx" agent-fixer verilex-agent $A --brain "$S/brain-fix" --intent 'prove a stored apple is listed'`: exit `2`, empty stdout, stderr `verilex-agent: inconclusive: the brain changed the project during the run, so no verdict covers the code under test: bin/tally`. Second view: `"$S/vx" agent-fixer-status git status --porcelain` shows ` M bin/tally`. Restore it with `"$S/vx" agent-fixer-undo git checkout -q -- bin/tally` and append the diff line again.
+
+```sh
+#!/bin/sh
+verilex run --claim item-listed > /dev/null
+python3 -c "p='bin/tally'; s=open(p).read(); open(p,'w').write(s.replace('hide-lists', 'hide-lists-off'))"
+verilex run --claim item-listed > /dev/null
+```
+
+- **Bypass.** Write `$S/brain-bypass` as below and `chmod +x` it. Run `REAL_VERILEX="$S/bin/verilex" AGENT_HOME="$S/agent-bypass-home" "$S/vx" agent-bypass verilex-agent $A --home "$S/agent-bypass-home" --brain "$S/brain-bypass" --intent 'prove the store opens'`: exit `2`, empty stdout, stderr names the bypass run with `did not come through the launcher` and `kept its instance; the launcher tore it down`. Second view: `"$S/vx" agent-bypass-runs python3 -c 'import json,sys,glob; [print(json.load(open(p))["run"], json.load(open(p))["cleanup"]) for p in glob.glob(sys.argv[1]+"/tally/runs/*/run.json")]' "$S/agent-bypass-home"` shows no run with `cleanup` `kept`, and `ls -A "$S/stores"` holds no store of the bypass run.
+
+```sh
+#!/bin/sh
+VERILEX_HOME="$AGENT_HOME" "$REAL_VERILEX" run --keep --claim store-opened > /dev/null
+verilex run --claim store-opened > /dev/null
+```
+
+- **Budget.** Write `$S/brain-escape` as `#!/bin/sh`, `python3 -c 'import os, time; os.setsid(); time.sleep(8)' &` and `sleep 8`, and `chmod +x` it. Run `printf 'intent: prove the store opens\nharness: stub\nmodel: stub\ntime_budget: 1s\n' > "$S/agent-budget.yaml"`, then `"$S/vx" agent-budget verilex-agent --project "$S/tally" --skill "$S/skill.md" --brain "$S/brain-escape" --ticket "$S/agent-budget.yaml"`: exit `2` with `inconclusive: the time budget ended` about one second after it started, not eight. The `evidence` dir's timestamps, or `time`, show it.
+- **Undo the diff.** `"$S/vx" agent-git-undo git checkout -q -- bin/tally`, then `"$S/vx" agent-git-clean git status --porcelain` prints nothing before the next recipe.
 - **Ticket.** Run `printf 'intent: prove a stored apple is listed\nharness: stub\nmodel: stub\neffort: low\n' > "$S/agent-ticket.yaml"`, then `"$S/vx" agent-ticket verilex-agent --project "$S/tally" --home "$S/agent-ticket-home" --skill "$S/skill.md" --brain "$S/brain" --ticket "$S/agent-ticket.yaml"`. Exit `0`, JSON `verdict` `green`, and stdout does not contain `BRAIN SAYS`.
 - **Same home.** Write `$S/brain-hold` as below and `chmod +x` it. `HOLD` is `$S/hold-flag` and `RELEASE` is `$S/release-flag`.
 
@@ -92,6 +113,7 @@ verilex run --claim store-opened
 - Without `--home` the launcher's home is temporary and removed after the run, so `verilex runs` in the session never lists launcher runs. Pass `--home` for a second view.
 - `vx` adds a `$ command` line before stdout. Parse the JSON from the evidence `stdout` file, not from the `vx` transcript.
 - The launcher replaces `VERILEX_HOME` and `VERILEX_LEDGER` for verilex and passes the rest of the environment through, so `TALLY_STORES` from `vx` still places stores under `$S/stores`.
-- `--diff` needs a git repository in the project; a revision git cannot read is refused before the brain starts.
+- The project must be a git work tree, or the launcher refuses before the brain starts; so is a `--diff` revision git cannot read. Files git ignores are not checked for brain edits.
+- The edited-project and bypass checks are detection, not a sandbox: a brain with a shell can still forge a shared-ledger pass (README, Companion launcher).
 - `--ticket` refuses `--intent`, `--diff`, `--harness`, `--model`, `--effort` and `--profile` on the same command.
 - The held run must be released with `touch "$S/release-flag"` or it sleeps until the shell ends.

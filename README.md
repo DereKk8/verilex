@@ -384,9 +384,20 @@ verilex-agent --ticket deep.yaml --project . --skill skills/verilex/SKILL.md
 verilex-agent --diff main...HEAD --claim item-listed --harness claude-code --model <model> --allow-harness
 ```
 
-The brain reaches verilex only through the launcher. It may run `index`, `plan`, `run`, `words`, `claims`, `runs`, `ticket` and `check`, never with `--keep` or `--continue`; every `run` and `plan` carries the run spec as `--ticket`, so the run record names the brain. A green is returned only from a `verilex-claim-run-1` run whose `requested` holds every `--claim` given to the launcher (`named` or `claims`) and every path the diff changes (`git diff --name-only --relative <diff>` in the project). Otherwise, or when the brain ran no verilex run, ran out of `time_budget`, or verilex's exit does not match its verdict, the launcher prints `verilex-agent: inconclusive: <reason>` on stderr, nothing on stdout, and exits `2`. A red or inconclusive verdict is returned as verilex printed it. Exit codes are verilex's: `0` green, `1` red, `2` inconclusive or refused. `--text` prints the verdict line and each gap instead of the JSON.
+The project must be in a git work tree. The brain's `verilex` command is the launcher's: it may run `index`, `plan`, `run`, `words`, `claims`, `runs`, `ticket` and `check`, never with `--keep` or `--continue`; every `run` and `plan` carries the run spec as `--ticket`, so the run record names the brain. A green is returned only from a `verilex-claim-run-1` run whose `requested` holds every `--claim` given to the launcher (`named` or `claims`) and every path the diff changes (`git diff --name-only -z --no-renames --relative <diff>` in the project, so both sides of a rename count).
 
-With `--suggest`, the brain is first asked, with verilex blocked, for extra claims; they reach the run prompt as suggestions, never as a verdict or a ceiling. Each run gets its own state home, so two runs do not share a mutable instance. Pass the same `--ledger` to keep skip savings. A second run that reuses a home still in use is refused.
+The launcher returns no verdict, but prints `verilex-agent: inconclusive: <reason>` on stderr, nothing on stdout, and exits `2`, when:
+
+- the green does not cover the spec as above, or verilex's exit does not match its verdict;
+- the brain ran no verilex run, or `time_budget` ended. One deadline covers `--suggest` and the run, and no child the brain started holds the launcher past it;
+- the brain changed the project: a file git tracks or would track (ignored files are not checked) was added, removed, written or touched between the start of the brain and its end, even if the bytes were put back;
+- the run's home holds a run that did not come through the launcher, or a kept instance. The launcher tears down every instance left in the home.
+
+A red or inconclusive verdict is returned as verilex printed it. Exit codes are verilex's: `0` green, `1` red, `2` inconclusive or refused. `--text` prints the verdict line and each gap instead of the JSON.
+
+With `--suggest`, the brain is first asked, with the launcher's `verilex` blocked, for extra claims; they reach the run prompt as suggestions, never as a verdict or a ceiling. Each run gets its own state home, so two runs do not share a mutable instance. Pass the same `--ledger` to keep skip savings. A second run that reuses a home still in use is refused.
+
+The launcher does not sandbox the brain. The brain runs as the same user with a shell, so it can still call the real `verilex` binary with another home, or write the shared ledger directly; a forged pass in the ledger can make a run skip to green. The checks above catch a brain that edits the code under test or leaves state in its own home, not one that sets out to forge evidence.
 
 ## The word lifecycle
 

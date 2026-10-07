@@ -33,10 +33,11 @@ type Proxy struct {
 	Ticket string
 	Env    []string
 
-	ln   net.Listener
-	mu   sync.Mutex
-	cmds []*exec.Cmd
-	run  capture
+	ln      net.Listener
+	mu      sync.Mutex
+	cmds    []*exec.Cmd
+	run     capture
+	started map[string]bool
 }
 
 type capture struct {
@@ -101,6 +102,23 @@ func (p *Proxy) LastRun() (stdout []byte, exit int, ok bool) {
 	return append([]byte(nil), p.run.stdout...), p.run.exit, p.run.ok
 }
 
+// Started is every run id a verilex run the brain asked for printed. A run in the home that is
+// not here did not come through the launcher.
+func (p *Proxy) Started() map[string]bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := map[string]bool{}
+	for id := range p.started {
+		out[id] = true
+	}
+	return out
+}
+
+// Exec runs one verilex command with the run's project, home, ledger and environment.
+func (p *Proxy) Exec(args ...string) (stdout, stderr []byte, code int) {
+	return p.exec(append([]string{"--project", p.Project}, args...), "")
+}
+
 // Close stops the listener and kills any verilex process the proxy still holds.
 func (p *Proxy) Close() error {
 	sock := p.Socket()
@@ -135,8 +153,18 @@ func (p *Proxy) handle(conn net.Conn) {
 	}
 	stdout, stderr, code := p.exec(args, req.Stdin)
 	if sub == "run" && bytes.HasPrefix(bytes.TrimSpace(stdout), []byte("{")) {
+		var doc struct {
+			Run string `json:"run"`
+		}
+		_ = json.Unmarshal(stdout, &doc)
 		p.mu.Lock()
 		p.run = capture{stdout: append([]byte(nil), stdout...), exit: code, ok: true}
+		if doc.Run != "" {
+			if p.started == nil {
+				p.started = map[string]bool{}
+			}
+			p.started[doc.Run] = true
+		}
 		p.mu.Unlock()
 	}
 	writeJSON(conn, response{Stdout: string(stdout), Stderr: string(stderr), Exit: code})

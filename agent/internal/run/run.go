@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -17,6 +17,7 @@ import (
 	"github.com/DereKk8/verilex/agent/internal/harness"
 	"github.com/DereKk8/verilex/agent/internal/prompt"
 	"github.com/DereKk8/verilex/agent/internal/proxy"
+	"github.com/DereKk8/verilex/agent/internal/tree"
 	"github.com/DereKk8/verilex/agent/internal/verdict"
 )
 
@@ -45,11 +46,9 @@ func inconclusive(format string, args ...any) error {
 	return &Inconclusive{Reason: fmt.Sprintf(format, args...)}
 }
 
-type budgetError struct{ budget time.Duration }
+type budgetError struct{}
 
-func (e *budgetError) Error() string {
-	return fmt.Sprintf("time budget %s ended before the brain finished", e.budget)
-}
+func (e *budgetError) Error() string { return "the time budget ended before the brain finished" }
 
 func isBudget(err error) bool {
 	var target *budgetError
@@ -109,8 +108,27 @@ func Run(opts Options) (Result, error) {
 	if spec.Diff != "" && len(changed) == 0 && spec.Intent == "" && len(opts.Claims) == 0 {
 		return Result{}, inconclusive("diff %s changes no file under %s, so there is nothing to prove", spec.Diff, project)
 	}
-	suggestions, err := suggest(opts, argv, work, skill, intent, spec.Diff, changed)
+	budget, err := time.ParseDuration(or(spec.TimeBudget, "0s"))
 	if err != nil {
+		return Result{}, fmt.Errorf("time_budget: %v", err)
+	}
+	before, err := tree.Snapshot(project)
+	if err != nil {
+		return Result{}, err
+	}
+	// One deadline covers both brain phases, so --suggest cannot stretch the budget.
+	var deadline time.Time
+	if budget > 0 {
+		deadline = time.Now().Add(budget)
+	}
+	suggestions, err := suggest(opts, argv, work, skill, intent, spec.Diff, changed, deadline)
+	if err != nil {
+		if edited := tree.Changed(before, snapshotOrNil(project)); len(edited) > 0 {
+			return Result{}, changedProject(edited)
+		}
+		if isBudget(err) {
+			return Result{}, inconclusive("%v", err)
+		}
 		return Result{}, err
 	}
 	text := prompt.Build(prompt.Input{
@@ -148,11 +166,16 @@ func Run(opts Options) (Result, error) {
 	if err = writeWrapper(work, px.Socket()); err != nil {
 		return Result{}, err
 	}
-	budget, err := time.ParseDuration(or(spec.TimeBudget, "0s"))
-	if err != nil {
-		return Result{}, fmt.Errorf("time_budget: %v", err)
+	brainErr := startBrain(opts, argv, work, promptPath, text, "verify", deadline)
+	// Stop the proxy first: no verilex run may finish after the checks below.
+	px.Close()
+	if edited := tree.Changed(before, snapshotOrNil(project)); len(edited) > 0 {
+		cleanHome(px)
+		return Result{}, changedProject(edited)
 	}
-	brainErr := startBrain(opts, argv, work, promptPath, text, "verify", budget)
+	if err = cleanHome(px); err != nil {
+		return Result{}, inconclusive("%v", err)
+	}
 	if isBudget(brainErr) {
 		return Result{}, inconclusive("%v", brainErr)
 	}
@@ -180,7 +203,62 @@ func Run(opts Options) (Result, error) {
 	return Result{Stdout: doc.Raw, Exit: code}, nil
 }
 
-func suggest(opts Options, argv []string, work string, skill []byte, intent, diff string, changed []string) ([]string, error) {
+// changedProject is the answer when the brain edited the project: whatever verilex printed was
+// about code the brain wrote, not the code under test.
+func changedProject(paths []string) error {
+	shown := paths
+	if len(shown) > 10 {
+		shown = append(slices.Clone(shown[:10]), fmt.Sprintf("and %d more", len(paths)-10))
+	}
+	return inconclusive("the brain changed the project during the run, so no verdict covers the code under test: %s", strings.Join(shown, ", "))
+}
+
+func snapshotOrNil(project string) tree.State {
+	state, err := tree.Snapshot(project)
+	if err != nil {
+		return tree.State{"(project unreadable)": err.Error()}
+	}
+	return state
+}
+
+// cleanHome tears down every instance left in the run's home and refuses a home the launcher
+// did not fill on its own: a kept instance outlives the run, and a run that did not come
+// through the proxy was not checked by it.
+func cleanHome(px *proxy.Proxy) error {
+	out, stderr, code := px.Exec("runs", "--json")
+	if code != 0 {
+		return fmt.Errorf("verilex runs in the run's home: %s", oneLine(string(stderr)))
+	}
+	var rows []struct {
+		Run     string `json:"run"`
+		Cleanup string `json:"cleanup"`
+	}
+	if err := json.Unmarshal(out, &rows); err != nil {
+		return fmt.Errorf("verilex runs JSON: %v", err)
+	}
+	started := px.Started()
+	var problems []string
+	for _, row := range rows {
+		if row.Cleanup == "kept" || row.Cleanup == "pending" {
+			if _, stderr, code := px.Exec("cleanup", row.Run); code != 0 {
+				problems = append(problems, fmt.Sprintf("run %s left an instance that cleanup could not tear down: %s", row.Run, oneLine(string(stderr))))
+				continue
+			}
+		}
+		if !started[row.Run] {
+			problems = append(problems, fmt.Sprintf("run %s did not come through the launcher", row.Run))
+		}
+		if row.Cleanup == "kept" {
+			problems = append(problems, fmt.Sprintf("run %s kept its instance; the launcher tore it down", row.Run))
+		}
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+func suggest(opts Options, argv []string, work string, skill []byte, intent, diff string, changed []string, deadline time.Time) ([]string, error) {
 	if !opts.Suggest {
 		return nil, nil
 	}
@@ -200,7 +278,10 @@ func suggest(opts Options, argv []string, work string, skill []byte, intent, dif
 		return nil, err
 	}
 	var stdout bytes.Buffer
-	if err := runBrain(opts, argv, block+string(os.PathListSeparator)+os.Getenv("PATH"), path, ask, "suggest", 0, &stdout); err != nil {
+	if err := runBrain(opts, argv, block+string(os.PathListSeparator)+os.Getenv("PATH"), path, ask, "suggest", deadline, &stdout); err != nil {
+		if isBudget(err) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("intent formulation: %v", err)
 	}
 	claims, err := suggestedClaims(stdout.Bytes())
@@ -231,23 +312,28 @@ func suggestedClaims(raw []byte) ([]string, error) {
 	return out, nil
 }
 
-func startBrain(opts Options, argv []string, work, promptPath, text, phase string, budget time.Duration) error {
+func startBrain(opts Options, argv []string, work, promptPath, text, phase string, deadline time.Time) error {
 	path := filepath.Join(work, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
-	return runBrain(opts, argv, path, promptPath, text, phase, budget, nil)
+	return runBrain(opts, argv, path, promptPath, text, phase, deadline, nil)
 }
 
-func runBrain(opts Options, argv []string, path, promptPath, text, phase string, budget time.Duration, stdout *bytes.Buffer) error {
+// runBrain runs one brain phase until it exits or deadline passes. The process group is killed
+// as soon as the brain exits, and pipes a child that left the group still holds are closed after
+// a short delay, so neither a background nor a setsid child can hold the launcher.
+func runBrain(opts Options, argv []string, path, promptPath, text, phase string, deadline time.Time, stdout *bytes.Buffer) error {
+	if !deadline.IsZero() && !time.Now().Before(deadline) {
+		return &budgetError{}
+	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = opts.Project
 	cmd.Env = brainEnv(path, promptPath, phase)
 	cmd.Stdin = strings.NewReader(text)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 200 * time.Millisecond
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if stdout != nil {
 		cmd.Stdout = stdout
-	} else {
-		cmd.Stdout = io.Discard
 	}
 	err := cmd.Start()
 	if err != nil {
@@ -255,18 +341,20 @@ func runBrain(opts Options, argv []string, path, promptPath, text, phase string,
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	if budget > 0 {
-		select {
-		case err = <-done:
-		case <-time.After(budget):
-			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			<-done
-			return &budgetError{budget: budget}
-		}
-	} else {
-		err = <-done
+	var expired <-chan time.Time
+	if !deadline.IsZero() {
+		timer := time.NewTimer(time.Until(deadline))
+		defer timer.Stop()
+		expired = timer.C
 	}
-	syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	select {
+	case err = <-done:
+		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	case <-expired:
+		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		<-done
+		return &budgetError{}
+	}
 	if err != nil {
 		detail := oneLine(stderr.String())
 		if detail == "" {
@@ -353,13 +441,14 @@ func strconvQuote(value string) string {
 	return fmt.Sprintf("%q", value)
 }
 
-// changedFiles lists the paths diff changes under project, relative to it. A diff git cannot
-// read is refused: an empty list would let a green skip the change.
+// changedFiles lists the paths diff changes under project, relative to it, unquoted, with both
+// sides of a rename. A diff git cannot read is refused: an empty list would let a green skip
+// the change.
 func changedFiles(project, diff string) ([]string, error) {
 	if diff == "" {
 		return nil, nil
 	}
-	cmd := exec.Command("git", "diff", "--name-only", "--relative", diff, "--")
+	cmd := exec.Command("git", "diff", "--name-only", "-z", "--no-renames", "--relative", diff, "--")
 	cmd.Dir = project
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -368,9 +457,9 @@ func changedFiles(project, diff string) ([]string, error) {
 		return nil, fmt.Errorf("diff %s: %s", diff, or(oneLine(stderr.String()), err.Error()))
 	}
 	var files []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line != "" {
-			files = append(files, line)
+	for _, path := range strings.Split(string(out), "\x00") {
+		if path != "" {
+			files = append(files, path)
 		}
 	}
 	return files, nil

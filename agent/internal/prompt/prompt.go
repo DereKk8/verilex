@@ -45,6 +45,7 @@ func Build(in Input) string {
 	b.WriteString("The launcher returns verilex's own JSON verdict from your last verilex run and ignores your message.\n")
 	b.WriteString("It returns green only from a claim run whose request holds every floor claim and every changed path; otherwise the result is inconclusive.\n")
 	b.WriteString("You may run index, plan, run, words, claims, runs, ticket and check, never with --keep or --continue.\n")
+	b.WriteString("Do not change the project. If you edit, add or remove a file in it, even to put it back, the result is inconclusive.\n")
 	return b.String()
 }
 

@@ -1,0 +1,546 @@
+{
+  "version": 1,
+  "summary": "Adds verilex-agent, a launcher in its own agent/ module that runs the brain in a sandbox and returns the verdict of a run that verilex itself planned, under one written verdict rule, with a CI check that keeps harness code out of the core.",
+  "files": [
+    {
+      "path": "agent/internal/verdict/verdict.go",
+      "summary": "Owns the verdict rule: README \"Verdict rule\" rows 9-30 turn the runs that verilex planned into one verdict, and every other run into a note.",
+      "annotations": [
+        {
+          "newRange": [
+            60,
+            67
+          ],
+          "summary": "Request reads requested.chain, the field verilex fills with the caller's chain, or null when verilex planned the chain.",
+          "rationale": "F8: the launcher used to parse the brain's arguments to tell a chain from a planned run, and read an empty chain argument differently from verilex, so a planned red stopped being final. Now verilex is the one owner of that reading. Verified by row 11 of TestVerdictRule (an empty chain argument, then a green, stays red) and by TestRequestNamesTheCallersChain in the core.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            83,
+            109
+          ],
+          "summary": "Parse refuses a claim run whose requested has no chain key, so an older verilex fails closed.",
+          "rationale": "Without the key, every chain run given --changed would read as planned, which is the F9 false green. The check reads key presence, not value, because null is the planned value. Verified by TestClaimRunWithoutRequestedChainIsInconclusive and by the mutation that skips the check.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            121,
+            188
+          ],
+          "summary": "Decide keeps only planned runs for the verdict: the last planned red is final, then the budget, then no planned run, then the last planned run.",
+          "rationale": "MAIN narrowed the rule after four checks found holes in how brain chains counted (F7, F9, F10). A brain chain can be red on correct code or green on inputs that miss a defect, so it never decides and never proves a claim; it becomes a note. Verified by TestVerdictRule rows 9-30 and by mutations: every run planned, a chain with --changed planned, no final planned red, no budget step, no note, no spec check and no open claims each fail named rows.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            190,
+            203
+          ],
+          "summary": "isPlanned is verilex's own reading of a run, and note is the one-line report for a run that is not planned.",
+          "rationale": "isPlanned needs the claim-run format, a requested object and a null chain, so a plain chain run (no format) and a chain given --changed (chain set) are both brain chains. Verified by rows 16, 17, 19 and 20, each of which also checks the note count.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            252,
+            277
+          ],
+          "summary": "check refuses a planned green that did not prove a floor claim or was not asked about a changed path.",
+          "rationale": "The old not-a-claim-run clause is gone, because every planned run is a claim run. Rows 24, 25 and 27 cover each reason, and the mutation that skips check fails exactly those rows.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/run/run.go",
+      "summary": "One launcher invocation: resolve the spec and its claim floor, snapshot the project, run the brain in the sandbox, check the project and home, return verilex's verdict.",
+      "annotations": [
+        {
+          "newRange": [
+            35,
+            44
+          ],
+          "summary": "Result carries Notes, the launcher's report on each brain chain, also when the verdict rule ends inconclusive.",
+          "rationale": "A brain chain never decides, but its red can point at a real defect that only the chain reached, so the launcher reports it instead of dropping it. Verified by rows 16, 17, 19 and 20 of TestVerdictRule.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            156,
+            165
+          ],
+          "summary": "One deadline now covers the intent lookup as well as both brain phases, and floor runs inside it.",
+          "rationale": "N5: a hung verilex index used to hold the launcher with no limit, and the budget started only after it. Verified by row 4 of TestVerdictRule (a 1s budget ends a hung index in about one second) and the Lookup failures recipe.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            238,
+            258
+          ],
+          "summary": "The launcher hands every run the proxy kept, and whether the budget ended, to verdict.Decide, and returns its verdict and notes.",
+          "rationale": "The rule has one owner. Rows 1-8 (spec, floor, sandbox, F1 and F5 checks) stay in Run, because they apply before any run is judged. With no planned run and a failed brain, the reason names both.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            343,
+            373
+          ],
+          "summary": "newLaunch builds the hide list: both homes, the ledger, the verilex binary, VERILEX_HOME, VERILEX_LEDGER, the run's logs and its verilex home.",
+          "rationale": "These decide a verdict, so the brain must neither read nor write them. The ledger directory is created before the brain starts so the sandbox can hide it. Verified by the forgery test: every pass added to the ledger names a run the launcher made, and every earlier file is unchanged.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            388,
+            438
+          ],
+          "summary": "brain passes the prompt as a file on stdin and writes the brain's output to the run's log files.",
+          "rationale": "With no pipe, no copy goroutine can wait on a child the brain left running, which matters on macOS, where a detached process can outlive the run. Verified by TestBudgetBoundsTheRunWhateverTheBrainStarts (a setsid child) and the stdin check in TestSkillIntentAndSuggestionsReachTheBrain; a prompt larger than the pipe buffer is not tested.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            522,
+            546
+          ],
+          "summary": "resolve gives verilex ticket at most 30 seconds, and a timeout is inconclusive.",
+          "rationale": "N5 also named the ticket lookup. It cannot use the time budget, because the budget comes from the ticket. Verified on the real launcher by the Lookup failures recipe: a hung ticket ends after about 30 seconds with 'verilex ticket did not answer within 30s'. Not in the agent tests, because the test would wait 30 seconds.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            548,
+            582
+          ],
+          "summary": "floor asks verilex index for the intent's claims within the budget, and a failure, a timeout, or no claim without --claim is inconclusive.",
+          "rationale": "N6: an index failure is the environment's, so it says inconclusive, not refused. The floor must come from verilex, not from the brain. Verified by rows 1, 3, 4 and 26 of TestVerdictRule, and by the mutations that return the failure as a refusal (row 3 fails) or drop the budget (row 4 fails).",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            588,
+            616
+          ],
+          "summary": "verilexJSON runs each lookup in its own process group with a 30-second deadline, and kills the group when the deadline or the budget ends.",
+          "rationale": "If the deadline killed only the parent, a child that it started would keep the pipes open and hold the launcher; killing the group ends both, and WaitDelay bounds the wait for the pipes. Verified by the Lookup failures recipe: after both hangs, pgrep finds no hung lookup left.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/proxy/proxy.go",
+      "summary": "The socket relay that runs the brain's verilex commands for it and keeps every run's JSON.",
+      "annotations": [
+        {
+          "newRange": [
+            96,
+            106
+          ],
+          "summary": "Runs returns a copy of every verilex run that printed JSON, in the order the runs finished.",
+          "rationale": "The proxy no longer records whether the brain gave a chain: verilex's requested.chain is the one owner (F8). pinArgs is back to its form before the chain reading.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            187,
+            206
+          ],
+          "summary": "exec drops a command from the kill list once Run returns.",
+          "rationale": "Close then never signals a pid the kernel gave to another process. Verified by the agent suite; pid reuse itself is not reproduced in a test.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/sandbox/sandbox.go",
+      "summary": "Owns the sandbox contract: what the brain may read and write, what stays hidden, and the check that the sandbox holds before the brain runs.",
+      "annotations": [
+        {
+          "newRange": [
+            113,
+            179
+          ],
+          "summary": "start runs the sandbox in a session of its own and returns only after the helper reports ok from inside the sandbox.",
+          "rationale": "Setsid leaves the brain no controlling terminal, so it cannot type into or print into the user's terminal (tester finding M2); the session is also the process group Kill ends. The config travels on fd 3, so no hidden path shows on a command line. Verified by TestBrainCannotReachTheTerminal and TestNoSandboxNoVerdict; on Linux, removing Setsid and bwrap --new-session made the terminal test fail.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            205,
+            271
+          ],
+          "summary": "newView builds the readable list from real paths and hides the ledger, the homes, the logs and every verilex binary on the brain's PATH.",
+          "rationale": "A verilex in a PATH directory that the launcher did not put there is the real binary, so it is hidden even when its directory stays readable. tooBroad drops a PATH entry that would expose the whole user home. Verified by TestBrainCannotReachTheRealVerilex (exit 126 on Linux, the binary shows as /dev/null).",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/sandbox/darwin.go",
+      "summary": "Builds the sandbox-exec profile for macOS.",
+      "annotations": [
+        {
+          "newRange": [
+            48,
+            105
+          ],
+          "summary": "seatbelt orders the rules so the last match wins: read all, deny user areas, allow the view, deny hidden paths, and deny terminal devices last.",
+          "rationale": "Exec does not need file-read in Seatbelt, so the hidden-path rule also denies process-exec; the first macOS CI run caught the brain running the real verilex. The terminal rule denies read, write and ioctl on /dev/tty*, /dev/pty* and /dev/ptmx, so the brain cannot reach any terminal by path (M2). Cost: a harness that opens its own pseudo-terminal fails on macOS. Verified by TestBrainCannotReachTheTerminal in the macOS CI job; no real harness ran on macOS.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/sandbox/linux.go",
+      "summary": "Builds the bubblewrap command line for Linux.",
+      "annotations": [
+        {
+          "newRange": [
+            60,
+            80
+          ],
+          "summary": "The brain gets new user, mount, pid, net, ipc, uts and cgroup namespaces, read-only binds sorted parents first, masks last, and a read-only root.",
+          "rationale": "The pid namespace hides the launcher's command line, which is where the tester's P11 forger read the ledger path. The private network blocks host loopback and abstract sockets, so the egress proxy is the only way out. Verified by the forgery test; sharing the pid namespace made its /proc and ps probes report reached. Landlock alone was rejected because it cannot hide a path inside an allowed tree and has no pid isolation.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/sandbox/init.go",
+      "summary": "The helper that runs inside the sandbox, checks it, bridges the egress port and then runs the brain.",
+      "annotations": [
+        {
+          "newRange": [
+            73,
+            96
+          ],
+          "summary": "holds proves the sandbox from inside: no new file in the project, nothing at hidden paths, and no reach to host loopback.",
+          "rationale": "A sandbox tool that starts but does not confine, such as a wrapper or a misconfigured profile, would otherwise run the brain unsandboxed. The probe file is removed if it was created. Verified by the passthrough case in TestNoSandboxNoVerdict.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/egress/egress.go",
+      "summary": "The CONNECT-only proxy that is the brain's only network path.",
+      "annotations": [
+        {
+          "newRange": [
+            154,
+            201
+          ],
+          "summary": "pick resolves a host once, refuses any address that is not public or is the host's own, and the proxy dials the address it checked.",
+          "rationale": "Dialing the checked address closes DNS rebinding. Public unmaps IPv4-mapped IPv6, so a mapped loopback or CGNAT address is refused too. Verified by the forgery test for 127.0.0.1, localhost, ::1, 10.0.0.1, 192.168.1.1, 169.254.169.254 and 100.64.0.1; a proxy that allowed every address failed it.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/harness/harness.go",
+      "summary": "Resolves the brain command and the credential files each built-in harness needs.",
+      "annotations": [
+        {
+          "newRange": [
+            147,
+            164
+          ],
+          "summary": "The built-in claude and codex commands turn their own permission prompts and sandbox off, and each harness names only its credential file.",
+          "rationale": "A headless brain cannot answer a permission prompt, so without the flag claude could not run verilex at all; the launcher's sandbox is the boundary instead. Verified with real runs through the launcher: claude haiku and codex gpt-6-sol returned verilex's green, and pi with openai-codex/gpt-6-sol did too.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/prompt/prompt.go",
+      "summary": "Owns all prompt text for both brain phases.",
+      "annotations": [
+        {
+          "newRange": [
+            21,
+            30
+          ],
+          "summary": "Verify ends the run prompt with a task section, and Suggest asks only for claims and carries no task.",
+          "rationale": "A headless brain reads the prompt once; the task line keeps it from asking for instructions, and the suggest phase must not run verilex. Verified by TestSkillIntentAndSuggestionsReachTheBrain.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            62,
+            70
+          ],
+          "summary": "Rule states the narrowed rule to the brain: only a planned run decides, a chain it writes is a note, then six cases in Decide's order.",
+          "rationale": "The skill text (skills/verilex/SKILL.md) says the same for brains under verilex-agent, so the brain is not invited to prove gaps with its own chains. TestSkillIntentAndSuggestionsReachTheBrain checks that the prompt carries Rule verbatim.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/brain_test.go",
+      "summary": "Regression tests for the tester's findings and the sandbox escape probes, on the real core.",
+      "annotations": [
+        {
+          "newRange": [
+            136,
+            245
+          ],
+          "summary": "The forgery test runs the P11 shape (run, forge, rerun) with every path given to the brain, and judges writes on the host.",
+          "rationale": "A write probe can succeed inside the brain's own /tmp without reaching the real path, so writes are judged on the host: the ledger only gains passes from launcher runs, and no forged file exists. Each grep uses [-] so it cannot match its own command line.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            247,
+            284
+          ],
+          "summary": "The terminal test starts the launcher on a new pseudo-terminal and checks that the brain cannot write /dev/tty or the terminal's device.",
+          "rationale": "A Python pty helper plays the shell, so the test runs the same way on Linux and in the macOS CI job, where M2 was open. The marker must not show in the terminal, and the brain's own report must say refused for both paths.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "summary": "Installs bubblewrap and allows it user namespaces in the Linux test job.",
+      "annotations": [
+        {
+          "newRange": [
+            51,
+            58
+          ],
+          "summary": "The sandbox step adds an AppArmor profile that grants /usr/bin/bwrap user namespaces, the same recipe the README gives for Ubuntu.",
+          "rationale": "Ubuntu 24.04 denies unprivileged user namespaces to programs without a profile, so every agent test would be inconclusive. Using the profile instead of the global sysctl keeps the runner's other restrictions and proves the README recipe. Verified by a green test job on ubuntu-latest.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "README.md",
+      "summary": "Documents the launcher, its verdict rule table, its sandbox contract, requirements, run directory and residual risks.",
+      "annotations": [
+        {
+          "newRange": [
+            391,
+            457
+          ],
+          "summary": "The Verdict rule section is now one table of 30 rows built on two terms: a planned run, which verilex marks, and a brain chain, which is a note.",
+          "rationale": "The table is shorter because one rule replaces the brain-chain cases. Its limits name the F6-chain-on-a-diff gap: a planned green on a diff, with verilex's warning, is green even after a red chain on a touched claim. A floor of the touched claims (the row-31 follow-up) would close it.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            459,
+            510
+          ],
+          "summary": "The Sandbox section states what the brain can and cannot reach, the run directory layout, and what the sandbox does not cover.",
+          "rationale": "Rows 7 and 8 of the verdict rule stay as defense in depth behind the sandbox.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/tree/tree.go",
+      "summary": "Records each file git tracks or would track, with its stat, so the launcher sees any change to the project during the run.",
+      "annotations": [
+        {
+          "newRange": [
+            17,
+            45
+          ],
+          "summary": "Snapshot keys every non-ignored file by mode, size, mtime, inode change time, inode and device.",
+          "rationale": "The inode change time cannot be set back by an unprivileged process, so an edit that restores the bytes and mtime is still seen (tester finding F1). The sandbox now stops the brain from writing the project, so this check catches changes from outside the sandbox. Git-ignored files are not checked.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "scripts/boundary.go",
+      "summary": "CI check that fails if cmd/ or internal/ import the agent module or name a harness.",
+      "annotations": [
+        {
+          "newRange": [
+            1,
+            98
+          ],
+          "summary": "The check parses Go and scans only imports, string literals and comments.",
+          "rationale": "A text grep flagged the claim planner's loop index pi as a harness name, so the check parses instead. Verified by TestBoundaryPassesOnThisRepoAndFailsOnAHarnessNameOrImport.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/rule_test.go",
+      "summary": "Tests README \"Verdict rule\" row by row: subtest NN is row NN.",
+      "annotations": [
+        {
+          "newRange": [
+            16,
+            58
+          ],
+          "summary": "TestVerdictRule runs one subtest per row, and TestVerdictRuleMatchesREADME fails when the README table and the rows differ.",
+          "rationale": "The table and the rows hold the same number, verdict, exit and printed run, so neither changes alone.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            71,
+            312
+          ],
+          "summary": "verdictRule holds the 30 rows; rows 11, 16, 17 and 20 are the F8, F10, F9 and F10-after-green cases from the fourth check.",
+          "rationale": "Rows that the narrower rule settles the same way as another row were merged: the bare planned red into row 10, the diff F6 into the F8 row 11, the chain-then-budget row into rows 14 and 16, the F6 chain on an intent into the floor rows, and both green-chain rows into row 17. Row 17 also runs the planned item-listed claim under hide-apple as a control and expects red, so its green chain would be a false green. The F6 chain on a diff is now green with verilex's warning; README limits state it, and the row-31 diff floor that would close it is a follow-up.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            351,
+            414
+          ],
+          "summary": "rule.run launches one row and checks exit, stdout bytes, stderr parts, the note count, the inconclusive prefix, and whether the brain started.",
+          "rationale": "The note count makes a note for a planned run, or a missing note for a brain chain, fail the row.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            438,
+            457
+          ],
+          "summary": "planVerilex wraps the real verilex: each run gets the TALLY_DEFECT value or the store lock its plan line names, and index can fail or hang.",
+          "rationale": "A plan line is now a defect name, so the F9 row can use hide-apple next to hide-lists.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/features/agent.md",
+      "summary": "The verify-verilex recipes for the launcher, driven end to end on a fresh session.",
+      "annotations": [
+        {
+          "newRange": [
+            1,
+            212
+          ],
+          "summary": "The recipes follow the narrowed rule: F8 (empty chain argument), F9 (hide-apple and its planned control), F10 (chain alone and after a green), and the notes.",
+          "rationale": "run.md and verdicts.md, which the canary cites, are untouched, so the canary reports no drift. Driven end to end on a fresh session with the recipe driver in this task's scratchpad.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/cli/cli.go",
+      "summary": "The verilex-agent command line: parses the flags, runs one launch, and prints the verdict, then the notes.",
+      "annotations": [
+        {
+          "newRange": [
+            22,
+            63
+          ],
+          "summary": "Main prints each note after the verdict JSON or the inconclusive line, so the verdict comes first.",
+          "rationale": "AGENTS.md rule 5 asks for the verdict first; the notes go to stderr, so stdout stays verilex's JSON byte for byte. The test helper now captures stderr on exit 0 too, so rows 19 and 20 can check the note.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "agent/e2e_test.go",
+      "summary": "End-to-end launcher tests on fake and real verilex builds.",
+      "annotations": [
+        {
+          "newRange": [
+            65,
+            93
+          ],
+          "summary": "The verdict-is-verilex's test now returns a planned red's JSON, and a new test refuses a claim run without requested.chain.",
+          "rationale": "The old fixture was a red chain run, which no longer decides. The assertions stay: exit 1, stdout byte for byte with unknown fields kept, and no brain text. The new test proves the fail-closed check in verdict.Parse on the real launcher.",
+          "author": "fm/verilex-agent-launcher"
+        },
+        {
+          "newRange": [
+            464,
+            484
+          ],
+          "summary": "launchEnv captures stderr on every exit, not only on a failure.",
+          "rationale": "Rows 19 and 20 exit 0 and must show the note on stderr; before, a green run's stderr was always empty in tests.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "internal/runner/record.go",
+      "summary": "The run record verilex prints: requested now says who wrote the chain.",
+      "annotations": [
+        {
+          "newRange": [
+            27,
+            28
+          ],
+          "summary": "Request.Chain is the caller's chain, or null when verilex planned the chain from claims and changes.",
+          "rationale": "This is the single owner MAIN asked for in F8: a launcher reads who wrote the chain from verilex, not from the agent's arguments. The field is always present in a claim run, so a launcher can fail closed on its absence. Verified by TestRequestNamesTheCallersChain.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/surface.go",
+      "summary": "Claim-plan and chain surfaces of verilex run: coverChain records the caller's chain.",
+      "annotations": [
+        {
+          "newRange": [
+            92,
+            92
+          ],
+          "summary": "coverChain receives the caller's chain and stores it in requested.chain; the planned surfaces keep it null.",
+          "rationale": "Only a non-empty operand reaches coverChain, because the CLI sends an empty operand to the claim surface, so an empty chain argument stays planned (F8). Verified by TestRequestNamesTheCallersChain and by the core mutation that drops the field (row 17 of TestVerdictRule fails).",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "tests/plan_claims_test.go",
+      "summary": "Core contract tests for claim plans and claim runs.",
+      "annotations": [
+        {
+          "newRange": [
+            390,
+            415
+          ],
+          "summary": "TestRequestNamesTheCallersChain checks requested.chain for a claim, an empty chain argument, a diff, and a chain with a diff.",
+          "rationale": "The launcher's verdict rule depends on this field, so the core owns a test of its contract.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "tests/fixtures/tally/bin/tally",
+      "summary": "The tally fixture product: hide-apple is a defect that only some inputs reach.",
+      "annotations": [
+        {
+          "newRange": [
+            58,
+            59
+          ],
+          "summary": "With TALLY_DEFECT=hide-apple, tally list leaves out the item apple and prints every other item.",
+          "rationale": "F9 needs an input-specific defect: a chain on pear stays green while the admitted item-listed word, which uses apple, is red. Verified by row 17 of TestVerdictRule and the hide-apple recipe.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    },
+    {
+      "path": "skills/verilex/SKILL.md",
+      "summary": "The verilex skill the launcher hands the brain.",
+      "annotations": [
+        {
+          "newRange": [
+            18,
+            20
+          ],
+          "summary": "The skill no longer invites a chain to verify a gap, and says that under verilex-agent only a planned run decides.",
+          "rationale": "MAIN asked the skill to match prompt.Rule, because a brain that follows the skill would otherwise spend time on chains that never count.",
+          "author": "fm/verilex-agent-launcher"
+        }
+      ]
+    }
+  ]
+}

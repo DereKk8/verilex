@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: scripts/ci lint mod
+      - run: scripts/ci lint mod boundary
 
   vuln:
     runs-on: ubuntu-latest
@@ -48,6 +48,14 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      # The agent tests run each brain in bubblewrap. Ubuntu 24.04 grants the user namespace it
+      # needs only to a program an AppArmor profile names: the README's recipe for Ubuntu.
+      - name: sandbox
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q bubblewrap
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile bwrap /usr/bin/bwrap flags=(unconfined) {\n  userns,\n}\n' | sudo tee /etc/apparmor.d/bwrap
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap
       - run: scripts/ci test build smoke canary canary-guards | tee ci.log
         shell: bash
       - name: coverage

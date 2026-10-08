@@ -387,6 +387,79 @@ func TestClaimReportAndRunContract(t *testing.T) {
 	contains(t, runs.stdout, "1 touched claim not covered")
 }
 
+// Rule: requested.chain says who wrote the chain: null when verilex planned the run from claims
+// and changes, also for an empty chain argument, and the caller's chain when the caller gave one.
+func TestRequestNamesTheCallersChain(t *testing.T) {
+	root := curated(t)
+	green(t, root, nil, chain)
+	for _, tc := range []struct {
+		args  []string
+		chain any
+	}{
+		{[]string{"--claim", "item-listed"}, nil},
+		{[]string{"--claim", "item-listed", ""}, nil},
+		{[]string{"--changed", "bin/tally"}, nil},
+		{[]string{"--changed", "bin/tally", "store-open"}, "store-open"},
+	} {
+		out := verilex(t, root, nil, append([]string{"run", "--json"}, tc.args...)...)
+		var record map[string]any
+		if err := json.Unmarshal([]byte(out.stdout), &record); err != nil {
+			t.Fatalf("%q: %v\n%s%s", tc.args, err, out.stdout, out.stderr)
+		}
+		requested, _ := record["requested"].(map[string]any)
+		if chain, ok := requested["chain"]; !ok || chain != tc.chain {
+			t.Fatalf("%q: requested.chain %#v (present %v), want %#v", tc.args, chain, ok, tc.chain)
+		}
+	}
+}
+
+// Rule: with --no-chain, plan and run refuse any chain argument, an empty one too, before anything
+// runs or any run record is written. Claims, named claims, a diff and --fresh still plan and run.
+func TestNoChainRefusesEveryChainArgument(t *testing.T) {
+	root := curated(t)
+	green(t, root, nil, chain)
+	before := runCount(t, root)
+	for _, command := range []string{"plan", "run"} {
+		for _, args := range [][]string{
+			{"store-open"},
+			{""},
+			{"--claim", "item-listed", ""},
+			{"--changed", "bin/tally", "store-open"},
+			{"--", "store-open"},
+		} {
+			out := verilex(t, root, nil, append([]string{command, "--no-chain", "--json"}, args...)...)
+			if out.code != 2 || out.stdout != "" || !strings.Contains(out.stderr, "--no-chain refuses a chain argument, an empty one too") {
+				t.Fatalf("%s %q: exit %d\n%s%s", command, args, out.code, out.stdout, out.stderr)
+			}
+		}
+	}
+	bare := verilex(t, root, nil, "run", "--no-chain", "--json")
+	if bare.code != 2 || !strings.Contains(bare.stderr, "--no-chain needs --claim, --named or --changed") {
+		t.Fatalf("bare run: exit %d\n%s%s", bare.code, bare.stdout, bare.stderr)
+	}
+	if after := runCount(t, root); after != before {
+		t.Fatalf("refused runs wrote run records: %d before, %d after", before, after)
+	}
+	if plan := planClaims(t, root, "--no-chain", "--claim", "item-listed"); plan.Chain != chain {
+		t.Fatalf("plan --no-chain --claim item-listed planned %q, want %q", plan.Chain, chain)
+	}
+	for _, args := range [][]string{
+		{"--claim", "item-listed"},
+		{"--named", "item-listed"},
+		{"--changed", "bin/tally"},
+		{"--fresh", "--claim", "item-listed"},
+	} {
+		out := verilex(t, root, nil, append([]string{"run", "--no-chain", "--json"}, args...)...)
+		var record map[string]any
+		if err := json.Unmarshal([]byte(out.stdout), &record); err != nil || out.code != 0 || record["verdict"] != "green" {
+			t.Fatalf("run %q: exit %d %v\n%s%s", args, out.code, err, out.stdout, out.stderr)
+		}
+		if args[0] == "--fresh" && record["skipped"] == true {
+			t.Fatalf("run %q skipped, but --fresh runs live", args)
+		}
+	}
+}
+
 // Rule: when the chain runs live, the plan says so, so a standing pass is not read as a step the
 // run omits. A provider step whose image pin changed forces the chain live too.
 func TestPlanSaysChainRunsLive(t *testing.T) {

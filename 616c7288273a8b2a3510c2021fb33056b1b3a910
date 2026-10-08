@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "summary": "verilex proves its own claims in CI: a pinned known-good verilex runs four canary words against the checkout, live, and fails on red, inconclusive or drift.",
+  "files": [
+    {
+      "path": "scripts/ci",
+      "summary": "Owns the canary step that CI and developers run.",
+      "annotations": [
+        {
+          "newRange": [
+            39,
+            41
+          ],
+          "summary": "The canary step refuses a canary_driver that is not an ancestor of origin/main.",
+          "rationale": "fetch-depth 0 puts every commit of the PR in the clone, so a pin to a commit only this branch holds could weaken the driver and grade the regression green. Verified: a loose commit with Red exiting 0 plus a cleanup regression now prints `canary: driver ... is not on origin/main` and exits 1; before, the step exited 0.",
+          "author": "fm/verilex-canary-next"
+        },
+        {
+          "newRange": [
+            42,
+            52
+          ],
+          "summary": "The step builds the pinned driver, keeps all state and Python bytecode in a mktemp dir, and counts only directories with a word.md as words.",
+          "rationale": "A ledger kept between runs can be forged, so the run is live with --fresh. A planted unchecked .pyc could stand in for a word's source, so PYTHONPYCACHEPREFIX moves bytecode out of the checkout. Verified: the planted .pyc attack exits 1.",
+          "author": "fm/verilex-canary-next"
+        },
+        {
+          "newRange": [
+            53,
+            68
+          ],
+          "summary": "The step requires `check: no drift (N admitted)` for N word directories, and an admitted word in `verilex index` for every claim file.",
+          "rationale": "check exits 0 on drift and counts only admitted words, so a provisional word or a deleted word with a kept claim would read as no drift. Verified: D1, D2, D3 and the deleted-word attack each exit 1 with the cause named; a clean run exits 0.",
+          "author": "fm/verilex-canary-next"
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "summary": "Runs the canary inside the test job, so the required ci gate covers it.",
+      "annotations": [
+        {
+          "newRange": [
+            46,
+            47
+          ],
+          "summary": "checkout fetches full history so git archive finds the pinned driver commit and origin/main exists for the diff.",
+          "rationale": "The repository is private, so go install of a SHA needs auth; git archive of a fetched commit does not. Not yet observed on a GitHub runner until this PR's CI runs.",
+          "author": "fm/verilex-canary-next"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/features/run.md",
+      "summary": "Labels the existing Live, Refused order and Skip steps with their sub-feature ids so canary claims cite them.",
+      "annotations": [
+        {
+          "newRange": [
+            34,
+            35
+          ],
+          "summary": "The Skip step now says `Expect the second to print ...`, which makes it a requirement sentence a claim can map.",
+          "rationale": "verilex counts only sentences with a requirement word (Expect, must, exits) as requirements, and a claim source needs at least one. Labelling the existing steps, not adding a fifth section, keeps the feature entry contract of four H2 sections and one owner per step.",
+          "author": "fm/verilex-canary-next"
+        }
+      ]
+    },
+    {
+      "path": ".verilex/frame/launch",
+      "summary": "Builds the verilex under test, with a planted defect when CANARY_DEFECT is set, into an instance dir owned by the run.",
+      "annotations": [
+        {
+          "newRange": [
+            1,
+            31
+          ],
+          "summary": "launch plants each defect as a literal edit on a source copy and exits 2 when the edited line moved.",
+          "rationale": "Defect hooks stay out of verilex's product code. If a refactor moves a patched line, the onboarding trial becomes inconclusive, never a silent healthy pass.",
+          "author": "fm/verilex-canary-next"
+        }
+      ]
+    },
+    {
+      "path": ".verilex/grouping.yaml",
+      "summary": "Onboarding decisions written by `verilex onboard` with the pinned driver; generated, not hand-edited.",
+      "annotations": [
+        {
+          "newRange": [
+            1,
+            80
+          ],
+          "summary": "Each decision records binding.frame and binding.shared digests, so editing the frame or canary_word.py makes every canary word drift-suspect.",
+          "rationale": "Written by onboarding with driver 249b64d after two counted uses per word; each onboarding caught its planted defect. Re-onboard with the same pinned driver whenever a word, the frame or the shared helper changes.",
+          "author": "fm/verilex-canary-next"
+        }
+      ]
+    },
+    {
+      "path": ".verilex/words/canary_word.py",
+      "summary": "Shared helper that runs the verilex under test on the scratch tally.",
+      "annotations": [
+        {
+          "newRange": [
+            1,
+            76
+          ],
+          "summary": "verilex() strips outer VERILEX_* and TALLY_* variables; launched() and left_behind() read the store each inner launch reported.",
+          "rationale": "Without the strip, the inner build would write into the outer ledger. Reading the launch record, not only TALLY_STORES, means a fixture that puts stores elsewhere still fails chain-runs-live and chain-skipped. Verified: the fixture attack (launch ignoring TALLY_STORES plus a cleanup regression) now exits 1; before, it exited 0.",
+          "author": "fm/verilex-canary-next"
+        }
+      ]
+    }
+  ]
+}

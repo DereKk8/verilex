@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "summary": "Adds the pr-author-prompts agent skill, which posts the author's sanitized prompts as one PR comment after a one-time saved consent.",
+  "files": [
+    {
+      "path": ".cursor/skills/pr-author-prompts/SKILL.md",
+      "summary": "Owns the whole author-prompts behavior: consent, prompt choice, sanitizing and the PR comment.",
+      "annotations": [
+        {
+          "newRange": [10, 30],
+          "summary": "Step 1 stores consent in one per-person file under XDG_CONFIG_HOME, never in git config.",
+          "rationale": "The same skill lands in other repositories, so one file outside any repository lets one answer serve all of them and all future sessions. A missing file in a headless run posts nothing, because nobody can give consent there. Verified: the file on this machine holds yes. The ask-once path in an interactive session is not exercised here.",
+          "author": "fm/verilex-pr-author-prompts"
+        },
+        {
+          "newRange": [42, 52],
+          "summary": "Step 3 lists the removal kinds and marks each removal with [redacted: <kind>]; other text stays word for word.",
+          "rationale": "Prompts are posted publicly, so the rule prefers redaction when unsure. Keeping the author's exact words is what lets reviewers catch code-intent drift. On this PR, the name of another project was redacted from the author's prompt.",
+          "author": "fm/verilex-pr-author-prompts"
+        },
+        {
+          "newRange": [54, 77],
+          "summary": "Step 4 finds the comment by its heading through gh api and edits it in place, else creates it with gh pr comment.",
+          "rationale": "gh pr comment --edit-last edits the user's last comment, which may be a different comment, so the heading match is used instead. Verified on https://github.com/DereKk8/verilex/pull/21: running the snippet twice created one comment, then patched it, and the heading count stayed 1.",
+          "author": "fm/verilex-pr-author-prompts"
+        }
+      ]
+    }
+  ]
+}

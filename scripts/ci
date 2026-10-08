@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The blocking checks. CI calls each step; run with no argument to run them all.
-# usage: scripts/ci [lint|mod|vuln|test|build|smoke|canary ...]
+# usage: scripts/ci [lint|mod|vuln|test|build|smoke|canary|canary-guards ...]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -10,7 +10,7 @@ lint() {
   go vet ./...
   go tool staticcheck ./...
   go tool actionlint
-  shellcheck .cursor/skills/verify-verilex/scripts/* .verilex/frame/* scripts/ci scripts/smoke
+  shellcheck .cursor/skills/verify-verilex/scripts/* .verilex/frame/* scripts/ci scripts/canary-guards scripts/smoke
 }
 mod() {
   go mod verify
@@ -69,12 +69,13 @@ canary() (
   return 1
 )
 
-steps=("$@"); [ $# -gt 0 ] || steps=(lint mod vuln test build smoke canary)
+steps=("$@"); [ $# -gt 0 ] || steps=(lint mod vuln test build smoke canary canary-guards)
 for step in "${steps[@]}"; do
   echo "== $step"
   case "$step" in
     lint|mod|vuln|build|smoke|canary) "$step" ;;
     test) test_ ;;
+    canary-guards) scripts/canary-guards ;;
     *) echo "unknown step: $step" >&2; exit 2 ;;
   esac
 done

@@ -6,63 +6,75 @@ words:
     claim: chain-order-refused@35ebdffb4db9
     entry: cli
     digest: 691e04eaf79e0d93e3e3b1ed7e0017a18ca1e102dc21db344daf7a120a79d110
+    binding:
+      frame: 9fdf080c3b4e20c6189e03fceb06c0543641d0d90c0c8c3c62ce8c3d30705f17
+      shared: de0fc466270221f2f0f89608b37c9404d625d6c1cda4a35d124d4ba194719035
     match: new
     defects:
       no-order-check: 343524a2139e
     uses:
       verilex:
-        - 1791412421-c4ed15ecf649
-        - 1791412423-bb9881f1cef1
+        - 1791418026-c4bd1c9fd40e
+        - 1791418029-dabae20a6c52
     chain: chain-order-refused
     claim_sources: 76a1da6d7e02892c10aa7f0e43ae01a380884a740b9516b73010ac2ad407a2df
-    date: "2026-10-07T22:33:46Z"
-    record: 1791412426-fba4cc
-    seal: 4f03fea02cffeefde3ae211702515e538389b997f99f726a85be5f71a1cba85d
+    date: "2026-10-08T00:07:12Z"
+    record: 1791418032-8bb47a
+    seal: 43d9f677083b5309626f20fb465859d34d1f93173bfc7a15ea529afc2248cb54
   chain-red:
     claim: chain-red@a5fa50654384
     entry: cli
     digest: 578e26aeccf92367d4a0f975b8468bdcbc832aff49465e57b6b64d8844a89a7a
+    binding:
+      frame: 9fdf080c3b4e20c6189e03fceb06c0543641d0d90c0c8c3c62ce8c3d30705f17
+      shared: de0fc466270221f2f0f89608b37c9404d625d6c1cda4a35d124d4ba194719035
     match: new
     defects:
       fail-is-green: 8ed657e55bb9
     uses:
       verilex:
-        - 1791412421-c4ed15ecf649
-        - 1791412423-bb9881f1cef1
+        - 1791418026-c4bd1c9fd40e
+        - 1791418029-dabae20a6c52
     chain: chain-order-refused | chain-red
     claim_sources: ef067368308fe0f8654cada244d23f28e240d1f29bd72fd69e5ec670346b311d
-    date: "2026-10-07T22:33:49Z"
-    record: 1791412429-a582b0
-    seal: b1bf54eff1d4c3490917dcedde9f6876eb571d5ad1f8eea30557f56e1b5fb1cc
+    date: "2026-10-08T00:07:15Z"
+    record: 1791418035-7d53a7
+    seal: 30d3c7bfd6bf0de0b7dd4707f235ec16dcf7a7886819c9ecfb7e32fed5e28254
   chain-runs-live:
     claim: chain-runs-live@14f20a7ab1be
     entry: cli
     digest: cf1426d8acd62950a965bc1e42d50f08cd65c62f9c3abc0158d56764280d0333
+    binding:
+      frame: 9fdf080c3b4e20c6189e03fceb06c0543641d0d90c0c8c3c62ce8c3d30705f17
+      shared: de0fc466270221f2f0f89608b37c9404d625d6c1cda4a35d124d4ba194719035
     match: new
     defects:
       skipped-cleanup: 3bc4e7142a5e
     uses:
       verilex:
-        - 1791412421-c4ed15ecf649
-        - 1791412423-bb9881f1cef1
+        - 1791418026-c4bd1c9fd40e
+        - 1791418029-dabae20a6c52
     chain: chain-order-refused | chain-red | chain-runs-live
     claim_sources: 3c218fd4aeeb14a6058cd5765f8aa67abf09e5788df39c1bf2448cd7c4128113
-    date: "2026-10-07T22:33:45Z"
-    record: 1791412425-e83cf0
-    seal: 536d9805ba0b28295a28d2244980616c99341aaff085fc4834edd56e85c4c671
+    date: "2026-10-08T00:07:11Z"
+    record: 1791418031-22407c
+    seal: 4b7df9fd43c3b18ef235cfea413f110e1808ab8813d79d44d794c03f795fd0ac
   chain-skipped:
     claim: chain-skipped@629142197b43
     entry: cli
     digest: 10c23d1c6e76efc77e1e8c242c6c8069614ea4aad48758350207d834aecb5a1a
+    binding:
+      frame: 9fdf080c3b4e20c6189e03fceb06c0543641d0d90c0c8c3c62ce8c3d30705f17
+      shared: de0fc466270221f2f0f89608b37c9404d625d6c1cda4a35d124d4ba194719035
     match: new
     defects:
       never-skip: 9daab33e4c7c
     uses:
       verilex:
-        - 1791412421-c4ed15ecf649
-        - 1791412423-bb9881f1cef1
+        - 1791418026-c4bd1c9fd40e
+        - 1791418029-dabae20a6c52
     chain: chain-order-refused | chain-red | chain-runs-live | chain-skipped
     claim_sources: 8fba5a0fff2dd724f6183ee32c41ed66fc2717283b42fcca52d7c926bcc0c728
-    date: "2026-10-07T22:33:46Z"
-    record: 1791412426-9b288f
-    seal: a4f30021ae1e3cf60db1ca7730dd1419cb269a1c99fec700399ead7fc854e3be
+    date: "2026-10-08T00:07:12Z"
+    record: 1791418032-7c2bb3
+    seal: d55896a00b5b7cecdeef7ff0f0dc45e2e048957b97c1a18aeac13ecf5550e3bb

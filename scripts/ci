@@ -32,7 +32,7 @@ smoke() { scripts/smoke; }
 
 # The verilex build that grades the canary: a reviewed, known-good commit. Never the build under test,
 # which could grade its own regression green. Bump it only in a reviewed change, built from main.
-canary_driver=de9405b18d66fb652b5febf59e8efe713c301872
+canary_driver=249b64d079153abaac342b10065f1633259b2b88
 canary() (
   # verilex proves its own claims (.verilex/) on this checkout: live, in throwaway state, so no ledger
   # written by earlier code can skip a step, and red when a canary word drifted or is not admitted.
@@ -56,6 +56,8 @@ canary() (
   echo "$drift"
   # Every canary word must be admitted: a word turned provisional is not drift, so the count is the check.
   [ "$drift" = "check: no drift ($words admitted)" ] || ok=false
+  provisional="$("$state/verilex" words | awk '/^[^ ]/ { w = $1 } /status: +provisional/ { printf "%s%s", s, w; s = ", " }')"
+  [ -z "$provisional" ] || echo "canary: not admitted, so not proven: $provisional"
   if $ok; then rm -rf "$state"; return; fi
   echo "canary red: evidence kept in $state; reproduce with scripts/ci canary"
   return 1

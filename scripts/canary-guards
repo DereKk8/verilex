@@ -81,7 +81,7 @@ for store in relative:'    store = Path(f"tally-{run}")' proc-cwd:'    store = P
   copy "store-${store%%:*}"
   plant "$work/store-${store%%:*}/tree/tests/fixtures/tally/.verilex/frame/launch" "$store_line" "${store#*:}"
   plant "$work/store-${store%%:*}/tree/internal/runner/runner.go" "$cleanup_frame" '[]string{"true"}'
-  expect "store-${store%%:*}" fails "not directly under TALLY_STORES"
+  expect "store-${store%%:*}" fails "launched its store at"
 done
 
 # The fixture ignores TALLY_STORES and puts its stores in the temp directory.
@@ -89,6 +89,6 @@ copy store-tmpdir
 plant "$work/store-tmpdir/tree/tests/fixtures/tally/.verilex/frame/launch" "$store_line" \
   '    store = Path(tempfile.gettempdir()) / f"tally-{run}"'
 plant "$work/store-tmpdir/tree/internal/runner/runner.go" "$cleanup_frame" '[]string{"true"}'
-expect store-tmpdir fails "not directly under TALLY_STORES"
+expect store-tmpdir fails "launched its store at"
 
 [ "$failed" -eq 0 ] || { echo "canary-guards: a guard failed; reproduce with scripts/canary-guards"; exit 1; }

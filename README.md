@@ -597,3 +597,5 @@ claims: the repository's `.verilex/` holds words that build the verilex under te
 on a scratch tally, each claim anchored on a `verify-verilex` sub-feature. A known-good build pinned in
 `scripts/ci` (`canary_driver`) runs them live in throwaway state, never the build under test, and the step fails
 on a red or inconclusive run and on drift. Onboard a changed canary word with that pinned build.
+Its `canary-guards` step (`scripts/canary-guards`) replays attacks that once passed the canary step on scratch
+copies of the checkout, and each must now fail it.

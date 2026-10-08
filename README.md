@@ -376,7 +376,7 @@ A run records its resolved ticket in its own run record (`ticket` in `--json` an
 
 ## Companion launcher
 
-`verilex-agent` is a separate module in `agent/`. The core does not import it and does not start a harness. The launcher reads the run spec through `verilex ticket`, starts the brain that spec names with the verilex skill and the intent, and prints the JSON of one `verilex run` the brain made, chosen as described below. That JSON is verilex's own verdict, byte for byte, including its missed-claim warning (`warning`, `uncovered`, `unmapped`, `unclaimed`, `unrun`). The brain's message is not the verdict. A real harness starts only with `--allow-harness`. A named executable (`--brain`) is how tests and bots supply a brain without one.
+`verilex-agent` is a separate module in `agent/`. The core does not import it and does not start a harness. The launcher reads the run spec through `verilex ticket`, starts the brain that spec names with the verilex skill and the intent, and prints the JSON of one `verilex run` the brain made, chosen by the [verdict rule](#verdict-rule). That JSON is verilex's own verdict, byte for byte, including its missed-claim warning (`warning`, `uncovered`, `unmapped`, `unclaimed`, `unrun`). The brain's message is not the verdict. A real harness starts only with `--allow-harness`. A named executable (`--brain`) is how tests and bots supply a brain without one.
 
 ```
 go build -o verilex-agent ./agent/cmd/verilex-agent
@@ -386,29 +386,76 @@ verilex-agent --diff main...HEAD --claim item-listed --harness claude-code --mod
 
 The project must be in a git work tree. The brain's `verilex` command is the launcher's, and the only one its sandbox shows: it may run `index`, `plan`, `run`, `words`, `claims`, `runs`, `ticket` and `check`, never with `--keep` or `--continue`; every `run` and `plan` carries the run spec as `--ticket`, so the run record names the brain.
 
-The launcher keeps the JSON of every `verilex run` the brain makes and chooses the verdict from all of them:
+With `--suggest`, the brain is first asked, with the launcher's `verilex` blocked, for extra claims; they reach the run prompt as suggestions, never as a verdict or a ceiling. Each run gets its own state home, so two runs do not share a mutable instance. Pass the same `--ledger` to keep skip savings. A second run that reuses a home still in use is refused.
 
-1. A red from any run is the verdict, with exit `1`. The project is read-only for the brain, so a later green on other claims cannot undo a failure that verilex found in the code under test. If more than one run is red, the launcher returns the last red.
-2. Otherwise the last run is the verdict.
-3. A last run that is green is returned only if it is a `verilex-claim-run-1` run that proved every floor claim, was asked about every path the diff changes, and proved every claim that an earlier inconclusive run selected.
+### Verdict rule
 
-The floor is every `--claim` given to the launcher, plus the claims that `verilex index --intent <intent> --json` finds for the intent. The launcher runs that lookup itself before the brain starts, and the prompt lists the floor. A run proved a claim when the run is green and its `requested` names the claim (`claims` or `named`), or its `claims` or `words` show the claim green. The diff's paths are `git diff --name-only -z --no-renames --relative <diff>` in the project, so both sides of a rename count, and the run's `requested.changed` must hold each one. The floor is only as good as the index's intent lookup.
+The launcher keeps the JSON of every `verilex run` the brain makes, in the order the runs finish. The table below turns those runs into one result, and the first row that matches decides. The launcher checks rows 1-8 before it judges any run (`run.Run` in `agent/internal/run`). `verdict.Decide` in `agent/internal/verdict` owns rows 9-34, and `prompt.Rule` states the same rule to the brain. Row NN is the subtest `NN ...` of `TestVerdictRule` in `agent/rule_test.go`, so change a row and its subtest together.
 
-An intent that names no claim has no floor. Without `--claim`, the launcher returns inconclusive before the brain starts, because no verilex run can prove such an intent. With `--claim`, the named claims stand for the intent.
+The rule uses these terms:
 
-The launcher returns no verdict, but prints `verilex-agent: inconclusive: <reason>` on stderr, nothing on stdout, and exits `2`, when:
+- A **planned run** is a `verilex run` with `--claim`, `--named` or `--changed` and no chain argument, so verilex plans its chain. A red from a planned run is a failure that verilex found in the code under test. The project is read-only for the brain, so no later run can undo that red.
+- A **brain chain** is a `verilex run` with a chain argument that the brain wrote, with or without `--changed`. The launcher reads the arguments of each run to tell a brain chain from a planned run. It does not use the JSON format, because a chain with `--changed` also prints `verilex-claim-run-1`. A brain chain can be red on correct code: `store-open | store-open` opens one store twice. So a red brain chain decides only when it is the last run.
+- The **floor** is every `--claim` given to the launcher, plus each claim that `verilex index --intent <intent> --json` finds for the intent. The launcher runs this lookup itself before the brain starts, and the prompt lists the floor. A spec without an intent has only the `--claim` floor.
+- A run **proves** a claim when the run is green and its `requested` names the claim (`claims` or `named`), or its `claims` or `words` show the claim green.
+- The **open claims** of an earlier run are the claims that the last run must prove. An inconclusive run leaves open every claim that it selected: its `requested` claims, its `claims` and the claim of each of its words. A red brain chain leaves open the claim of each red word.
+- A green **covers the spec** when it is a claim run (format `verilex-claim-run-1`, with `requested`), it proves every floor claim, and its `requested.changed` holds every path that the diff changes. The diff's paths are `git diff --name-only -z --no-renames --relative <diff>` in the project, so both sides of a rename count.
 
-- the last run is green but does not prove the floor or the diff, or does not prove a claim that an earlier inconclusive run selected;
-- a run's exit does not match the verdict it printed;
-- the intent names no claim and no `--claim` is given;
-- the brain ran no verilex run, or `time_budget` ended before any run was red. A red that verilex printed before the deadline is still the verdict. One deadline covers `--suggest` and the run, and no child the brain started holds the launcher past it;
-- the sandbox could not start or did not hold (see [Sandbox](#sandbox));
-- the project changed during the run: a file git tracks or would track (ignored files are not checked) was added, removed, written or touched between the start of the brain and its end, even if the bytes were put back;
-- the run's home holds a run that did not come through the launcher, or a kept instance. The launcher tears down every instance left in the home.
+The table uses the tally fixture (`tests/fixtures/tally`) and these short forms:
+
+- `apple` is `--intent 'prove a stored apple is listed'`, with the floor `item-listed` and `item-added`. `store` is `--intent 'prove the store opens'`, with the floor `store-opened`. `nothing` is `--intent 'make the export faster'`, which names no claim. `diff` is `--diff HEAD`, with `bin/tally` changed.
+- `claim X` is `verilex run --claim X`. `+ changed` adds `--changed bin/tally`. `chain A | B` is `verilex run 'A | B'`.
+- The defect is `TALLY_DEFECT=hide-lists`, which makes `item-listed` red. A locked store makes verilex inconclusive.
+- `run N` means that the launcher prints the JSON of the brain's run N, as verilex printed it. `no JSON` means that the launcher prints `verilex-agent: inconclusive: <reason>` on stderr and nothing on stdout.
+
+| # | Spec | The brain's runs, in order | Verdict | Exit | Why |
+|---|---|---|---|---|---|
+| 1 | `nothing` | none: the brain does not start | inconclusive, no JSON | 2 | The intent names no claim, and no `--claim` stands for it. So no verilex run can prove the intent. |
+| 2 | `--diff HEAD..HEAD`, no intent and no `--claim` | none: the brain does not start | inconclusive, no JSON | 2 | The diff changes no file, and no intent or `--claim` names a claim. So there is nothing to prove. |
+| 3 | `apple`, `verilex index` fails | none: the brain does not start | inconclusive, no JSON | 2 | The floor is unknown. The launcher ran the lookup itself, so the failure is the environment's, not a refusal. |
+| 4 | `apple`, `time_budget: 1s`, `verilex index` hangs | none: the brain does not start | inconclusive, no JSON | 2 | The floor is unknown. The lookup stops when the time budget ends or after 30 seconds, whichever comes first. |
+| 5 | `store`, the sandbox tool fails | none: the brain does not start | inconclusive, no JSON | 2 | The brain runs only in a sandbox. See [Sandbox](#sandbox). |
+| 6 | `store`, the sandbox tool starts the brain without a sandbox | none: the brain does not start | inconclusive, no JSON | 2 | The check inside the sandbox finds that the brain could write the project. |
+| 7 | `store`, a file in the project changes on the host during the run | `claim store-opened` green | inconclusive, no JSON | 2 | The verdict can be about code that is no longer the code under test (F1). |
+| 8 | `store`, a `verilex run --keep` in the launcher's home, outside the launcher, during the run | `claim store-opened` green | inconclusive, no JSON | 2 | A run in the home did not come through the launcher, and it kept its instance (F5). |
+| 9 | `store`, a fake verilex | run 1 prints red and exits 0, run 2 green | inconclusive, no JSON | 2 | An exit that disagrees with the JSON is an environment failure, never a verdict. |
+| 10 | `apple`, the defect | `claim item-listed` red | red, run 1 | 1 | A planned red is a failure that verilex found in the code under test. |
+| 11 | `apple`, the defect | `claim item-listed` red, `claim store-opened` green | red, run 1 | 1 | A planned red is final. A later green on other claims cannot undo it (F6). |
+| 12 | `diff`, the defect | `verilex run --changed bin/tally` red, `claim store-opened + changed` green | red, run 1 | 1 | The same as row 11, on the diff (F6). |
+| 13 | `apple`, the defect | `claim item-listed` red, a forged pass written to the ledger's path, `claim item-listed` red | red, run 2 | 1 | The brain cannot reach the ledger, so the second run is not skipped. Of two planned reds, the launcher returns the last (F2). |
+| 14 | `apple`, `time_budget: 2s`, the defect | `claim item-listed` red, then the budget ends | red, run 1 | 1 | A planned red stands when the budget ends after it (F4). |
+| 15 | `apple`, `time_budget: 2s` | `claim item-listed` green, then the budget ends | inconclusive, no JSON | 2 | The brain did not finish, so only a planned red can decide. The same applies when the budget ends before any run (F4). |
+| 16 | `store`, `time_budget: 2s` | `chain store-open \| store-open` red, then the budget ends | inconclusive, no JSON | 2 | A red brain chain decides only as the last run of a brain that finished. |
+| 17 | `store` | a refused `verilex run --keep` and a `verilex plan` | inconclusive, no JSON | 2 | No verilex run printed a verdict. The brain's own message is not a verdict. |
+| 18 | `store` | `chain store-open \| store-open` red | red, run 1 | 1 | A red brain chain that is the last run is the result. |
+| 19 | `apple`, the store locked for run 2 | `claim item-listed` green, `claim item-listed` inconclusive | inconclusive, run 2 | 2 | The last run is the result when it is not green. |
+| 20 | `store` | `chain store-open \| store-open` red, `claim store-opened` green | green, run 2 | 0 | The green proves `store-opened`, the claim of the chain's red word, and covers the spec (F7). |
+| 21 | `apple`, the defect | `chain store-open \| item-stored apple \| item-listed apple` red, `claim store-opened` green | inconclusive, no JSON | 2 | The green does not prove `item-listed`, the claim of the chain's red word (F6 as a chain). |
+| 22 | `diff`, the defect | the chain of row 21 `+ changed` red, `claim store-opened + changed` green | inconclusive, no JSON | 2 | The same as row 21, on the diff. The chain prints `verilex-claim-run-1`, and it is still a brain chain (F6 as a chain). |
+| 23 | `apple`, the store locked for run 1 | `claim item-listed` inconclusive, `claim item-listed` green | green, run 2 | 0 | The green proves every claim that the inconclusive run selected, and covers the spec. |
+| 24 | `store`, a fake verilex | run 1 inconclusive, asked for `item-listed` and selecting `store-opened`, `item-added` and `item-listed`, run 2 green on `store-opened` | inconclusive, no JSON | 2 | The green does not prove `item-listed` or `item-added`, which the inconclusive run selected. |
+| 25 | `apple` | `claim item-listed` green | green, run 1 | 0 | The green covers the spec. Its words prove both floor claims. |
+| 26 | `apple` | `claim item-listed` green, `claim store-opened` green | inconclusive, no JSON | 2 | The last green proves neither floor claim. An earlier green does not count, because the last run is the result. |
+| 27 | `store`, `--claim item-listed` | `claim store-opened` green | inconclusive, no JSON | 2 | The green does not prove `item-listed`, a floor claim from `--claim`. |
+| 28 | `nothing`, `--claim store-opened` | `claim store-opened` green | green, run 1 | 0 | `--claim` stands for an intent that names no claim. |
+| 29 | `diff` | `claim store-opened` green | inconclusive, no JSON | 2 | The green was not asked about `bin/tally`. |
+| 30 | `diff` | `verilex run --changed bin/tally` green | green, run 1 | 0 | The green covers the spec. It proves every claim that the diff touches, so verilex prints no warning. |
+| 31 | `diff` | `claim store-opened + changed` green | green, run 1 | 0 | The green covers the spec. verilex's own warning, `2 touched claims not covered`, stays in the JSON. |
+| 32 | `store`, `--diff HEAD` with a rename and a non-ASCII file name | `claim store-opened`, with `--changed` for each changed path in the prompt | green, run 1 | 0 | Both sides of the rename and the non-ASCII name reach the prompt and `requested.changed` (F3). |
+| 33 | `store`, `diff` | `chain store-open + changed` green | green, run 1 | 0 | A brain chain with `--changed` is a claim run, and this one covers the spec. |
+| 34 | `store` | `chain store-open` green | inconclusive, no JSON | 2 | A chain without `--changed` is not a claim run, so its JSON does not show what it was asked. |
+
+Row 7 checks every file that git tracks or would track, and ignores the files that git ignores. A file counts as changed when it was added, removed, written or touched between the start of the brain and its end, even if its bytes were put back. Row 8 also matches a kept instance in the home. The launcher tears down every instance that it finds in the home.
 
 A red or inconclusive verdict is returned as verilex printed it. Exit codes are verilex's: `0` green, `1` red, `2` inconclusive or refused. `--text` prints the verdict line and each gap instead of the JSON.
 
-With `--suggest`, the brain is first asked, with the launcher's `verilex` blocked, for extra claims; they reach the run prompt as suggestions, never as a verdict or a ceiling. Each run gets its own state home, so two runs do not share a mutable instance. Pass the same `--ledger` to keep skip savings. A second run that reuses a home still in use is refused.
+One deadline, the run spec's `time_budget`, covers the intent lookup, `--suggest` and the run. No child that the brain started holds the launcher past it. Each `verilex ticket` and `verilex index` command that the launcher runs for itself also stops after 30 seconds, and the launcher is then inconclusive.
+
+The rule has these limits:
+
+- The floor is only as good as the index's intent lookup. `verilex index --intent` returns up to five claims, best first, weak matches included, and the floor holds all of them. So on a large product, a brain that proves only the claims that it judged relevant can get inconclusive and must run more claims. This costs time, but it never gives a false green or a false red.
+- The last run is the run that finished last. When the brain runs verilex in parallel, timing decides which run is last, so the same runs can give green or inconclusive. They cannot give a false green, because the last run must cover the spec alone.
+- A red brain chain is not final. When a later green proves the claim of each red word, the result is green, even if only the chain's own inputs reach a defect. verilex proves a claim through its admitted words, so a defect that those words do not reach is outside the claim.
 
 ### Sandbox
 
@@ -461,7 +508,7 @@ The sandbox does not cover these cases:
 - The egress proxy serves only `CONNECT`. A client that sends plain HTTP requests to the proxy gets `405`.
 - A harness cannot save a token that it refreshes during a run. If the provider rotates refresh tokens, log in again on the host when the harness reports an expired login.
 
-The project check and the home check in the list above stay as defense in depth. The brain can no longer cause either one, but they still catch a change that something outside the sandbox makes during the run, and a run that something starts around the launcher in its home.
+The project check and the home check, rows 7 and 8 of the [verdict rule](#verdict-rule), stay as defense in depth. The brain can no longer cause either one, but they still catch a change that something outside the sandbox makes during the run, and a run that something starts around the launcher in its home.
 
 ## The word lifecycle
 

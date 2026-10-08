@@ -53,12 +53,21 @@ func shared(in Input) string {
 	b.WriteString("When the intent is the default, it means: prove nothing this change touched broke.\n")
 	b.WriteString("Pass every changed path with --changed. Call verilex plan with --claim, --named and --changed, then verilex run with the same flags and no chain.\n")
 	b.WriteString("If the plan lists unpicked, or the verdict says a touched claim is not covered, add that claim with --claim and run again.\n")
-	b.WriteString("The launcher returns verilex's own JSON verdict and ignores your message. A red from any of your verilex runs is the result.\n")
-	b.WriteString("Otherwise your last verilex run is the result. It is green only if it is a claim run that proved every floor claim, was asked about every changed path, and proved every claim an earlier inconclusive run selected; otherwise the result is inconclusive.\n")
+	b.WriteString(Rule)
 	b.WriteString("You may run index, plan, run, words, claims, runs, ticket and check, never with --keep or --continue.\n")
 	b.WriteString("The project is read-only: verilex tests the code as it is. Write scratch files only in $HOME or $TMPDIR.\n")
 	return b.String()
 }
+
+// Rule is README "Verdict rule" as the brain reads it: how the launcher turns the brain's verilex
+// runs into one result. verdict.Decide implements it, so change the three together.
+const Rule = "The launcher returns verilex's own JSON verdict and ignores your message. It turns your verilex runs into one result, and the first case that applies decides:\n" +
+	"1. A run whose exit code disagrees with its JSON: inconclusive.\n" +
+	"2. A red from a run verilex planned (--claim, --named or --changed, and no chain): that red, whatever runs follow.\n" +
+	"3. The time budget ended before you finished: inconclusive.\n" +
+	"4. No verilex run: inconclusive.\n" +
+	"5. Your last run is red (a chain you wrote) or inconclusive: that run.\n" +
+	"6. Your last run is green: that green only if it proved the claim of each red word of an earlier red chain and every claim an earlier inconclusive run selected, is a claim run (a run with --claim, --named or --changed), proved every floor claim, and passed every changed path with --changed. Otherwise inconclusive.\n"
 
 func writeList(b *strings.Builder, label string, items []string) {
 	if len(items) == 0 {

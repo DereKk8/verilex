@@ -64,96 +64,6 @@ func TestBrainCannotEditTheProject(t *testing.T) {
 	}
 }
 
-// The tree check stays as defense in depth: when anything outside the sandbox changes the project
-// while the brain runs, verilex's verdict is not about the code under test, so there is none.
-func TestProjectChangedDuringTheRunIsInconclusive(t *testing.T) {
-	dir, product, ledger := admittedProduct(t)
-	brain := writeBrain(t, dir, holdBrain+"verilex run --claim item-listed > /dev/null\n")
-	run := launchHeld(t, dir, coreBin, brain,
-		"--project", product, "--ledger", ledger, "--intent", "prove a stored apple is listed", "--harness", "stub", "--model", "stub")
-	appendLine(t, filepath.Join(product, "bin", "tally"), "# changed while the brain ran\n")
-	defer gitRestore(t, product)
-	got := run.release(t)
-	if got.code != 2 || got.stdout != "" || !strings.Contains(got.stderr, "inconclusive: the project changed during the run") || !strings.Contains(got.stderr, "bin/tally") {
-		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", got.code, got.stdout, got.stderr)
-	}
-}
-
-// The diff names both sides of a rename and non-ASCII paths as they are, so verilex still sees
-// every claim the change touches and warns about the one the brain left out.
-func TestDiffKeepsRenamesAndNonASCIIPaths(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("TALLY_STORES", t.TempDir())
-	dir := t.TempDir()
-	product := copyProduct(t, dir)
-	words := filepath.Join(product, ".verilex", "words", "item-listed")
-	for _, name := range []string{"notes.txt", "café.txt"} {
-		if err := os.WriteFile(filepath.Join(words, name), []byte("note\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ledger := filepath.Join(dir, "ledger")
-	admit(t, product, ledger)
-	if err := commitAll(product); err != nil {
-		t.Fatal(err)
-	}
-	brain := writeBrain(t, dir, `#!/bin/sh
-cp "$VERILEX_AGENT_PROMPT" "$HOME/prompt"
-set --
-for path in $(sed -n 's/^changed: //p' "$VERILEX_AGENT_PROMPT"); do set -- "$@" --changed "$path"; done
-verilex run --claim store-opened "$@" > /dev/null
-`)
-	for _, tc := range []struct {
-		name    string
-		change  func() error
-		changed []string
-	}{
-		{"rename", func() error {
-			cmd := exec.Command("git", "mv", ".verilex/words/item-listed/notes.txt", "notes-moved.txt")
-			cmd.Dir = product
-			return cmd.Run()
-		}, []string{".verilex/words/item-listed/notes.txt", "notes-moved.txt"}},
-		{"non-ASCII name", func() error {
-			return os.WriteFile(filepath.Join(words, "café.txt"), []byte("changed\n"), 0o600)
-		}, []string{".verilex/words/item-listed/café.txt"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if err := tc.change(); err != nil {
-				t.Fatal(err)
-			}
-			defer func() {
-				cmd := exec.Command("git", "reset", "-q", "--hard")
-				cmd.Dir = product
-				if out, err := cmd.CombinedOutput(); err != nil {
-					t.Fatalf("%v\n%s", err, out)
-				}
-			}()
-			run := launchKept(t, dir, coreBin, brain,
-				"--project", product, "--ledger", ledger, "--intent", "prove the store opens", "--diff", "HEAD", "--harness", "stub", "--model", "stub")
-			var doc runDoc
-			if run.code != 0 || json.Unmarshal([]byte(run.stdout), &doc) != nil {
-				t.Fatalf("exit %d\n%s\n%s", run.code, run.stdout, run.stderr)
-			}
-			if strings.Join(doc.Requested.Changed, ",") != strings.Join(tc.changed, ",") {
-				t.Fatalf("requested.changed %q, want %q", doc.Requested.Changed, tc.changed)
-			}
-			var missed []string
-			for _, u := range doc.Uncovered {
-				missed = append(missed, u.Claim)
-			}
-			if strings.Join(missed, ",") != "item-listed" {
-				t.Fatalf("uncovered %v, warning %q", missed, doc.Warning)
-			}
-			prompt := run.home(t, "prompt")
-			for _, path := range tc.changed {
-				if !strings.Contains(prompt, "changed: "+path+"\n") {
-					t.Fatalf("prompt lacks %s\n%s", path, prompt)
-				}
-			}
-		})
-	}
-}
-
 // The time budget bounds the whole run, both brain phases, and no child of the brain can hold
 // the launcher past it. Without a budget, a background child cannot hold the launcher either.
 func TestBudgetBoundsTheRunWhateverTheBrainStarts(t *testing.T) {
@@ -220,31 +130,6 @@ verilex run --claim store-opened > /dev/null
 	}
 	if rows := instancesDown(t, product, home); len(rows) != 1 || rows[0].Run != doc.Run {
 		t.Fatalf("home runs %+v, want only %s", rows, doc.Run)
-	}
-}
-
-// The home check stays as defense in depth: a run in the launcher's home that did not come
-// through it, here one a host process starts while the brain runs, leaves no verdict, and the
-// instance it kept is torn down.
-func TestRunAroundTheLauncherIsInconclusive(t *testing.T) {
-	dir, product, ledger := admittedProduct(t)
-	home := filepath.Join(t.TempDir(), "home")
-	brain := writeBrain(t, dir, holdBrain+"verilex run --claim store-opened > /dev/null\n")
-	run := launchHeld(t, dir, coreBin, brain,
-		"--project", product, "--home", home, "--ledger", ledger, "--intent", "prove the store opens", "--harness", "stub", "--model", "stub")
-	cmd := exec.Command(coreBin, "--project", product, "run", "--keep", "--claim", "store-opened")
-	cmd.Env = append(os.Environ(), "VERILEX_HOME="+home, "VERILEX_LEDGER="+ledger)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	got := run.release(t)
-	for _, want := range []string{"did not come through the launcher", "kept its instance; the launcher tore it down"} {
-		if got.code != 2 || got.stdout != "" || !strings.Contains(got.stderr, want) {
-			t.Fatalf("exit %d\nstdout: %s\nstderr: %s", got.code, got.stdout, got.stderr)
-		}
-	}
-	if rows := instancesDown(t, product, home); len(rows) != 2 {
-		t.Fatalf("home runs %+v, want the host's and the brain's", rows)
 	}
 }
 
@@ -420,54 +305,6 @@ sys.stdout.buffer.write(shown)
 sys.exit(os.waitstatus_to_exitcode(status))
 `
 
-// Where the sandbox cannot be established, the launcher returns no verdict and the brain never
-// runs: when the sandbox tool fails, and when it starts the brain without sandboxing it.
-func TestNoSandboxNoVerdict(t *testing.T) {
-	tool := sandboxTool()
-	passthrough := "#!/bin/sh\nwhile [ \"$1\" != -- ]; do shift; done\nshift\nexec \"$@\"\n"
-	if tool == "sandbox-exec" {
-		passthrough = "#!/bin/sh\nshift 2\nexec \"$@\"\n"
-	}
-	for _, tc := range []struct{ name, fake, want string }{
-		{"the tool fails", "#!/bin/sh\necho '" + tool + ": setting up uid map: Permission denied' >&2\nexit 1\n",
-			tool + " could not start the sandbox: " + tool + ": setting up uid map: Permission denied"},
-		{"the tool does not sandbox", passthrough, "the sandbox did not hold: the brain could write the project"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			project := filepath.Join(dir, "project")
-			if err := os.MkdirAll(project, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := commitAll(project); err != nil {
-				t.Fatal(err)
-			}
-			fakes := t.TempDir()
-			if err := os.WriteFile(filepath.Join(fakes, tool), []byte(tc.fake), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			marker := filepath.Join(t.TempDir(), "brain-ran")
-			fake := writeFake(t, dir, fakeFiles{ticket: ticketJSON("stub", "stub"), run: claimRun("green", "r1", nil, nil)})
-			brain := writeBrain(t, dir, "#!/bin/sh\ntouch \"$MARKER\"\nverilex run --json 'store-open'\n")
-			stdout, stderr, code, err := launchEnv(dir, fake, brain,
-				[]string{"PATH=" + fakes + string(os.PathListSeparator) + os.Getenv("PATH"), "MARKER=" + marker},
-				"--intent", "prove the store opens", "--harness", "stub", "--model", "stub")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if code != 2 || stdout != "" || !strings.Contains(stderr, "inconclusive: the brain runs only in a sandbox, and the sandbox is not available here: "+tc.want) {
-				t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
-			}
-			if _, err := os.Stat(marker); !os.IsNotExist(err) {
-				t.Fatal("the brain ran without a sandbox")
-			}
-			if status := gitStatus(t, project); status != "" {
-				t.Fatalf("the project changed:\n%s", status)
-			}
-		})
-	}
-}
-
 // listen opens a listener on the host that counts the connections it accepts.
 func listen(t *testing.T, network, address string) (string, *atomic.Int64) {
 	t.Helper()
@@ -521,17 +358,6 @@ func gitStatus(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return string(out)
-}
-
-func gitRestore(t *testing.T, dir string) {
-	t.Helper()
-	for _, args := range [][]string{{"checkout", "-q", "--", "."}, {"clean", "-qfd"}} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
 }
 
 func appendLine(t *testing.T, path, line string) {

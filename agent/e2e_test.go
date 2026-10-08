@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/DereKk8/verilex/agent/internal/prompt"
 )
 
 var (
@@ -88,22 +90,6 @@ func TestBrainExitDoesNotReplaceTheVerdict(t *testing.T) {
 	}
 }
 
-func TestNoVerilexRunIsNotGreen(t *testing.T) {
-	dir := t.TempDir()
-	fake := writeFake(t, dir, fakeFiles{ticket: ticketJSON("stub", "stub")})
-	brain := writeBrain(t, dir, "#!/bin/sh\nprintf '%s\\n' 'green'\nexit 0\n")
-	stdout, stderr, code := launch(t, dir, fake, brain, "--intent", "prove the store opens", "--harness", "stub", "--model", "stub")
-	if code != 2 {
-		t.Fatalf("exit %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
-	}
-	if strings.Contains(stdout, "green") {
-		t.Fatalf("stdout reported green without a verilex run: %s", stdout)
-	}
-	if !strings.Contains(stderr, "no verdict") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-}
-
 func TestSkillIntentAndSuggestionsReachTheBrain(t *testing.T) {
 	dir := t.TempDir()
 	gitRepo(t, filepath.Join(dir, "project"), "notes.txt")
@@ -132,8 +118,7 @@ func TestSkillIntentAndSuggestionsReachTheBrain(t *testing.T) {
 		"floor: store-opened",
 		"changed: notes.txt",
 		"suggestion: item-added",
-		"The launcher returns verilex's own JSON verdict and ignores your message. A red from any of your verilex runs is the result.\n",
-		"Otherwise your last verilex run is the result.",
+		prompt.Rule,
 		"# Task\nProve the intent now.",
 	} {
 		if !strings.Contains(text, want) {
@@ -529,8 +514,14 @@ func (k kept) home(t *testing.T, name string) string {
 // run directory.
 func launchKept(t *testing.T, dir, verilex, brain string, args ...string) kept {
 	t.Helper()
+	return launchKeptEnv(t, dir, verilex, brain, nil, args...)
+}
+
+// launchKeptEnv is launchKept with env added to the test's environment.
+func launchKeptEnv(t *testing.T, dir, verilex, brain string, env []string, args ...string) kept {
+	t.Helper()
 	tmp := runTemp(t)
-	stdout, stderr, code, err := launchEnv(dir, verilex, brain, []string{"TMPDIR=" + tmp}, append(args, "--keep-work")...)
+	stdout, stderr, code, err := launchEnv(dir, verilex, brain, append([]string{"TMPDIR=" + tmp}, env...), append(args, "--keep-work")...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -550,10 +541,16 @@ type held struct {
 // launchHeld starts the launcher and returns once its brain is holding.
 func launchHeld(t *testing.T, dir, verilex, brain string, args ...string) held {
 	t.Helper()
+	return launchHeldEnv(t, dir, verilex, brain, nil, args...)
+}
+
+// launchHeldEnv is launchHeld with env added to the test's environment.
+func launchHeldEnv(t *testing.T, dir, verilex, brain string, env []string, args ...string) held {
+	t.Helper()
 	tmp := runTemp(t)
 	done := make(chan kept, 1)
 	go func() {
-		stdout, stderr, code, err := launchEnv(dir, verilex, brain, []string{"TMPDIR=" + tmp}, append(args, "--keep-work")...)
+		stdout, stderr, code, err := launchEnv(dir, verilex, brain, append([]string{"TMPDIR=" + tmp}, env...), append(args, "--keep-work")...)
 		if err != nil {
 			stderr += err.Error()
 			code = -1

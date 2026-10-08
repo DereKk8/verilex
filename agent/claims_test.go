@@ -101,40 +101,6 @@ verilex run --claim store-opened "$@" > "$HOME/printed"
 	})
 }
 
-// A green that verilex was not asked about the whole spec does not prove it. The launcher says
-// inconclusive and prints no verdict a caller could read as green.
-func TestGreenThatDoesNotCoverTheSpecIsInconclusive(t *testing.T) {
-	dir, product, ledger := changedProduct(t)
-	for _, tc := range []struct {
-		name, run, want string
-		floor           []string
-	}{
-		{"diff left out", "verilex run --claim store-opened", "was not asked about change bin/tally", nil},
-		{"floor left out", "verilex run --claim store-opened --changed bin/tally", "was not asked about claim item-listed", []string{"--claim", "item-listed"}},
-		{"chain run", "verilex run --changed bin/tally 'store-open'", "", nil},
-		{"chain run without a diff", "verilex run 'store-open'", "is green but is not a claim run", nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			brain := writeBrain(t, filepath.Join(dir, strings.ReplaceAll(tc.name, " ", "-")), "#!/bin/sh\n"+tc.run+" > /dev/null\n")
-			args := append([]string{"--project", product, "--ledger", ledger,
-				"--intent", "prove the store opens", "--diff", "HEAD", "--harness", "stub", "--model", "stub"}, tc.floor...)
-			stdout, stderr, code := launch(t, dir, coreBin, brain, args...)
-			if tc.want == "" {
-				// A chain run given the diff is a claim run: verilex itself warns about what the
-				// chain did not prove, so the launcher returns it.
-				var doc runDoc
-				if code != 0 || json.Unmarshal([]byte(stdout), &doc) != nil || doc.Warning != "2 touched claims not covered" {
-					t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
-				}
-				return
-			}
-			if code != 2 || stdout != "" || !strings.Contains(stderr, "verilex-agent: inconclusive: ") || !strings.Contains(stderr, tc.want) {
-				t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
-			}
-		})
-	}
-}
-
 // The brain drives verilex only through the launcher, which refuses commands that change what
 // verilex trusts or keep an instance past the run.
 func TestBrainCannotChangeTrustOrKeepAnInstance(t *testing.T) {

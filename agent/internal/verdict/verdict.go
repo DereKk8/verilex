@@ -1,12 +1,12 @@
-// Package verdict reads the JSON every verilex run printed and decides which one the launcher
-// returns. It never invents a verdict. A red from any run stands, a green must cover the run
-// spec and every claim an earlier inconclusive run left open, and a document whose process exit
-// disagrees with it is refused.
+// Package verdict owns the launcher's verdict rule, README "Verdict rule": it reads the JSON
+// every verilex run printed and decides which one the launcher returns. It never invents a
+// verdict.
 package verdict
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -48,11 +48,16 @@ type Step struct {
 	Verdict string `json:"verdict"`
 }
 
-// Run is what one verilex run printed and its exit code.
+// Run is what one verilex run printed and its exit code. Chain is set when the brain wrote the
+// run's chain; otherwise verilex planned the run from claims and changed paths.
 type Run struct {
 	Stdout []byte
 	Exit   int
+	Chain  bool
 }
+
+// ErrNoRun is the reason there is no verdict when no run printed JSON.
+var ErrNoRun = errors.New("the brain exited without a verilex run, so there is no verdict")
 
 // Request is what verilex says it was asked, read from verilex rather than from the brain.
 type Request struct {
@@ -102,15 +107,20 @@ func Exit(doc Doc, verilexExit int) (int, error) {
 	return want, nil
 }
 
-// Decide picks the verdict the launcher returns from every run the brain made, in order, and its
-// exit code. A red from any run is the verdict: the project is read-only, so a later green on
-// other claims cannot undo a failure verilex found in the code under test. Otherwise the last run
-// is the verdict. A last run that is green must cover the spec and must have proved every claim
-// that an earlier inconclusive run left open. An error is a reason to return no verdict.
-func Decide(runs []Run, want Want) (Doc, int, error) {
-	if len(runs) == 0 {
-		return Doc{}, 2, fmt.Errorf("the brain ran no verilex run, so there is no verdict")
-	}
+// Decide is the verdict rule, rows 9-34 of README "Verdict rule"; prompt.Rule states it to the
+// brain. It turns every run the brain made, in the order the runs finished, into the verdict the
+// launcher returns and its exit code; an error is the reason there is none. unfinished is why the
+// brain did not finish, such as an ended time budget, or nil. The first step that applies decides:
+//
+//  1. A run whose exit disagrees with its JSON is an environment failure, never a verdict.
+//  2. A red from a run verilex planned is a failure in the code under test. The project is
+//     read-only for the brain, so nothing it runs later can undo it.
+//  3. A brain that did not finish has no other verdict.
+//  4. With no run there is no verdict.
+//  5. A last run that is not green is the verdict. A red here is from a chain the brain wrote.
+//  6. A last green is the verdict only if it proves every claim an earlier run left open and
+//     covers the spec.
+func Decide(runs []Run, want Want, unfinished error) (Doc, int, error) {
 	docs := make([]Doc, len(runs))
 	for i, run := range runs {
 		doc, err := Parse(run.Stdout)
@@ -123,33 +133,57 @@ func Decide(runs []Run, want Want) (Doc, int, error) {
 		docs[i] = doc
 	}
 	for i := len(docs) - 1; i >= 0; i-- {
-		if docs[i].Verdict == "red" {
+		if docs[i].Verdict == "red" && !runs[i].Chain {
 			return docs[i], 1, nil
 		}
+	}
+	if unfinished != nil {
+		return Doc{}, 2, unfinished
+	}
+	if len(docs) == 0 {
+		return Doc{}, 2, ErrNoRun
 	}
 	last := docs[len(docs)-1]
 	if last.Verdict != "green" {
 		return last, code(last.Verdict), nil
 	}
+	proven := provenBy(last)
+	for i, doc := range docs[:len(docs)-1] {
+		open, left := openClaims(doc, runs[i].Chain)
+		var missing []string
+		for _, claim := range open {
+			if !proven[claim] {
+				missing = append(missing, claim)
+			}
+		}
+		if len(missing) > 0 {
+			return Doc{}, 2, fmt.Errorf("run %s is green but did not prove %s, which run %s left %s", last.Run, strings.Join(missing, ", "), doc.Run, left)
+		}
+	}
 	if err := Check(last, want); err != nil {
 		return Doc{}, 2, err
 	}
-	proven := provenBy(last)
-	for _, doc := range docs[:len(docs)-1] {
-		if doc.Verdict != "inconclusive" {
-			continue
-		}
-		var open []string
-		for _, claim := range selected(doc) {
-			if !proven[claim] {
-				open = append(open, claim)
+	return last, 0, nil
+}
+
+// openClaims is what an earlier run leaves for the last green to prove, and how the run left it:
+// every claim an inconclusive run selected, and the claim of each red word in a red chain the
+// brain wrote. Such a chain can be red on correct code, for example when it opens one store
+// twice, so its red does not decide alone.
+func openClaims(doc Doc, chain bool) ([]string, string) {
+	switch {
+	case doc.Verdict == "inconclusive":
+		return selected(doc), "inconclusive"
+	case doc.Verdict == "red" && chain:
+		var out []string
+		for _, step := range doc.Words {
+			if name := claimOf(step); step.Verdict == "red" && name != "" && !slices.Contains(out, name) {
+				out = append(out, name)
 			}
 		}
-		if len(open) > 0 {
-			return Doc{}, 2, fmt.Errorf("run %s is green but did not prove %s, which run %s left inconclusive", last.Run, strings.Join(open, ", "), doc.Run)
-		}
+		return out, "red"
 	}
-	return last, 0, nil
+	return nil, ""
 }
 
 // provenBy is every claim a green run proved: the claims it was asked for, and each selected

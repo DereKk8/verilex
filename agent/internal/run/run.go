@@ -100,7 +100,7 @@ func newDirs() (dirs, error) {
 }
 
 // Run resolves the spec through the verilex CLI, starts the brain in the sandbox, and returns
-// verilex's verdict.
+// verilex's verdict. It applies rows 1-8 of README "Verdict rule", and verdict.Decide the rest.
 func Run(opts Options) (result Result, err error) {
 	project, err := abs(opts.Project)
 	if err != nil {
@@ -146,26 +146,19 @@ func Run(opts Options) (result Result, err error) {
 	if spec.Diff != "" && len(changed) == 0 && spec.Intent == "" && len(opts.Claims) == 0 {
 		return Result{}, inconclusive("diff %s changes no file under %s, so there is nothing to prove", spec.Diff, project)
 	}
-	// The claims the intent names are a floor like --claim, found by verilex, not by the brain. An
-	// intent that names no claim has no floor, so only the caller's --claim can stand for it.
-	named := slices.Clone(opts.Claims)
-	if spec.Intent != "" {
-		claims, err := intentClaims(verilex, project, spec.Intent)
-		if err != nil {
-			return Result{}, err
-		}
-		if len(claims) == 0 && len(opts.Claims) == 0 {
-			return Result{}, inconclusive("intent %q names no claim (verilex index --intent found none), so no verilex run can prove it; name the claims with --claim", spec.Intent)
-		}
-		for _, claim := range claims {
-			if !slices.Contains(named, claim) {
-				named = append(named, claim)
-			}
-		}
-	}
 	budget, err := time.ParseDuration(or(spec.TimeBudget, "0s"))
 	if err != nil {
 		return Result{}, fmt.Errorf("time_budget: %v", err)
+	}
+	// One deadline covers the intent lookup and both brain phases, so none can stretch the budget.
+	ctx, cancel := context.WithCancel(context.Background())
+	if budget > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), budget)
+	}
+	defer cancel()
+	named, err := floor(ctx, verilex, project, spec.Intent, opts.Claims)
+	if err != nil {
+		return Result{}, err
 	}
 	home, err := homeDir(opts.Home, d.home)
 	if err != nil {
@@ -186,12 +179,6 @@ func Run(opts Options) (result Result, err error) {
 		return Result{}, err
 	}
 	defer l.close()
-	// One deadline covers both brain phases, so --suggest cannot stretch the budget.
-	ctx, cancel := context.WithCancel(context.Background())
-	if budget > 0 {
-		ctx, cancel = context.WithTimeout(context.Background(), budget)
-	}
-	defer cancel()
 	suggestions, err := l.suggest(ctx, skill, intent, spec.Diff, changed)
 	if err != nil {
 		if edited := tree.Changed(before, snapshotOrNil(project)); len(edited) > 0 {
@@ -245,22 +232,14 @@ func Run(opts Options) (result Result, err error) {
 	if err = cleanHome(px); err != nil {
 		return Result{}, inconclusive("%v", err)
 	}
-	runs := px.Runs()
-	want := verdict.Want{Project: project, Named: named, Changed: changed}
+	var unfinished error
 	if isBudget(brainErr) {
-		// A red verilex printed before the budget ended still stands.
-		if doc, code, err := verdict.Decide(runs, want); err == nil && code == 1 {
-			return output(doc, code, opts.JSON), nil
-		}
-		return Result{}, inconclusive("%v", brainErr)
+		unfinished = brainErr
 	}
-	if len(runs) == 0 {
-		if brainErr != nil {
-			return Result{}, inconclusive("%v, and ran no verilex run, so there is no verdict", brainErr)
-		}
-		return Result{}, inconclusive("the brain exited without a verilex run, so there is no verdict")
+	doc, code, err := verdict.Decide(px.Runs(), verdict.Want{Project: project, Named: named, Changed: changed}, unfinished)
+	if errors.Is(err, verdict.ErrNoRun) && brainErr != nil {
+		return Result{}, inconclusive("%v, and ran no verilex run, so there is no verdict", brainErr)
 	}
-	doc, code, err := verdict.Decide(runs, want)
 	if err != nil {
 		return Result{}, inconclusive("%v", err)
 	}
@@ -550,7 +529,11 @@ func resolve(verilex, project, work string, opts Options) (ticket, string, error
 		return ticket{}, "", err
 	}
 	var spec ticket
-	if err = verilexJSON(verilex, project, &spec, "ticket", "--json", path); err != nil {
+	err = verilexJSON(context.Background(), verilex, project, &spec, "ticket", "--json", path)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return ticket{}, "", inconclusive("verilex ticket did not answer within %s", lookupTimeout)
+	}
+	if err != nil {
 		return ticket{}, "", err
 	}
 	if spec.Harness == "" || spec.Model == "" {
@@ -559,32 +542,64 @@ func resolve(verilex, project, work string, opts Options) (ticket, string, error
 	return spec, path, nil
 }
 
-// intentClaims are the claims verilex index names for intent, best first.
-func intentClaims(verilex, project, intent string) ([]string, error) {
+// floor is the claims a green must prove: each --claim, and each claim verilex index finds for
+// the intent, found by verilex, not by the brain. An intent that names no claim has no floor, so
+// only --claim can stand for it. The lookup runs within ctx, the run's time budget.
+func floor(ctx context.Context, verilex, project, intent string, claims []string) ([]string, error) {
+	named := slices.Clone(claims)
+	if intent == "" {
+		return named, nil
+	}
 	var rows []struct {
 		Claim string `json:"claim"`
 	}
-	if err := verilexJSON(verilex, project, &rows, "index", "--intent", intent, "--json"); err != nil {
-		return nil, err
+	err := verilexJSON(ctx, verilex, project, &rows, "index", "--intent", intent, "--json")
+	switch {
+	case ctx.Err() != nil:
+		return nil, inconclusive("the time budget ended before verilex index --intent answered")
+	case errors.Is(err, context.DeadlineExceeded):
+		return nil, inconclusive("verilex index --intent did not answer within %s", lookupTimeout)
+	case err != nil:
+		// The launcher made this call itself, so a failure is the environment's, not the caller's.
+		return nil, inconclusive("verilex index --intent failed, so the intent's claims are unknown: %v", err)
 	}
-	var claims []string
+	found := 0
 	for _, row := range rows {
 		if row.Claim != "" {
-			claims = append(claims, row.Claim)
+			found++
+			if !slices.Contains(named, row.Claim) {
+				named = append(named, row.Claim)
+			}
 		}
 	}
-	return claims, nil
+	if found == 0 && len(claims) == 0 {
+		return nil, inconclusive("intent %q names no claim (verilex index --intent found none), so no verilex run can prove it; name the claims with --claim", intent)
+	}
+	return named, nil
 }
 
+// lookupTimeout bounds each verilex command the launcher runs for itself, the ticket and the
+// intent's claims. Both read local records, so one that takes longer is stuck.
+const lookupTimeout = 30 * time.Second
+
 // verilexJSON runs one read-only verilex command for the launcher itself and decodes its JSON
-// into out. A refusal comes back as verilex worded it.
-func verilexJSON(verilex, project string, out any, args ...string) error {
-	cmd := exec.Command(verilex, append([]string{"--project", project}, args...)...)
+// into out. A refusal comes back as verilex worded it, and a deadline as context.DeadlineExceeded.
+func verilexJSON(ctx context.Context, verilex, project string, out any, args ...string) error {
+	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, verilex, append([]string{"--project", project}, args...)...)
 	cmd.Env = os.Environ()
+	// A process group of its own, so the deadline ends every process it started.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		detail := oneLine(stderr.String())
 		if detail == "" {
 			detail = err.Error()

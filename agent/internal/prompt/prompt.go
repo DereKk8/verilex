@@ -61,13 +61,13 @@ func shared(in Input) string {
 
 // Rule is README "Verdict rule" as the brain reads it: how the launcher turns the brain's verilex
 // runs into one result. verdict.Decide implements it, so change the three together.
-const Rule = "The launcher returns verilex's own JSON verdict and ignores your message. It turns your verilex runs into one result, and the first case that applies decides:\n" +
+const Rule = "The launcher returns verilex's own JSON verdict and ignores your message. Only a run that verilex planned decides it: a verilex run with --claim, --named or --changed, and no chain. A chain you write never decides the verdict and never proves a claim. The launcher reports it as a note only. The first case that applies decides:\n" +
 	"1. A run whose exit code disagrees with its JSON: inconclusive.\n" +
-	"2. A red from a run verilex planned (--claim, --named or --changed, and no chain): that red, whatever runs follow.\n" +
+	"2. A red from a planned run: that red, whatever runs follow.\n" +
 	"3. The time budget ended before you finished: inconclusive.\n" +
-	"4. No verilex run: inconclusive.\n" +
-	"5. Your last run is red (a chain you wrote) or inconclusive: that run.\n" +
-	"6. Your last run is green: that green only if it proved the claim of each red word of an earlier red chain and every claim an earlier inconclusive run selected, is a claim run (a run with --claim, --named or --changed), proved every floor claim, and passed every changed path with --changed. Otherwise inconclusive.\n"
+	"4. No planned run: inconclusive.\n" +
+	"5. Your last planned run is inconclusive: that run.\n" +
+	"6. Your last planned run is green: that green only if it proved every claim that an earlier inconclusive planned run selected, proved every floor claim, and passed every changed path with --changed. Otherwise inconclusive.\n"
 
 func writeList(b *strings.Builder, label string, items []string) {
 	if len(items) == 0 {

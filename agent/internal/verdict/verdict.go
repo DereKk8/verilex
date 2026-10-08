@@ -48,22 +48,22 @@ type Step struct {
 	Verdict string `json:"verdict"`
 }
 
-// Run is what one verilex run printed and its exit code. Chain is set when the brain wrote the
-// run's chain; otherwise verilex planned the run from claims and changed paths.
+// Run is what one verilex run printed and its exit code.
 type Run struct {
 	Stdout []byte
 	Exit   int
-	Chain  bool
 }
 
-// ErrNoRun is the reason there is no verdict when no run printed JSON.
-var ErrNoRun = errors.New("the brain exited without a verilex run, so there is no verdict")
+// ErrNoRun is the reason there is no verdict when no run that verilex planned printed JSON.
+var ErrNoRun = errors.New("the brain made no run that verilex planned, so there is no verdict")
 
-// Request is what verilex says it was asked, read from verilex rather than from the brain.
+// Request is what verilex says it was asked, read from verilex rather than from the brain. Chain
+// is the chain the brain gave, or nil when verilex planned the chain from claims and changes.
 type Request struct {
 	Claims  []string `json:"claims"`
 	Named   []string `json:"named"`
 	Changed []string `json:"changed"`
+	Chain   *string  `json:"chain"`
 }
 
 // Uncovered is a touched claim the run did not prove.
@@ -80,7 +80,8 @@ type Want struct {
 	Changed []string
 }
 
-// Parse reads one JSON object and keeps its bytes.
+// Parse reads one JSON object and keeps its bytes. A claim run must say who wrote its chain: a
+// verilex without requested.chain would make a chain the brain wrote look planned.
 func Parse(raw []byte) (Doc, error) {
 	trimmed := bytes.TrimSpace(raw)
 	var doc Doc
@@ -92,6 +93,16 @@ func Parse(raw []byte) (Doc, error) {
 	}
 	if code(doc.Verdict) < 0 {
 		return Doc{}, fmt.Errorf("verilex JSON has no verdict")
+	}
+	if doc.Format == RunFormat {
+		// A requested that does not decode leaves keys empty, which is refused below.
+		var keys struct {
+			Requested map[string]json.RawMessage `json:"requested"`
+		}
+		_ = json.Unmarshal(trimmed, &keys)
+		if _, ok := keys.Requested["chain"]; !ok {
+			return Doc{}, fmt.Errorf("verilex printed a claim run without requested.chain, so the launcher cannot tell a run verilex planned from a chain the brain wrote; use the verilex built with this launcher")
+		}
 	}
 	doc.Raw = append(slices.Clone(trimmed), '\n')
 	return doc, nil
@@ -107,96 +118,96 @@ func Exit(doc Doc, verilexExit int) (int, error) {
 	return want, nil
 }
 
-// Decide is the verdict rule, rows 9-34 of README "Verdict rule"; prompt.Rule states it to the
+// Decide is the verdict rule, rows 9-30 of README "Verdict rule"; prompt.Rule states it to the
 // brain. It turns every run the brain made, in the order the runs finished, into the verdict the
-// launcher returns and its exit code; an error is the reason there is none. unfinished is why the
-// brain did not finish, such as an ended time budget, or nil. The first step that applies decides:
+// launcher returns, its exit code, and a note for each run of a chain the brain wrote; an error is
+// the reason there is no verdict. unfinished is why the brain did not finish, such as an ended
+// time budget, or nil. Only a run that verilex planned decides. A chain the brain wrote can be red
+// on correct code, or green on inputs that miss a defect, so it never decides and never proves a
+// claim. The first step that applies decides:
 //
 //  1. A run whose exit disagrees with its JSON is an environment failure, never a verdict.
-//  2. A red from a run verilex planned is a failure in the code under test. The project is
-//     read-only for the brain, so nothing it runs later can undo it.
+//  2. A planned red is a failure in the code under test. The project is read-only for the brain,
+//     so nothing it runs later can undo it.
 //  3. A brain that did not finish has no other verdict.
-//  4. With no run there is no verdict.
-//  5. A last run that is not green is the verdict. A red here is from a chain the brain wrote.
-//  6. A last green is the verdict only if it proves every claim an earlier run left open and
-//     covers the spec.
-func Decide(runs []Run, want Want, unfinished error) (Doc, int, error) {
-	docs := make([]Doc, len(runs))
-	for i, run := range runs {
+//  4. With no planned run there is no verdict.
+//  5. A last planned run that is inconclusive is the verdict.
+//  6. A last planned green is the verdict only if it proves every claim that an earlier planned
+//     inconclusive run selected, and covers the spec.
+func Decide(runs []Run, want Want, unfinished error) (Doc, int, []string, error) {
+	var planned []Doc
+	var notes []string
+	for _, run := range runs {
 		doc, err := Parse(run.Stdout)
 		if err != nil {
-			return Doc{}, 2, err
+			return Doc{}, 2, nil, err
 		}
 		if _, err = Exit(doc, run.Exit); err != nil {
-			return Doc{}, 2, fmt.Errorf("run %s: %v", doc.Run, err)
+			return Doc{}, 2, nil, fmt.Errorf("run %s: %v", doc.Run, err)
 		}
-		docs[i] = doc
+		if isPlanned(doc) {
+			planned = append(planned, doc)
+		} else {
+			notes = append(notes, note(doc))
+		}
 	}
-	for i := len(docs) - 1; i >= 0; i-- {
-		if docs[i].Verdict == "red" && !runs[i].Chain {
-			return docs[i], 1, nil
+	for i := len(planned) - 1; i >= 0; i-- {
+		if planned[i].Verdict == "red" {
+			return planned[i], 1, notes, nil
 		}
 	}
 	if unfinished != nil {
-		return Doc{}, 2, unfinished
+		return Doc{}, 2, notes, unfinished
 	}
-	if len(docs) == 0 {
-		return Doc{}, 2, ErrNoRun
+	if len(planned) == 0 {
+		return Doc{}, 2, notes, ErrNoRun
 	}
-	last := docs[len(docs)-1]
+	last := planned[len(planned)-1]
 	if last.Verdict != "green" {
-		return last, code(last.Verdict), nil
+		return last, code(last.Verdict), notes, nil
 	}
 	proven := provenBy(last)
-	for i, doc := range docs[:len(docs)-1] {
-		open, left := openClaims(doc, runs[i].Chain)
+	for _, doc := range planned[:len(planned)-1] {
+		if doc.Verdict != "inconclusive" {
+			continue
+		}
 		var missing []string
-		for _, claim := range open {
+		for _, claim := range selected(doc) {
 			if !proven[claim] {
 				missing = append(missing, claim)
 			}
 		}
 		if len(missing) > 0 {
-			return Doc{}, 2, fmt.Errorf("run %s is green but did not prove %s, which run %s left %s", last.Run, strings.Join(missing, ", "), doc.Run, left)
+			return Doc{}, 2, notes, fmt.Errorf("run %s is green but did not prove %s, which run %s left inconclusive", last.Run, strings.Join(missing, ", "), doc.Run)
 		}
 	}
-	if err := Check(last, want); err != nil {
-		return Doc{}, 2, err
+	if err := check(last, want); err != nil {
+		return Doc{}, 2, notes, err
 	}
-	return last, 0, nil
+	return last, 0, notes, nil
 }
 
-// openClaims is what an earlier run leaves for the last green to prove, and how the run left it:
-// every claim an inconclusive run selected, and the claim of each red word in a red chain the
-// brain wrote. Such a chain can be red on correct code, for example when it opens one store
-// twice, so its red does not decide alone.
-func openClaims(doc Doc, chain bool) ([]string, string) {
-	switch {
-	case doc.Verdict == "inconclusive":
-		return selected(doc), "inconclusive"
-	case doc.Verdict == "red" && chain:
-		var out []string
-		for _, step := range doc.Words {
-			if name := claimOf(step); step.Verdict == "red" && name != "" && !slices.Contains(out, name) {
-				out = append(out, name)
-			}
-		}
-		return out, "red"
-	}
-	return nil, ""
+// isPlanned is verilex's own reading of a run: a claim run whose requested.chain is null, so
+// verilex planned its chain from claims and changes. Any other run ran a chain the brain wrote.
+func isPlanned(doc Doc) bool {
+	return doc.Format == RunFormat && doc.Requested != nil && doc.Requested.Chain == nil
 }
 
-// provenBy is every claim a green run proved: the claims it was asked for, and each selected
-// claim and word it gave a green. A run that is not green proved none.
+// note reports a run of a chain the brain wrote, which never decides the verdict.
+func note(doc Doc) string {
+	line := fmt.Sprintf("run %s ran a chain the brain wrote, so it does not decide the verdict: %s", doc.Run, doc.Verdict)
+	if doc.Reason != nil && *doc.Reason != "" {
+		line += " (" + *doc.Reason + ")"
+	}
+	return line
+}
+
+// provenBy is every claim a planned green proved: the claims it was asked for, and each selected
+// claim and word it gave a green.
 func provenBy(doc Doc) map[string]bool {
 	out := map[string]bool{}
-	if doc.Verdict != "green" {
-		return out
-	}
-	if doc.Requested != nil {
-		for _, name := range append(slices.Clone(doc.Requested.Claims), doc.Requested.Named...) {
-			out[name] = true
-		}
+	for _, name := range append(slices.Clone(doc.Requested.Claims), doc.Requested.Named...) {
+		out[name] = true
 	}
 	for _, claim := range doc.Claims {
 		if claim.Verdict == "green" {
@@ -211,8 +222,8 @@ func provenBy(doc Doc) map[string]bool {
 	return out
 }
 
-// selected is every claim a run set out to prove: the claims it was asked for, the claims a claim
-// run selected, and the claim each of its words proves.
+// selected is every claim a planned run set out to prove: the claims it was asked for, the claims
+// it selected, and the claim each of its words proves.
 func selected(doc Doc) []string {
 	var out []string
 	add := func(name string) {
@@ -220,10 +231,8 @@ func selected(doc Doc) []string {
 			out = append(out, name)
 		}
 	}
-	if doc.Requested != nil {
-		for _, name := range append(slices.Clone(doc.Requested.Claims), doc.Requested.Named...) {
-			add(name)
-		}
+	for _, name := range append(slices.Clone(doc.Requested.Claims), doc.Requested.Named...) {
+		add(name)
 	}
 	for _, claim := range doc.Claims {
 		add(claim.Claim)
@@ -240,16 +249,9 @@ func claimOf(step Step) string {
 	return name
 }
 
-// Check refuses a green that does not prove the spec: a run that was not a claim run, one that
-// neither was asked for nor proved a named claim, or one whose request left out a changed path. A
-// red or inconclusive verdict stands as verilex printed it.
-func Check(doc Doc, want Want) error {
-	if doc.Verdict != "green" {
-		return nil
-	}
-	if doc.Format != RunFormat || doc.Requested == nil {
-		return fmt.Errorf("run %s is green but is not a claim run, so it does not show what it was asked", doc.Run)
-	}
+// check refuses a planned green that does not cover the spec: one that neither was asked for nor
+// proved a floor claim, or one whose request left out a changed path.
+func check(doc Doc, want Want) error {
 	proven := provenBy(doc)
 	var missing []string
 	for _, name := range want.Named {

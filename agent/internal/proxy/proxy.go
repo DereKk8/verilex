@@ -100,7 +100,7 @@ func (p *Proxy) Runs() []verdict.Run {
 	defer p.mu.Unlock()
 	out := make([]verdict.Run, len(p.runs))
 	for i, run := range p.runs {
-		out[i] = verdict.Run{Stdout: append([]byte(nil), run.Stdout...), Exit: run.Exit, Chain: run.Chain}
+		out[i] = verdict.Run{Stdout: append([]byte(nil), run.Stdout...), Exit: run.Exit}
 	}
 	return out
 }
@@ -149,7 +149,7 @@ func (p *Proxy) handle(conn net.Conn) {
 		writeJSON(conn, response{Stderr: "verilex-agent: refused: stdin is too large\n", Exit: 2})
 		return
 	}
-	args, sub, chain, err := pinArgs(req.Args, p.Project, p.Ticket)
+	args, sub, err := pinArgs(req.Args, p.Project, p.Ticket)
 	if err != nil {
 		p.logf("refused verilex %s: %v", strings.Join(req.Args, " "), err)
 		writeJSON(conn, response{Stderr: "verilex-agent: refused: " + err.Error() + "\n", Exit: 2})
@@ -163,7 +163,7 @@ func (p *Proxy) handle(conn net.Conn) {
 		}
 		_ = json.Unmarshal(stdout, &doc)
 		p.mu.Lock()
-		p.runs = append(p.runs, verdict.Run{Stdout: append([]byte(nil), stdout...), Exit: code, Chain: chain})
+		p.runs = append(p.runs, verdict.Run{Stdout: append([]byte(nil), stdout...), Exit: code})
 		if doc.Run != "" {
 			if p.started == nil {
 				p.started = map[string]bool{}
@@ -253,9 +253,8 @@ func Relay(socket string, args []string, stdin io.Reader, stdout, stderr io.Writ
 
 // pinArgs points every command at the launcher's project and refuses what a stateless run may
 // not do. run and plan always print JSON, carry the run spec, and never keep or continue an
-// instance: a kept instance would outlive this run's home. chain reports a positional argument,
-// read as verilex reads it: the brain wrote the chain, so verilex did not plan it.
-func pinArgs(args []string, project, ticket string) (pinned []string, sub string, chain bool, err error) {
+// instance: a kept instance would outlive this run's home.
+func pinArgs(args []string, project, ticket string) ([]string, string, error) {
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--project" && i+1 < len(args) {
@@ -267,16 +266,16 @@ func pinArgs(args []string, project, ticket string) (pinned []string, sub string
 		}
 		rest = append(rest, args[i])
 	}
-	pinned = []string{"--project", project}
+	pinned := []string{"--project", project}
 	if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
-		return append(pinned, rest...), "", false, nil
+		return append(pinned, rest...), "", nil
 	}
-	sub = rest[0]
+	sub := rest[0]
 	if !allowed[sub] {
-		return nil, sub, false, fmt.Errorf("verilex %s is not available to the brain; it may run index, plan, run, words, claims, runs, ticket and check", sub)
+		return nil, sub, fmt.Errorf("verilex %s is not available to the brain; it may run index, plan, run, words, claims, runs, ticket and check", sub)
 	}
 	if sub != "run" && sub != "plan" {
-		return append(pinned, rest...), sub, false, nil
+		return append(pinned, rest...), sub, nil
 	}
 	var kept []string
 	hasJSON, literal := false, false
@@ -284,7 +283,6 @@ func pinArgs(args []string, project, ticket string) (pinned []string, sub string
 		arg := rest[i]
 		if literal {
 			kept = append(kept, arg)
-			chain = true
 			continue
 		}
 		name, _, inline := strings.Cut(arg, "=")
@@ -292,7 +290,7 @@ func pinArgs(args []string, project, ticket string) (pinned []string, sub string
 		case arg == "--":
 			literal = true
 		case arg == "--keep" || name == "--continue":
-			return nil, sub, false, fmt.Errorf("%s is not available to the brain: each launcher run owns one instance and leaves none behind", name)
+			return nil, sub, fmt.Errorf("%s is not available to the brain: each launcher run owns one instance and leaves none behind", name)
 		case arg == "--json":
 			hasJSON = true
 		case name == "--ticket":
@@ -304,8 +302,6 @@ func pinArgs(args []string, project, ticket string) (pinned []string, sub string
 			kept = append(kept, arg, rest[i+1])
 			i++
 			continue
-		case arg == "-" || !strings.HasPrefix(arg, "-"):
-			chain = true
 		}
 		kept = append(kept, arg)
 	}
@@ -316,7 +312,7 @@ func pinArgs(args []string, project, ticket string) (pinned []string, sub string
 	if !hasJSON {
 		pinned = append(pinned, "--json")
 	}
-	return append(pinned, kept...), sub, chain, nil
+	return append(pinned, kept...), sub, nil
 }
 
 func writeJSON(w io.Writer, value any) error {

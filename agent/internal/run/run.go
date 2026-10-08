@@ -33,10 +33,13 @@ type Options struct {
 }
 
 // Result is what the command prints. Stdout is verilex's document, never the brain's message.
-// Work is the run's directory when KeepWork kept it, also when the run returns an error.
+// Notes report each run of a chain the brain wrote, which never decides the verdict. They stay set
+// when the verdict rule ends inconclusive. Work is the run's directory when KeepWork kept it, also
+// when the run returns an error.
 type Result struct {
 	Stdout []byte
 	Exit   int
+	Notes  []string
 	Work   string
 }
 
@@ -236,22 +239,22 @@ func Run(opts Options) (result Result, err error) {
 	if isBudget(brainErr) {
 		unfinished = brainErr
 	}
-	doc, code, err := verdict.Decide(px.Runs(), verdict.Want{Project: project, Named: named, Changed: changed}, unfinished)
+	doc, code, notes, err := verdict.Decide(px.Runs(), verdict.Want{Project: project, Named: named, Changed: changed}, unfinished)
 	if errors.Is(err, verdict.ErrNoRun) && brainErr != nil {
-		return Result{}, inconclusive("%v, and ran no verilex run, so there is no verdict", brainErr)
+		return Result{Notes: notes}, inconclusive("%v, and made no run that verilex planned, so there is no verdict", brainErr)
 	}
 	if err != nil {
-		return Result{}, inconclusive("%v", err)
+		return Result{Notes: notes}, inconclusive("%v", err)
 	}
-	return output(doc, code, opts.JSON), nil
+	return output(doc, code, notes, opts.JSON), nil
 }
 
 // output prints doc as verilex printed it, or its quiet human form.
-func output(doc verdict.Doc, code int, asJSON bool) Result {
+func output(doc verdict.Doc, code int, notes []string, asJSON bool) Result {
 	if !asJSON {
-		return Result{Stdout: []byte(verdict.Summary(doc)), Exit: code}
+		return Result{Stdout: []byte(verdict.Summary(doc)), Exit: code, Notes: notes}
 	}
-	return Result{Stdout: doc.Raw, Exit: code}
+	return Result{Stdout: doc.Raw, Exit: code, Notes: notes}
 }
 
 // phaseError is the answer when a brain phase could not finish: the sandbox could not be

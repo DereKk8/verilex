@@ -5,7 +5,8 @@ TALLY_DEFECT plants a defect:
   drop-adds    `add` reports success but stores nothing;
   mute-adds    `add` stores the item but prints nothing;
   dirty-opens  `open` creates a store that already holds an item;
-  hide-lists   `list` prints nothing.
+  hide-lists   `list` prints nothing;
+  hide-apple   `list` leaves out the item apple, a defect only some inputs reach.
 TALLY_SIMULATE_LOCK=1 makes the store look locked by another process (exit 75).
 """
 
@@ -54,7 +55,8 @@ def main() -> int:
         return 0
     if defect != "hide-lists":
         for name in items:
-            print(name)
+            if defect != "hide-apple" or name != "apple":
+                print(name)
     return 0
 
 

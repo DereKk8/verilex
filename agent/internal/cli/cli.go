@@ -16,7 +16,7 @@ import (
 const usage = `usage: verilex-agent [--text] [--project DIR] [--verilex PATH] (--ticket FILE | --intent TEXT | --diff REV) [--claim NAME] [--harness NAME] [--model NAME] [--effort LEVEL] [--profile NAME] [--ledger DIR] [--home DIR] [--skill FILE] [--brain PATH] [--harnesses FILE] [--suggest] [--allow-harness] [--keep-work]
 
 verilex-agent launches the brain named by the run spec, hands it the verilex skill and the intent, and prints verilex's own JSON verdict. The brain's message is ignored.
-A green that does not cover the named claims and the diff, or no verilex run at all, is inconclusive (exit 2).
+Only a run that verilex planned decides. A run of a chain the brain wrote is a note on stderr. A green that does not cover the named claims and the diff, or no planned run at all, is inconclusive (exit 2).
 `
 
 // Main runs one launcher invocation.
@@ -43,6 +43,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	}
 	if inconclusive := (*run.Inconclusive)(nil); errors.As(err, &inconclusive) {
 		fmt.Fprintf(stderr, "verilex-agent: inconclusive: %v\n", err)
+		printNotes(stderr, result.Notes)
 		return 2
 	}
 	if err != nil {
@@ -50,7 +51,15 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	stdout.Write(result.Stdout)
+	printNotes(stderr, result.Notes)
 	return result.Exit
+}
+
+// printNotes prints each note after the verdict, so the verdict comes first.
+func printNotes(stderr io.Writer, notes []string) {
+	for _, note := range notes {
+		fmt.Fprintf(stderr, "verilex-agent: note: %s\n", note)
+	}
 }
 
 func relay(argv []string, stdout, stderr io.Writer) int {

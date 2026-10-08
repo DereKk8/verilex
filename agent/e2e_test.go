@@ -63,10 +63,10 @@ func TestMain(m *testing.M) {
 }
 
 func TestLauncherReturnsVerilexJSONNotTheBrain(t *testing.T) {
-	runJSON := []byte("{\"verdict\":\"red\",\"run\":\"r1\",\"missed_claims\":[\"item-added\"],\"note\":\"keep me\"}\n")
+	runJSON := []byte("{\"format\":\"verilex-claim-run-1\",\"verdict\":\"red\",\"run\":\"r1\",\"requested\":{\"claims\":[\"item-listed\"],\"named\":[],\"changed\":[],\"chain\":null},\"missed_claims\":[\"item-added\"],\"note\":\"keep me\"}\n")
 	dir := t.TempDir()
 	fake := writeFake(t, dir, fakeFiles{run: runJSON, runExit: 1, ticket: ticketJSON("stub", "stub")})
-	brain := writeBrain(t, dir, "#!/bin/sh\nprintf '%s\\n' 'BRAIN SAYS GREEN'\nverilex run --json 'store-open'\nprintf '%s\\n' 'still green'\n")
+	brain := writeBrain(t, dir, "#!/bin/sh\nprintf '%s\\n' 'BRAIN SAYS GREEN'\nverilex run --json --claim item-listed\nprintf '%s\\n' 'still green'\n")
 	stdout, stderr, code := launch(t, dir, fake, brain, "--intent", "prove a stored apple is listed", "--harness", "stub", "--model", "stub")
 	if code != 1 {
 		t.Fatalf("exit %d, want 1\nstderr: %s\nstdout: %s", code, stderr, stdout)
@@ -79,11 +79,24 @@ func TestLauncherReturnsVerilexJSONNotTheBrain(t *testing.T) {
 	}
 }
 
+// A claim run that does not say who wrote its chain comes from a verilex older than the launcher.
+// Its chain may be the brain's, so it is inconclusive, never a verdict.
+func TestClaimRunWithoutRequestedChainIsInconclusive(t *testing.T) {
+	runJSON := []byte(`{"format":"verilex-claim-run-1","verdict":"green","run":"r1","requested":{"claims":[],"named":["store-opened"],"changed":["notes.txt"]}}` + "\n")
+	dir := t.TempDir()
+	fake := writeFake(t, dir, fakeFiles{run: runJSON, ticket: ticketJSON("stub", "stub")})
+	brain := writeBrain(t, dir, "#!/bin/sh\nverilex run --json --changed notes.txt 'store-open'\n")
+	stdout, stderr, code := launch(t, dir, fake, brain, "--intent", "prove the store opens", "--harness", "stub", "--model", "stub")
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "verilex-agent: inconclusive: verilex printed a claim run without requested.chain") {
+		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+}
+
 func TestBrainExitDoesNotReplaceTheVerdict(t *testing.T) {
 	runJSON := claimRun("green", "r9", []string{"store-opened"}, nil)
 	dir := t.TempDir()
 	fake := writeFake(t, dir, fakeFiles{run: runJSON, ticket: ticketJSON("stub", "stub")})
-	brain := writeBrain(t, dir, "#!/bin/sh\nverilex run --json 'store-open'\nexit 1\n")
+	brain := writeBrain(t, dir, "#!/bin/sh\nverilex run --json --named store-opened\nexit 1\n")
 	stdout, stderr, code := launch(t, dir, fake, brain, "--intent", "prove the store opens", "--harness", "stub", "--model", "stub")
 	if code != 0 || stdout != string(runJSON) {
 		t.Fatalf("exit %d stdout %q stderr %s", code, stdout, stderr)
@@ -173,7 +186,7 @@ func TestSameHomeIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")
 	fake := writeFake(t, dir, fakeFiles{ticket: ticketJSON("stub", "stub"), run: claimRun("green", "hold", []string{"store-opened"}, nil)})
-	brain := writeBrain(t, dir, holdBrain+"verilex run --json 'store-open'\n")
+	brain := writeBrain(t, dir, holdBrain+"verilex run --json --named store-opened\n")
 	held := launchHeld(t, dir, fake, brain, "--home", home, "--intent", "prove the store opens", "--harness", "stub", "--model", "stub")
 	_, stderr, code := launch(t, dir, fake, brain, "--home", home, "--intent", "prove the store opens", "--harness", "stub", "--model", "stub")
 	first := held.release(t)
@@ -457,15 +470,17 @@ func launchEnv(dir, verilex, brain string, env []string, args ...string) (string
 	cmd := exec.Command(agentBin, argv...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
-	out, err := cmd.Output()
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err = cmd.Run()
 	if err == nil {
-		return string(out), "", 0, nil
+		return stdout.String(), stderr.String(), 0, nil
 	}
 	exit, ok := err.(*exec.ExitError)
 	if !ok {
-		return string(out), "", 0, err
+		return stdout.String(), stderr.String(), 0, err
 	}
-	return string(out), string(exit.Stderr), exit.ExitCode(), nil
+	return stdout.String(), stderr.String(), exit.ExitCode(), nil
 }
 
 // launcherArgs is a test's launcher command line, with a skill and, unless args name one, a

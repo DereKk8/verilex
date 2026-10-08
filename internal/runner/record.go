@@ -24,10 +24,13 @@ type Frame struct {
 const ClaimRunFormat = "verilex-claim-run-1"
 
 // Request is the claim-plan input this run was given. An empty list means the caller passed none.
+// Chain is the chain the caller gave, or null when verilex planned the chain from the claims and
+// the changes, so a launcher reads from verilex, not from the agent, who wrote the chain.
 type Request struct {
 	Claims  []string `json:"claims"`
 	Named   []string `json:"named"`
 	Changed []string `json:"changed"`
+	Chain   *string  `json:"chain"`
 }
 
 // Gaps is what a diff touched that no claim verdict of the run proves. Each entry is counted in
@@ -129,8 +132,9 @@ type Record struct {
 	Reason  *string          `json:"reason"`
 	Skipped bool             `json:"skipped,omitempty"`
 	Rerun   string           `json:"rerun,omitempty"`
-	// Format, Requested and Touched are set on a claim-plan run so a launcher can see what was
-	// asked without trusting the agent. Format is verilex-claim-run-1.
+	// Format, Requested and Touched are set on a claim-plan run, and on a chain run given a diff,
+	// so a launcher can see what was asked, and who wrote the chain, without trusting the agent.
+	// Format is verilex-claim-run-1.
 	Format    string   `json:"format,omitempty"`
 	Requested *Request `json:"requested,omitempty"`
 	Touched   []string `json:"touched,omitempty"`

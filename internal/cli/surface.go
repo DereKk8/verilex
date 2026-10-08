@@ -79,8 +79,8 @@ func claimSurface(project dictionary.Project, words []dictionary.Word, args opti
 	return writeRun(record, runErr, args.json, out, stderr, refuse)
 }
 
-// coverChain attaches a missed-claim warning to a chain run that was given a diff.
-func coverChain(project dictionary.Project, steps []dictionary.Step, record *runner.Record, changed []string) error {
+// coverChain attaches a missed-claim warning to a run of the caller's chain that was given a diff.
+func coverChain(project dictionary.Project, chain string, steps []dictionary.Step, record *runner.Record, changed []string) error {
 	if len(changed) == 0 {
 		return nil
 	}
@@ -89,7 +89,7 @@ func coverChain(project dictionary.Project, steps []dictionary.Step, record *run
 		return err
 	}
 	record.Format = runner.ClaimRunFormat
-	record.Requested = &runner.Request{Claims: []string{}, Named: []string{}, Changed: listed(changed)}
+	record.Requested = &runner.Request{Claims: []string{}, Named: []string{}, Changed: listed(changed), Chain: &chain}
 	record.Touched = ix.TouchedClaims(project, changed)
 	record.Gaps = ix.Gaps(project, changed, steps)
 	if err = attachCoverage(record, ix, nil, record.Touched, changed); err != nil {

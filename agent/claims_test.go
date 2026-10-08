@@ -25,6 +25,7 @@ type runDoc struct {
 		Claims  []string `json:"claims"`
 		Named   []string `json:"named"`
 		Changed []string `json:"changed"`
+		Chain   *string  `json:"chain"`
 	} `json:"requested"`
 }
 
@@ -133,11 +134,11 @@ verilex run --changed bin/tally > /dev/null
 	}
 }
 
-// claimRun is a claim-run document a fake verilex prints.
+// claimRun is a planned claim-run document a fake verilex prints.
 func claimRun(verdict, run string, named, changed []string) []byte {
 	doc := map[string]any{
 		"format": "verilex-claim-run-1", "verdict": verdict, "run": run,
-		"requested": map[string][]string{"claims": {}, "named": orEmpty(named), "changed": orEmpty(changed)},
+		"requested": map[string]any{"claims": []string{}, "named": orEmpty(named), "changed": orEmpty(changed), "chain": nil},
 	}
 	data, _ := json.Marshal(doc)
 	return append(data, '\n')

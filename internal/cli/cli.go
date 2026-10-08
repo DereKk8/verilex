@@ -187,7 +187,7 @@ func Main(argv []string, out, stderr io.Writer) int {
 		return refuse(refused.Err)
 	}
 	if len(args.changed) > 0 {
-		if err = coverChain(project, steps, &record, args.changed); err != nil {
+		if err = coverChain(project, args.operand, steps, &record, args.changed); err != nil {
 			return refuse(err)
 		}
 	}

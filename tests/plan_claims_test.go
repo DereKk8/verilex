@@ -387,6 +387,32 @@ func TestClaimReportAndRunContract(t *testing.T) {
 	contains(t, runs.stdout, "1 touched claim not covered")
 }
 
+// Rule: requested.chain says who wrote the chain: null when verilex planned the run from claims
+// and changes, also for an empty chain argument, and the caller's chain when the caller gave one.
+func TestRequestNamesTheCallersChain(t *testing.T) {
+	root := curated(t)
+	green(t, root, nil, chain)
+	for _, tc := range []struct {
+		args  []string
+		chain any
+	}{
+		{[]string{"--claim", "item-listed"}, nil},
+		{[]string{"--claim", "item-listed", ""}, nil},
+		{[]string{"--changed", "bin/tally"}, nil},
+		{[]string{"--changed", "bin/tally", "store-open"}, "store-open"},
+	} {
+		out := verilex(t, root, nil, append([]string{"run", "--json"}, tc.args...)...)
+		var record map[string]any
+		if err := json.Unmarshal([]byte(out.stdout), &record); err != nil {
+			t.Fatalf("%q: %v\n%s%s", tc.args, err, out.stdout, out.stderr)
+		}
+		requested, _ := record["requested"].(map[string]any)
+		if chain, ok := requested["chain"]; !ok || chain != tc.chain {
+			t.Fatalf("%q: requested.chain %#v (present %v), want %#v", tc.args, chain, ok, tc.chain)
+		}
+	}
+}
+
 // Rule: when the chain runs live, the plan says so, so a standing pass is not read as a step the
 // run omits. A provider step whose image pin changed forces the chain live too.
 func TestPlanSaysChainRunsLive(t *testing.T) {

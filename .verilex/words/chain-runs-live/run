@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True  # keep the shared words directory, and so its stamp, unchanged
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from canary_word import CHAIN, fail, result, run_id, run_line, said, stores, verilex
+from canary_word import CHAIN, fail, launched, left_behind, result, run_id, run_line, said, verilex
 
 done = verilex("action", "run", CHAIN)
 if done.returncode == 2:
@@ -15,6 +15,8 @@ run = run_id(done)
 line = run_line(run)
 if "green" not in line.split() or "cleanup=done" not in line.split():
     fail(f"verilex runs does not show {run} green with cleanup=done: {line!r}")
-if stores():
-    fail(f"run {run} was green but left stores behind: {stores()}")
+if run not in launched():
+    fail(f"run {run} was green but its record holds no launched store")
+if left_behind():
+    fail(f"run {run} was green but left stores behind: {left_behind()}")
 result("pass", observation=f"verilex runs shows {run} green and cleanup=done; no store is left")

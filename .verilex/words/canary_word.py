@@ -42,6 +42,19 @@ def stores() -> list:
     return sorted(os.listdir(instance / "stores"))
 
 
+def launched() -> dict:
+    """The store each inner run's launch reported, by run id, read from the inner run's own record."""
+    runs_dir = instance / "home" / "tally" / "runs"
+    return {out.parent.parent.name: Path(json.loads(out.read_text())["instance"]["store"])
+            for out in sorted(runs_dir.glob("*/frame-launch/stdout"))}
+
+
+def left_behind() -> list:
+    """Stores still on disk: every store an inner launch reported, wherever it put it, and any under TALLY_STORES."""
+    return sorted({str(store) for store in launched().values() if store.exists()}
+                  | {str(instance / "stores" / name) for name in stores()})
+
+
 def runs() -> list:
     return [line for line in must("runs", "runs").stdout.splitlines() if line.strip()]
 

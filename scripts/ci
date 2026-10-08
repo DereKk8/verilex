@@ -36,20 +36,20 @@ canary_driver=249b64d079153abaac342b10065f1633259b2b88
 canary() (
   # verilex proves its own claims (.verilex/) on this checkout: live, in throwaway state, so no ledger
   # written by earlier code can skip a step, and red when a canary word drifted or is not admitted.
+  # The driver must be a commit main already holds: a commit only this branch holds could grade itself green.
+  git merge-base --is-ancestor "$canary_driver" origin/main ||
+    { echo "canary: driver $canary_driver is not on origin/main"; return 1; }
   state="$(mktemp -d)"
   mkdir "$state/driver"
   git archive "$canary_driver" | tar -x -C "$state/driver"
   (cd "$state/driver" && go build -o "$state/verilex" ./cmd/verilex)
+  # Python keeps its bytecode out of the checkout, so a planted .pyc can never stand in for a word's source.
   export VERILEX_HOME="$state/home" VERILEX_LEDGER="$state/ledger" XDG_CONFIG_HOME="$state/config" \
-    CANARY_INSTANCES="$state/instances"
+    CANARY_INSTANCES="$state/instances" PYTHONPYCACHEPREFIX="$state/pycache"
   chain="" words=0
-  for word in .verilex/words/*/; do word="${word%/}"; chain="${chain:+$chain | }${word##*/}"; words=$((words + 1)); done
+  for word in .verilex/words/*/word.md; do word="${word%/word.md}"; chain="${chain:+$chain | }${word##*/}"; words=$((words + 1)); done
   changed=()
-  if base="$(git merge-base origin/main HEAD 2>/dev/null)"; then
-    while IFS= read -r path; do changed+=(--changed "$path"); done < <(git diff --name-only "$base")
-  else
-    echo "canary: no origin/main to diff against; the run names no changed files"
-  fi
+  while IFS= read -r path; do changed+=(--changed "$path"); done < <(git diff --name-only "$(git merge-base origin/main HEAD)")
   ok=true
   "$state/verilex" run --fresh "${changed[@]}" "$chain" || ok=false
   drift="$("$state/verilex" check)" || ok=false
@@ -58,6 +58,12 @@ canary() (
   [ "$drift" = "check: no drift ($words admitted)" ] || ok=false
   provisional="$("$state/verilex" words | awk '/^[^ ]/ { w = $1 } /status: +provisional/ { printf "%s%s", s, w; s = ", " }')"
   [ -z "$provisional" ] || echo "canary: not admitted, so not proven: $provisional"
+  # Every canary claim must keep an admitted word: deleting a word but keeping its claim is not drift either.
+  active="$("$state/verilex" index | tail -n +2 | cut -d' ' -f1)"
+  for claim in .verilex/claims/*.yaml; do
+    claim="${claim##*/}"; claim="${claim%.yaml}"
+    grep -qx "$claim" <<<"$active" || { echo "canary: claim $claim has no admitted word"; ok=false; }
+  done
   if $ok; then rm -rf "$state"; return; fi
   echo "canary red: evidence kept in $state; reproduce with scripts/ci canary"
   return 1

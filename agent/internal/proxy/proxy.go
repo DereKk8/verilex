@@ -253,7 +253,9 @@ func Relay(socket string, args []string, stdin io.Reader, stdout, stderr io.Writ
 
 // pinArgs points every command at the launcher's project and refuses what a stateless run may
 // not do. run and plan always print JSON, carry the run spec, and never keep or continue an
-// instance: a kept instance would outlive this run's home.
+// instance: a kept instance would outlive this run's home. They also carry --no-chain, so verilex
+// itself refuses a chain the brain wrote, an empty one too, before it runs anything: a chain's
+// run record would set the word arguments of every later claim plan in the home (F11).
 func pinArgs(args []string, project, ticket string) ([]string, string, error) {
 	var rest []string
 	for i := 0; i < len(args); i++ {
@@ -305,7 +307,7 @@ func pinArgs(args []string, project, ticket string) ([]string, string, error) {
 		}
 		kept = append(kept, arg)
 	}
-	pinned = append(pinned, sub)
+	pinned = append(pinned, sub, "--no-chain")
 	if ticket != "" {
 		pinned = append(pinned, "--ticket", ticket)
 	}

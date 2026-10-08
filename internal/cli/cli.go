@@ -25,7 +25,7 @@ const usage = "usage: verilex [-h] [--project PROJECT] {run,plan,ticket,words,cl
 type options struct {
 	project, command, operand, verdict, from, ticket, intent, sameAs string
 	implements, changed, operands, claims, named                     []string
-	keep, fresh, json, distinct                                      bool
+	keep, fresh, json, distinct, noChain                             bool
 }
 
 func Main(argv []string, out, stderr io.Writer) int {
@@ -226,8 +226,8 @@ type command struct {
 var optional = map[string][]string{"index": {"claim", "word"}}
 
 var commands = map[string]command{
-	"run":     {"chain", "[--keep] [--fresh] [--continue RUN] [--ticket FILE] [--claim CLAIM ...] [--named CLAIM ...] [--changed CHANGE ...] [--json] [chain]", "run a chain, or the chain planned from claims and a diff", []string{"--keep", "--fresh", "--json"}, []string{"--continue", "--ticket", "--claim", "--named", "--changed"}},
-	"plan":    {"chain", "[--continue RUN] [--ticket FILE] [--claim CLAIM ...] [--named CLAIM ...] [--changed CHANGE ...] [--json] [chain]", "show whether a chain would be skipped, or plan claims and a diff, running nothing", []string{"--json"}, []string{"--continue", "--ticket", "--claim", "--named", "--changed"}},
+	"run":     {"chain", "[--keep] [--fresh] [--no-chain] [--continue RUN] [--ticket FILE] [--claim CLAIM ...] [--named CLAIM ...] [--changed CHANGE ...] [--json] [chain]", "run a chain, or the chain planned from claims and a diff", []string{"--keep", "--fresh", "--no-chain", "--json"}, []string{"--continue", "--ticket", "--claim", "--named", "--changed"}},
+	"plan":    {"chain", "[--no-chain] [--continue RUN] [--ticket FILE] [--claim CLAIM ...] [--named CLAIM ...] [--changed CHANGE ...] [--json] [chain]", "show whether a chain would be skipped, or plan claims and a diff, running nothing", []string{"--no-chain", "--json"}, []string{"--continue", "--ticket", "--claim", "--named", "--changed"}},
 	"ticket":  {"file", "[--json] file", "validate a run ticket and resolve its profile and defaults", []string{"--json"}, nil},
 	"words":   {"", "", "list the dictionary and each word's lifecycle status", nil, nil},
 	"claims":  {"", "[--json]", "list each claim's current version, the words that prove it, and any review it needs", []string{"--json"}, nil},
@@ -297,6 +297,7 @@ func parse(argv []string) (options, bool, error) {
 			o.fresh = o.fresh || arg == "--fresh"
 			o.json = o.json || arg == "--json"
 			o.distinct = o.distinct || arg == "--distinct"
+			o.noChain = o.noChain || arg == "--no-chain"
 			continue
 		}
 		if name, value, inline := strings.Cut(arg, "="); !literal && slices.Contains(spec.values, name) {
@@ -341,6 +342,11 @@ func parse(argv []string) (options, bool, error) {
 		if len(pos) > 1 {
 			return o, false, fmt.Errorf("unrecognized arguments: %s", strings.Join(pos[1:], " "))
 		}
+		// --no-chain lets a caller allow only claim plans: any chain argument, an empty one too, is
+		// refused here, before anything runs or any run record is written.
+		if o.noChain && len(pos) == 1 {
+			return o, false, fmt.Errorf("--no-chain refuses a chain argument, an empty one too; pass --claim, --named or --changed")
+		}
 		if len(pos) == 1 {
 			o.operand = pos[0]
 		}
@@ -348,6 +354,9 @@ func parse(argv []string) (options, bool, error) {
 			return o, false, fmt.Errorf("pass a chain, or claims and a diff, not both")
 		}
 		if o.operand == "" && len(o.claims) == 0 && len(o.named) == 0 && len(o.changed) == 0 {
+			if o.noChain {
+				return o, false, fmt.Errorf("--no-chain needs --claim, --named or --changed")
+			}
 			return o, false, fmt.Errorf("the following arguments are required: %s", spec.operand)
 		}
 		return o, false, nil
@@ -413,6 +422,7 @@ func printHelp(name string, out io.Writer) {
 var flagHelp = map[string]string{
 	"--keep":       "--keep      skip cleanup; tear down later with `verilex cleanup`",
 	"--fresh":      "--fresh     run live even when every proof stamp matches",
+	"--no-chain":   "--no-chain  refuse a chain argument, an empty one too; plan only from --claim, --named and --changed",
 	"--json":       "--json      print the complete record as JSON",
 	"--continue":   "--continue RUN    use the instance RUN kept: run refreshes it, asks the doctor, then runs only the words it does not already prove",
 	"--ticket":     "--ticket FILE     the run ticket: intent or diff, profile, harness, model, effort and budgets; see `verilex ticket`",

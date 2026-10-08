@@ -17,6 +17,6 @@ No intent means prove nothing this change touched broke. If verilex says no clai
 4. Read skip, run, order, chain and unpicked. Then run `verilex run --claim <derived> --named <named> --changed <change>`: the same flags, no chain argument. If the plan says `whole chain runs live`, every step runs, including `proven` ones; report it that way.
 5. If the plan lists `unpicked`, or the verdict says `touched claim not covered`, add those claims with `--claim` and run again before you accept the result. If it lists `unmapped`, `unclaimed` or `unrun`, fix a mistyped change, or verify that part with the product verify skill.
 
-Under `verilex-agent`, only a run that verilex planned (claims and changes, no chain argument) decides the verdict. A chain you write never decides the verdict and never proves a claim: the launcher reports it as a note only.
+Under `verilex-agent`, every `verilex run` and `verilex plan` gets `--no-chain`: verilex refuses any chain argument, an empty one too. Run only planned commands, with `--claim`, `--named` and `--changed`.
 
 The command output is the rest of the contract.

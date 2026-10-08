@@ -85,7 +85,7 @@ func TestClaimRunWithoutRequestedChainIsInconclusive(t *testing.T) {
 	runJSON := []byte(`{"format":"verilex-claim-run-1","verdict":"green","run":"r1","requested":{"claims":[],"named":["store-opened"],"changed":["notes.txt"]}}` + "\n")
 	dir := t.TempDir()
 	fake := writeFake(t, dir, fakeFiles{run: runJSON, ticket: ticketJSON("stub", "stub")})
-	brain := writeBrain(t, dir, "#!/bin/sh\nverilex run --json --changed notes.txt 'store-open'\n")
+	brain := writeBrain(t, dir, "#!/bin/sh\nverilex run --json --named store-opened --changed notes.txt\n")
 	stdout, stderr, code := launch(t, dir, fake, brain, "--intent", "prove the store opens", "--harness", "stub", "--model", "stub")
 	if code != 2 || stdout != "" || !strings.Contains(stderr, "verilex-agent: inconclusive: verilex printed a claim run without requested.chain") {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, stdout, stderr)

@@ -2,7 +2,6 @@ package e2e_test
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -58,14 +57,13 @@ func TestVerdictRuleMatchesREADME(t *testing.T) {
 }
 
 const (
-	apple     = "prove a stored apple is listed"
-	store     = "prove the store opens"
-	nothing   = "make the export faster"
-	dupChain  = "store-open | store-open"
+	apple    = "prove a stored apple is listed"
+	store    = "prove the store opens"
+	nothing  = "make the export faster"
+	dupChain = "store-open | store-open"
+	// pearChain stores and lists pear, which hide-apple leaves alone.
 	pearChain = "store-open | item-stored pear | item-listed pear"
-	// chainNote is the launcher's note on a run of a chain the brain wrote.
-	chainNote = " ran a chain the brain wrote, so it does not decide the verdict: "
-	noPlanned = "made no run that verilex planned, so there is no verdict"
+	noRun     = "made no verilex run, so there is no verdict"
 )
 
 var verdictRule = []rule{
@@ -139,17 +137,26 @@ var verdictRule = []rule{
 		exit:  2, stderr: []string{"inconclusive: run r1: verilex printed red but exited 0"},
 	},
 	{
-		name: "10 a planned red, then a green on another claim (F6)", spec: intent(apple), plan: []string{"hide-lists", "hide-lists"},
+		name: "10 a run that verilex did not plan", spec: intent(store),
+		fake: []fakeRun{
+			{chainDoc("green", "r1", "store-open"), 0},
+			{claimDoc("green", "r2", []string{"store-opened"}, []string{"store-opened"}), 0},
+		},
+		brain: "verilex run --named store-opened > \"$HOME/1\"\nverilex run --named store-opened > \"$HOME/2\"\n",
+		exit:  2, stderr: []string{"inconclusive: run r1 ran a chain although the launcher passes --no-chain, so verilex did not plan it"},
+	},
+	{
+		name: "11 a red, then a green on another claim (F6)", spec: intent(apple), plan: []string{"hide-lists", "hide-lists"},
 		brain: "verilex run --claim item-listed > \"$HOME/1\"\nverilex run --claim store-opened > \"$HOME/2\"\n",
 		exit:  1, stdout: "1", check: green("2"),
 	},
 	{
-		name: "11 a planned red with an empty chain argument, then a green on the same diff (F8)", spec: diff(), plan: []string{"hide-lists", ""},
-		brain: "verilex run --changed bin/tally '' > \"$HOME/1\"\nverilex run --changed bin/tally > \"$HOME/2\"\n",
-		exit:  1, stdout: "1", check: green("2"),
+		name: "12 an empty chain argument is refused (F8)", spec: diff(), plan: []string{"hide-lists", "hide-lists"},
+		brain: "verilex run --changed bin/tally '' > \"$HOME/1\" 2>> \"$HOME/refused\"\nverilex run --changed bin/tally > \"$HOME/2\"\n",
+		exit:  1, stdout: "2", refused: 1,
 	},
 	{
-		name: "12 a planned red, a forged pass, the same red again (F2)", spec: intent(apple), plan: []string{"hide-lists", "hide-lists"},
+		name: "13 a red, a forged pass, the same red again (F2)", spec: intent(apple), plan: []string{"hide-lists", "hide-lists"},
 		setup: func(t *testing.T, r *ruleRun) {
 			ledger := filepath.Join(r.dir, "ledger")
 			r.args = append(r.args, "--ledger", ledger)
@@ -171,70 +178,59 @@ var verdictRule = []rule{
 		},
 	},
 	{
-		name: "13 a planned red, then the time budget ends (F4)", ticket: ticket(apple, "2s"), plan: []string{"hide-lists"},
+		name: "14 a red, then the time budget ends (F4)", ticket: ticket(apple, "2s"), plan: []string{"hide-lists"},
 		brain:  "verilex run --claim item-listed > \"$HOME/1\"\nsleep 30\n",
 		within: 8 * time.Second,
 		exit:   1, stdout: "1",
 	},
 	{
-		name: "14 a green, then the time budget ends (F4)", ticket: ticket(apple, "2s"),
+		name: "15 a green, then the time budget ends (F4)", ticket: ticket(apple, "2s"),
 		brain:  "verilex run --claim item-listed > \"$HOME/1\"\nsleep 30\n",
 		within: 8 * time.Second,
 		exit:   2, stderr: []string{"inconclusive: the time budget ended before the brain finished"},
 	},
 	{
-		name: "15 no run, only a refused run and a plan", spec: intent(store),
+		name: "16 no run, only a refused run and a plan", spec: intent(store),
 		brain: "printf '%s\\n' green\nverilex run --keep --claim store-opened 2> /dev/null\nverilex plan --claim store-opened > /dev/null\n",
-		exit:  2, stderr: []string{noPlanned},
+		exit:  2, stderr: []string{"inconclusive: the brain " + noRun},
 	},
 	{
-		name: "16 a red brain chain, alone (F10)", spec: intent(store),
-		brain: "verilex run '" + dupChain + "' > \"$HOME/1\"\n",
-		exit:  2, notes: 1, stderr: []string{noPlanned, chainNote + "red (store-open: "},
-		check: verdictOf("1", "red"),
+		name: "17 a chain alone is refused (F10)", spec: intent(store),
+		brain: "verilex run '" + dupChain + "' > \"$HOME/1\" 2>> \"$HOME/refused\"\n",
+		exit:  2, refused: 1, stderr: []string{"inconclusive: brain exited: exit status 2, and " + noRun},
 	},
 	{
-		name: "17 a green brain chain on other inputs, with --changed, under an input-specific defect (F9)", spec: intent(apple), plan: []string{"hide-apple"},
-		brain: "verilex run --changed bin/tally '" + pearChain + "' > \"$HOME/1\"\n",
-		exit:  2, notes: 1, stderr: []string{noPlanned, chainNote + "green"},
-		check: func(t *testing.T, r *ruleRun, got kept) {
-			var doc runDoc
-			if err := json.Unmarshal([]byte(got.home(t, "1")), &doc); err != nil || doc.Verdict != "green" || doc.Format != "verilex-claim-run-1" || doc.Requested.Chain == nil {
-				t.Fatalf("the chain run is not a green claim run that names its chain: %v %+v", err, doc)
-			}
-			// The planned run of the intent's claim is red under the same defect, so green is false.
-			cmd := exec.Command(coreBin, "--project", r.product, "run", "--claim", "item-listed")
-			cmd.Env = append(os.Environ(), "TALLY_DEFECT=hide-apple", "VERILEX_HOME="+filepath.Join(r.dir, "control-home"), "VERILEX_LEDGER="+filepath.Join(r.dir, "control-ledger"))
-			out, err := cmd.CombinedOutput()
-			if exit := (*exec.ExitError)(nil); !errors.As(err, &exit) || exit.ExitCode() != 1 {
-				t.Fatalf("the planned item-listed run under hide-apple is not red: %v\n%s", err, out)
-			}
-		},
+		name: "18 a chain on other inputs is refused, so the claim plan keeps the admitted inputs (F9, F11)", spec: intent(apple), plan: []string{"hide-apple", "hide-apple"},
+		brain: "verilex run --changed bin/tally '" + pearChain + "' > \"$HOME/1\" 2>> \"$HOME/refused\"\nverilex run --claim item-listed > \"$HOME/2\"\n",
+		exit:  1, stdout: "2", refused: 1, check: listedApple("2"),
 	},
 	{
-		name: "18 a green, then an inconclusive, last", spec: intent(apple), plan: []string{"", "lock"},
+		name: "19 the same with --fresh (F11)", spec: intent(apple), plan: []string{"hide-apple", "hide-apple"},
+		brain: "verilex run '" + pearChain + "' > \"$HOME/1\" 2>> \"$HOME/refused\"\nverilex run --fresh --claim item-listed > \"$HOME/2\"\n",
+		exit:  1, stdout: "2", refused: 1, check: listedApple("2"),
+	},
+	{
+		name: "20 a green, then an inconclusive, last", spec: intent(apple), plan: []string{"", "lock"},
 		brain: "verilex run --claim item-listed > \"$HOME/1\"\nverilex run --claim item-listed > \"$HOME/2\"\n",
 		exit:  2, stdout: "2", check: verdictOf("1", "green"),
 	},
 	{
-		name: "19 a red brain chain, then a green that covers the spec (F7)", spec: intent(store),
-		brain: "verilex run '" + dupChain + "' > \"$HOME/1\"\nverilex run --claim store-opened > \"$HOME/2\"\n",
-		exit:  0, stdout: "2", notes: 1, stderr: []string{chainNote + "red (store-open: "},
-		check: verdictOf("1", "red"),
+		name: "21 a chain is refused, then a green covers the spec (F7)", spec: intent(store),
+		brain: "verilex run '" + dupChain + "' > \"$HOME/1\" 2>> \"$HOME/refused\"\nverilex run --claim store-opened > \"$HOME/2\"\n",
+		exit:  0, stdout: "2", refused: 1,
 	},
 	{
-		name: "20 a green that covers the spec, then a red brain chain (F10)", spec: intent(store),
-		brain: "verilex run --claim store-opened > \"$HOME/1\"\nverilex run '" + dupChain + "' > \"$HOME/2\"\n",
-		exit:  0, stdout: "1", notes: 1, stderr: []string{chainNote + "red (store-open: "},
-		check: verdictOf("2", "red"),
+		name: "22 a green covers the spec, then a chain is refused (F10)", spec: intent(store),
+		brain: "verilex run --claim store-opened > \"$HOME/1\"\nverilex run '" + dupChain + "' > \"$HOME/2\" 2>> \"$HOME/refused\"\n",
+		exit:  0, stdout: "1", refused: 1,
 	},
 	{
-		name: "21 an inconclusive, then a green that proves its claims", spec: intent(apple), plan: []string{"lock", ""},
+		name: "23 an inconclusive, then a green that proves its claims", spec: intent(apple), plan: []string{"lock", ""},
 		brain: "verilex run --claim item-listed > \"$HOME/1\"\nverilex run --claim item-listed > \"$HOME/2\"\n",
 		exit:  0, stdout: "2", check: verdictOf("1", "inconclusive"),
 	},
 	{
-		name: "22 an inconclusive, then a narrower green", spec: intent(store),
+		name: "24 an inconclusive, then a narrower green", spec: intent(store),
 		fake: []fakeRun{
 			{claimDoc("inconclusive", "r1", []string{"item-listed"}, []string{"store-opened", "item-added", "item-listed"}), 2},
 			{claimDoc("green", "r2", []string{"store-opened"}, []string{"store-opened"}), 0},
@@ -243,7 +239,7 @@ var verdictRule = []rule{
 		exit:  2, stderr: []string{"inconclusive: run r2 is green but did not prove item-listed, item-added, which run r1 left inconclusive"},
 	},
 	{
-		name: "23 a green that covers the spec", spec: intent(apple),
+		name: "25 a green that covers the spec", spec: intent(apple),
 		brain: "cp \"$VERILEX_AGENT_PROMPT\" \"$HOME/prompt\"\nverilex run --claim item-listed > \"$HOME/1\"\n",
 		exit:  0, stdout: "1",
 		check: func(t *testing.T, r *ruleRun, got kept) {
@@ -253,37 +249,37 @@ var verdictRule = []rule{
 		},
 	},
 	{
-		name: "24 a green below the intent's floor", spec: intent(apple),
+		name: "26 a green below the intent's floor", spec: intent(apple),
 		brain: "verilex run --claim item-listed > \"$HOME/1\"\nverilex run --claim store-opened > \"$HOME/2\"\n",
 		exit:  2, stderr: []string{"is green but was not asked about claim item-listed, claim item-added"},
 	},
 	{
-		name: "25 a green below the --claim floor", spec: append(intent(store), "--claim", "item-listed"),
+		name: "27 a green below the --claim floor", spec: append(intent(store), "--claim", "item-listed"),
 		brain: "verilex run --claim store-opened > \"$HOME/1\"\n",
 		exit:  2, stderr: []string{"is green but was not asked about claim item-listed"},
 	},
 	{
-		name: "26 the intent names no claim, and --claim stands for it", spec: append(intent(nothing), "--claim", "store-opened"),
+		name: "28 the intent names no claim, and --claim stands for it", spec: append(intent(nothing), "--claim", "store-opened"),
 		brain: "verilex run --claim store-opened > \"$HOME/1\"\n",
 		exit:  0, stdout: "1",
 	},
 	{
-		name: "27 a green not asked about the diff", spec: diff(),
+		name: "29 a green not asked about the diff", spec: diff(),
 		brain: "verilex run --claim store-opened > \"$HOME/1\"\n",
 		exit:  2, stderr: []string{"is green but was not asked about change bin/tally"},
 	},
 	{
-		name: "28 a green on the diff that proves every touched claim", spec: diff(),
+		name: "30 a green on the diff that proves every touched claim", spec: diff(),
 		brain: "verilex run --changed bin/tally > \"$HOME/1\"\n",
 		exit:  0, stdout: "1", check: warning(""),
 	},
 	{
-		name: "29 a green on the diff, with verilex's warning", spec: diff(),
+		name: "31 a green on the diff, with verilex's warning", spec: diff(),
 		brain: "verilex run --claim store-opened --changed bin/tally > \"$HOME/1\"\n",
 		exit:  0, stdout: "1", check: warning("2 touched claims not covered"),
 	},
 	{
-		name: "30 a green on a diff with a rename and a non-ASCII name (F3)", spec: append(intent(store), "--diff", "HEAD"),
+		name: "32 a green on a diff with a rename and a non-ASCII name (F3)", spec: append(intent(store), "--diff", "HEAD"),
 		setup: renamedProduct,
 		brain: "cp \"$VERILEX_AGENT_PROMPT\" \"$HOME/prompt\"\nset --\n" +
 			"for path in $(sed -n 's/^changed: //p' \"$VERILEX_AGENT_PROMPT\"); do set -- \"$@\" --changed \"$path\"; done\n" +
@@ -336,9 +332,10 @@ type rule struct {
 	// stdout names the file in the brain's home that holds the launcher's stdout; "" is none.
 	stdout string
 	stderr []string
-	// notes is how many notes the launcher prints: one for each run of a chain the brain wrote.
-	notes int
-	check func(t *testing.T, r *ruleRun, got kept)
+	// refused is how many chains verilex refused for the brain. Each chain run appends its stderr
+	// to refused in the brain's home.
+	refused int
+	check   func(t *testing.T, r *ruleRun, got kept)
 }
 
 // ruleRun is one row's launch: its directory, the project and home the launcher uses, and the
@@ -402,9 +399,11 @@ func (row rule) run(t *testing.T, product string) {
 			t.Fatalf("stderr lacks %q\nstderr: %s", part, got.stderr)
 		}
 	}
-	if n := strings.Count(got.stderr, "verilex-agent: note: "); n != row.notes {
-		t.Fatalf("%d notes, want %d\nstderr: %s", n, row.notes, got.stderr)
+	refusals, _ := os.ReadFile(filepath.Join(got.root, "brain", "home", "refused"))
+	if n := strings.Count(string(refusals), "--no-chain refuses a chain argument, an empty one too"); n != row.refused {
+		t.Fatalf("verilex refused %d chains, want %d\nrefused: %s\nstderr: %s", n, row.refused, refusals, got.stderr)
 	}
+	plannedOnly(t, r.home)
 	if _, err := os.Stat(filepath.Join(got.root, "brain", "home", "started")); row.neverStarts != os.IsNotExist(err) {
 		t.Fatalf("the brain started: %v, want %v\nstderr: %s", !os.IsNotExist(err), !row.neverStarts, got.stderr)
 	}
@@ -541,6 +540,60 @@ func warning(text string) func(t *testing.T, r *ruleRun, got kept) {
 			t.Fatalf("warning %q, want %q: %v", doc.Warning, text, err)
 		}
 	}
+}
+
+// plannedOnly checks that every run record in home is a claim run that verilex planned: no chain
+// ran, so no chain set the word arguments of a later claim plan (F11).
+func plannedOnly(t *testing.T, home string) {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(home, "*", "runs", "*", "run.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		var record struct {
+			Format    string `json:"format"`
+			Requested *struct {
+				Chain *string `json:"chain"`
+			} `json:"requested"`
+		}
+		data, err := os.ReadFile(path)
+		if err != nil || json.Unmarshal(data, &record) != nil || record.Format != "verilex-claim-run-1" || record.Requested == nil || record.Requested.Chain != nil {
+			t.Fatalf("%s is not a run that verilex planned: %v\n%s", path, err, data)
+		}
+	}
+}
+
+// listedApple checks that the run whose JSON the brain kept in file listed apple, the input of
+// the admitted chain, and not an input that a chain chose.
+func listedApple(file string) func(t *testing.T, r *ruleRun, got kept) {
+	return func(t *testing.T, r *ruleRun, got kept) {
+		var doc struct {
+			Words []struct {
+				Word string   `json:"word"`
+				Args []string `json:"args"`
+			} `json:"words"`
+		}
+		if err := json.Unmarshal([]byte(got.home(t, file)), &doc); err != nil {
+			t.Fatal(err)
+		}
+		for _, word := range doc.Words {
+			if word.Word == "item-listed" && slices.Equal(word.Args, []string{"apple"}) {
+				return
+			}
+		}
+		t.Fatalf("run %s did not run item-listed apple: %+v", file, doc.Words)
+	}
+}
+
+// chainDoc is a claim-run document of a chain the caller gave, which a fake verilex prints.
+func chainDoc(verdict, run, chain string) []byte {
+	doc := map[string]any{
+		"format": "verilex-claim-run-1", "verdict": verdict, "run": run,
+		"requested": map[string]any{"claims": []string{}, "named": []string{}, "changed": []string{"bin/tally"}, "chain": chain},
+	}
+	data, _ := json.Marshal(doc)
+	return append(data, '\n')
 }
 
 // claimDoc is a claim-run document a fake verilex prints: the claims it was asked for, and the

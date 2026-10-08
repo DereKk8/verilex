@@ -14,6 +14,7 @@ import (
 	"github.com/DereKk8/verilex/internal/curation"
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/featuremap"
+	"github.com/DereKk8/verilex/internal/fingerprint"
 	"github.com/DereKk8/verilex/internal/grouping"
 	"github.com/DereKk8/verilex/internal/lifecycle"
 )
@@ -334,6 +335,144 @@ func TestEditingFeatureMapSectionMarksWordDriftSuspect(t *testing.T) {
 	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (2 admitted)\n")
 }
 
+// Rule: a word runs with more than its own directory: the helpers beside the word directories
+// and the frame. Onboarding judged the word with them, so a change to either leaves every word
+// drift-suspect until it is onboarded again. A feature-map line no claim cites, or config.yaml,
+// changes neither.
+func TestEditingSharedWordFilesOrFrameMarksEveryWordDriftSuspect(t *testing.T) {
+	root := product(t)
+	used(t, root, "store-open | item-stored apple")
+	used(t, root, "store-open | item-stored pear")
+	onboard(t, root, "item-stored")
+	onboard(t, root, "store-open")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (2 admitted)\n")
+
+	readme := feature(root, "README.md")
+	original := read(t, readme)
+	write(t, readme, original+"- Stores live under the run's own directory.\n", 0644)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (2 admitted)\n")
+	write(t, readme, original, 0644)
+	// config.yaml names the product, not what a word runs with: one vocabulary serves several products.
+	config := filepath.Join(root, ".verilex", "config.yaml")
+	original = read(t, config)
+	write(t, config, original+"secret_patterns: ['NEVER-[0-9]+']\n", 0644)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (2 admitted)\n")
+	write(t, config, original, 0644)
+
+	shared := "the shared word files changed since onboarding (.verilex/words/tally_word.py)"
+	helper := filepath.Join(root, ".verilex", "words", "tally_word.py")
+	original = read(t, helper)
+	write(t, helper, original+"\n# every result is a pass\n", 0644)
+	done := verilex(t, root, nil, "check")
+	equal(t, done.code, 0)
+	equal(t, done.stdout, "check: 2 of 2 admitted drift-suspect; they always run\n  item-stored: "+shared+"\n  store-open: "+shared+"\n")
+	used(t, root, "store-open | item-stored apple")
+	equal(t, plan(t, root, "store-open | item-stored apple").stdout, "plan: skip 0, run 2; store-open: drift-suspect: "+shared+"\n")
+	write(t, helper, original, 0644)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (2 admitted)\n")
+
+	frame := "the frame changed since onboarding (.verilex/frame)"
+	launch := filepath.Join(root, ".verilex", "frame", "launch")
+	original = read(t, launch)
+	write(t, launch, original+"\n# builds another checkout\n", 0755)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 2 of 2 admitted drift-suspect; they always run\n  item-stored: "+frame+"\n  store-open: "+frame+"\n")
+
+	onboard(t, root, "store-open")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 2 admitted drift-suspect; they always run\n  item-stored: "+frame+"\n")
+	write(t, launch, original, 0755)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 2 admitted drift-suspect; they always run\n  store-open: "+frame+"\n")
+}
+
+// An interpreter cache beside the shared helpers is derived from them and differs between
+// checkouts, so it drifts nothing.
+func TestInterpreterCacheBesideSharedWordFilesDriftsNothing(t *testing.T) {
+	root := product(t)
+	used(t, root, "store-open")
+	used(t, root, "store-open")
+	onboard(t, root, "store-open")
+	for _, cache := range []string{"words", "frame"} {
+		dir := filepath.Join(root, ".verilex", cache, "__pycache__")
+		if err := os.Mkdir(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(dir, "helper.cpython-312.pyc"), "compiled\n", 0644)
+	}
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (1 admitted)\n")
+	write(t, filepath.Join(root, ".verilex", "words", "lib.py"), "# a new helper\n", 0644)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 1 admitted drift-suspect; they always run\n  store-open: the shared word files changed since onboarding (.verilex/words/lib.py, .verilex/words/tally_word.py)\n")
+}
+
+// Onboarding records the frame and the shared word files its trials ran with, so a change to
+// them while it runs records nothing.
+func TestBindingChangedDuringOnboardingRecordsNothing(t *testing.T) {
+	root := product(t)
+	used(t, root, "store-open")
+	used(t, root, "store-open")
+	launch := filepath.Join(root, ".verilex", "frame", "launch")
+	original := read(t, launch)
+	// Each launch leaves a line beside the word directories, as an edit during the trials would.
+	write(t, launch, strings.Replace(original, "run = os.environ[\"VERILEX_RUN\"]\n", "run = os.environ[\"VERILEX_RUN\"]\nwith open(Path(os.environ[\"VERILEX_PROJECT_ROOT\"], \".verilex\", \"words\", \"launches.log\"), \"a\") as log:\n    log.write(run + \"\\n\")\n", 1), 0755)
+	done := verilex(t, root, nil, "onboard", "store-open")
+	equal(t, done.code, 2)
+	equal(t, done.stderr, "verilex: refused: the frame or the shared word files changed while store-open was onboarded; onboard it again\n")
+	equal(t, status(t, root, "store-open"), "provisional")
+}
+
+// A decision recorded before onboarding kept the frame and the shared word files cannot say the
+// word still runs with them, so the word is drift-suspect until it is onboarded again.
+func TestDecisionWithoutBindingIsDriftSuspect(t *testing.T) {
+	root := product(t)
+	used(t, root, "store-open")
+	used(t, root, "store-open")
+	onboard(t, root, "store-open")
+	project, err := dictionary.FindProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := grouping.Load(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Removing the binding by hand breaks the seal, so the older decision is sealed as onboarding sealed it.
+	older := g.Words["store-open"]
+	older.Binding = nil
+	g.Set("store-open", older)
+	if err = grouping.Save(project, g); err != nil {
+		t.Fatal(err)
+	}
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 1 admitted drift-suspect; they always run\n  store-open: the frame and the shared word files were not recorded at onboarding; onboard it again\n")
+	onboard(t, root, "store-open")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (1 admitted)\n")
+}
+
+// Rule: an outside curator judged a word without a claim with the helpers and frame of its
+// packet's time, so a change to either drifts the admitted word and voids a packet not yet judged.
+func TestWordWithoutClaimDriftsWithSharedWordFilesAndFrame(t *testing.T) {
+	root := product(t)
+	addWord(t, root, "store-glanced", `echo '{"verdict": "pass", "observation": "fine"}'`+"\n")
+	used(t, root, "store-open | store-glanced")
+	used(t, root, "store-open | store-glanced")
+	helper := filepath.Join(root, ".verilex", "words", "tally_word.py")
+	original := read(t, helper)
+
+	packet := propose(t, root, "store-glanced")
+	write(t, helper, original+"\n# every result is a pass\n", 0644)
+	done := verilex(t, root, nil, "admit", "store-glanced", "--verdict", verdict(t, root, `{"word": "store-glanced", "packet": "`+packet.ID+`", "verdict": "admit", "curator": "m"}`))
+	equal(t, done.code, 2)
+	equal(t, done.stderr, "verilex: refused: store-glanced changed since packet "+packet.ID+"; propose it again\n")
+	equal(t, status(t, root, "store-glanced"), "provisional")
+
+	write(t, helper, original, 0644)
+	admit(t, root, "store-glanced")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (1 admitted)\n")
+	write(t, helper, original+"\n# every result is a pass\n", 0644)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 1 admitted drift-suspect; they always run\n  store-glanced: the shared word files changed since admission (.verilex/words/tally_word.py)\n")
+	write(t, helper, original, 0644)
+	cleanup := filepath.Join(root, ".verilex", "frame", "cleanup")
+	write(t, cleanup, read(t, cleanup)+"\n# keeps the store\n", 0755)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 1 admitted drift-suspect; they always run\n  store-glanced: the frame changed since admission (.verilex/frame)\n")
+}
+
 // A word without a claim keeps the older anchor: its whole feature-map section, or the whole
 // file for a sub-feature id.
 func TestWordWithoutClaimDriftsWithItsWholeSection(t *testing.T) {
@@ -381,8 +520,8 @@ func curated(t *testing.T) string {
 	return root
 }
 
-// admitted records each named word (every word when none is named) as admitted, matching its files
-// and claim version as they are now: a sealed onboarding decision for a word that proves a claim,
+// admitted records each named word (every word when none is named) as admitted, matching its files,
+// the frame, the shared word files and its claim version as they are now: a sealed onboarding decision for a word that proves a claim,
 // an admission record for one that names feature-map sections.
 func admitted(t *testing.T, root string, names ...string) {
 	t.Helper()
@@ -400,6 +539,10 @@ func admittedFor(t *testing.T, root, product string, names ...string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	binding, err := fingerprint.Digests(project)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, word := range words {
 		if len(names) > 0 && !slices.Contains(names, word.Name) {
 			continue
@@ -413,7 +556,7 @@ func admittedFor(t *testing.T, root, product string, names ...string) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			d := grouping.Decision{Claim: word.Claim.Pin(), Entry: word.Entry, Digest: digest, Match: grouping.Same, Defects: map[string]string{},
+			d := grouping.Decision{Claim: word.Claim.Pin(), Entry: word.Entry, Digest: digest, Binding: binding, Match: grouping.Same, Defects: map[string]string{},
 				Uses: map[string][]string{product: {"1-a", "2-b"}}, ClaimSources: word.Claim.SourcesDigest(), Date: time.Now().UTC().Format(time.RFC3339), Record: "test"}
 			for name, defect := range word.Claim.Defects {
 				d.Defects[name] = defect.Digest()
@@ -423,7 +566,7 @@ func admittedFor(t *testing.T, root, product string, names ...string) {
 				t.Fatal(err)
 			}
 		} else {
-			admission := lifecycle.Admission{Word: word.Name, Date: time.Now().UTC().Format(time.RFC3339), Curator: "test-curator", Packet: "0123456789abcdef", Runs: []string{"1-a", "2-b"}, WordDigest: digest, Sections: map[string]string{}}
+			admission := lifecycle.Admission{Word: word.Name, Date: time.Now().UTC().Format(time.RFC3339), Curator: "test-curator", Packet: "0123456789abcdef", Runs: []string{"1-a", "2-b"}, WordDigest: digest, Binding: binding, Sections: map[string]string{}}
 			for _, ref := range word.Implements {
 				section, err := featuremap.Resolve(project.Root, project.SkillDirs, ref)
 				if err != nil {

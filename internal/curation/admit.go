@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
+	"github.com/DereKk8/verilex/internal/fingerprint"
 	"github.com/DereKk8/verilex/internal/lifecycle"
 )
 
@@ -28,8 +30,8 @@ var packetID = regexp.MustCompile(`^[0-9a-f]{16}$`)
 
 // Admit records a curator's verdict on a proposed word. Both verdicts are kept beside the
 // packet; only "admit" writes an admission record, so a rejected word stays as it was. The
-// verdict must name a packet of this word whose files and sections still match the
-// project, so a curator never admits something other than what it judged.
+// verdict must name a packet of this word whose files, frame, shared word files and sections
+// still match the project, so a curator never admits something other than what it judged.
 func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.Admission, error) {
 	var v Verdict
 	data, err := os.ReadFile(verdictPath)
@@ -79,11 +81,15 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 	if err != nil {
 		return v, nil, err
 	}
+	binding, err := fingerprint.Digests(p)
+	if err != nil {
+		return v, nil, err
+	}
 	current, err := sections(p, w)
 	if err != nil {
 		return v, nil, fmt.Errorf("%v; %v", err, stale)
 	}
-	if digest != packet.WordDigest || len(current) != len(packet.Sections) {
+	if digest != packet.WordDigest || !maps.Equal(binding, packet.Binding) || len(current) != len(packet.Sections) {
 		return v, nil, stale
 	}
 	hashes := map[string]string{}
@@ -103,6 +109,6 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 	for _, use := range packet.Uses {
 		runs = append(runs, use.Run)
 	}
-	a := &lifecycle.Admission{Word: name, Date: now(), Curator: v.Curator, Reason: v.Reason, Packet: v.Packet, Runs: runs, WordDigest: digest, Sections: hashes}
+	a := &lifecycle.Admission{Word: name, Date: now(), Curator: v.Curator, Reason: v.Reason, Packet: v.Packet, Runs: runs, WordDigest: digest, Binding: binding, Sections: hashes}
 	return v, a, writeJSON(lifecycle.AdmissionPath(w), a)
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/featuremap"
+	"github.com/DereKk8/verilex/internal/fingerprint"
 	"github.com/DereKk8/verilex/internal/lifecycle"
 	"github.com/DereKk8/verilex/internal/runner"
 	"github.com/DereKk8/verilex/internal/verdict"
@@ -83,6 +84,7 @@ type Packet struct {
 	Status     lifecycle.State      `json:"status"`
 	Files      map[string]string    `json:"files"`
 	WordDigest string               `json:"word_digest"`
+	Binding    map[string]string    `json:"binding"`
 	Uses       []Use                `json:"uses"`
 	Sections   []featuremap.Section `json:"sections"`
 	Dictionary []Entry              `json:"dictionary"`
@@ -132,6 +134,10 @@ func Propose(p dictionary.Project, name string) (Packet, string, error) {
 	if err != nil {
 		return Packet{}, "", err
 	}
+	binding, err := fingerprint.Digests(p)
+	if err != nil {
+		return Packet{}, "", err
+	}
 	dictionaryEntries := make([]Entry, 0, len(words))
 	for _, other := range words {
 		s, err := lifecycle.StatusOf(p, other)
@@ -140,7 +146,7 @@ func Propose(p dictionary.Project, name string) (Packet, string, error) {
 		}
 		dictionaryEntries = append(dictionaryEntries, Entry{other.Name, s.State, other.Promise, other.Args, other.Requires, other.Provides, other.Implements, other.Proves()})
 	}
-	packet := Packet{Project: p.Name, Created: now(), Word: name, Status: status.State, Files: files, WordDigest: digest, Uses: uses, Sections: implemented, Dictionary: dictionaryEntries, Curator: instructions}
+	packet := Packet{Project: p.Name, Created: now(), Word: name, Status: status.State, Files: files, WordDigest: digest, Binding: binding, Uses: uses, Sections: implemented, Dictionary: dictionaryEntries, Curator: instructions}
 	data, err := json.Marshal(packet)
 	if err != nil {
 		return Packet{}, "", err

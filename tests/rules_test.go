@@ -224,6 +224,7 @@ func TestAnyChangedStampComponentForcesRerun(t *testing.T) {
 		}, chain, "store-open: input bin/tally changed"},
 		{"shared word helper", func(t *testing.T, root string) map[string]string {
 			appendTo(t, filepath.Join(root, ".verilex", "words", "tally_word.py"), "# edited\n")
+			admitted(t, root)
 			return nil
 		}, chain, "store-open: shared changed"},
 		{"shared helper directory", func(t *testing.T, root string) map[string]string {
@@ -232,16 +233,18 @@ func TestAnyChangedStampComponentForcesRerun(t *testing.T) {
 				t.Fatal(err)
 			}
 			write(t, filepath.Join(dir, "helper.py"), "# new helper\n", 0644)
+			admitted(t, root)
 			return nil
 		}, chain, "store-open: shared changed"},
 		{"frame step", func(t *testing.T, root string) map[string]string {
 			appendTo(t, filepath.Join(root, ".verilex", "frame", "doctor"), "# edited\n")
+			admitted(t, root)
 			return nil
 		}, chain, "store-open: frame changed"},
 		{"project config", func(t *testing.T, root string) map[string]string {
 			appendTo(t, filepath.Join(root, ".verilex", "config.yaml"), "secret_patterns: ['NEVER-[0-9]+']\n")
 			return nil
-		}, chain, "store-open: frame changed"},
+		}, chain, "store-open: config changed"},
 		{"declared environment", func(t *testing.T, root string) map[string]string {
 			return map[string]string{"TALLY_SIMULATE_LOCK": ""}
 		}, chain, "store-open: env TALLY_SIMULATE_LOCK changed"},

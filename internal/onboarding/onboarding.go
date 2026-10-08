@@ -31,6 +31,7 @@ import (
 	"github.com/DereKk8/verilex/internal/curation"
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/featuremap"
+	"github.com/DereKk8/verilex/internal/fingerprint"
 	"github.com/DereKk8/verilex/internal/grouping"
 	"github.com/DereKk8/verilex/internal/lifecycle"
 	"github.com/DereKk8/verilex/internal/runner"
@@ -174,7 +175,11 @@ func Onboard(p dictionary.Project, name string, choice Choice) (Result, error) {
 	if err != nil {
 		return r, err
 	}
-	o := &onboarding{p: p, w: w, words: words, claims: claims, now: grouping.PinsOf(claims, words), g: g, r: &r, opens: map[string]map[string][]string{}}
+	binding, err := fingerprint.Digests(p)
+	if err != nil {
+		return r, err
+	}
+	o := &onboarding{p: p, w: w, words: words, claims: claims, now: grouping.PinsOf(claims, words), g: g, r: &r, opens: map[string]map[string][]string{}, binding: binding}
 	if r.Record, err = newRecord(p, name); err != nil {
 		return r, err
 	}
@@ -204,6 +209,8 @@ type onboarding struct {
 	agree []Candidate
 	// group is the claim the word joins under.
 	group dictionary.Claim
+	// binding is the frame and the shared word files the trials ran with.
+	binding map[string]string
 }
 
 func (o *onboarding) reject(why string) { o.r.Outcome, o.r.Reason = Rejected, why }
@@ -453,8 +460,11 @@ func (o *onboarding) record(g *grouping.Grouping, uses []curation.Use, sources [
 		return fmt.Errorf("the grouping changed while %s was onboarded, by another onboarding or answer; onboard it again", o.w.Name)
 	}
 	c := *o.w.Claim
+	if binding, err := fingerprint.Digests(o.p); err != nil || !maps.Equal(binding, o.binding) {
+		return fmt.Errorf("the frame or the shared word files changed while %s was onboarded; onboard it again", o.w.Name)
+	}
 	digest, _ := lifecycle.WordDigest(o.w)
-	d := grouping.Decision{Claim: o.group.Pin(), Entry: o.w.Entry, Digest: digest, Match: o.r.Match,
+	d := grouping.Decision{Claim: o.group.Pin(), Entry: o.w.Entry, Digest: digest, Binding: o.binding, Match: o.r.Match,
 		Defects: map[string]string{}, Uses: map[string][]string{o.p.Name: runs(uses)}, Chain: o.chain, ClaimSources: c.SourcesDigest(), Sources: sources,
 		Date: o.r.Date, Record: filepath.Base(o.r.Record)}
 	for name, defect := range c.Defects {

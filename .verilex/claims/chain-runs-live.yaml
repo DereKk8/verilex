@@ -1,0 +1,15 @@
+claim: chain-runs-live
+sentence: A chain of the sample product's words runs live, is green, and leaves no instance behind.
+entry: [cli]
+evidence:
+  action: "`verilex run 'store-open | item-stored apple | item-listed apple'` exits `0` and prints `green: 3 green; run <RUN>`."
+  observation: "`verilex runs` shows `<RUN>` `green  cleanup=done`, and no store is left."
+  non_proofs:
+    - "`green: 3 green` alone does not prove the instance was cleaned up."
+defects:
+  skipped-cleanup: {CANARY_DEFECT: skipped-cleanup}
+sources:
+  - ref: verify-verilex/features/run.md#run-live
+    prose: ad71e5d2671d
+    requirements:
+      - "Output `green: 3 green; run <RUN>`, exit `0`."

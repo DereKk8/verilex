@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Canary Cleanup: remove the instance directory only when this run owns it.
+set -euo pipefail
+inst="${CANARY_INSTANCES:-${TMPDIR:-/tmp}/verilex-canary}/$VERILEX_RUN"
+if [ "$(cat "$inst/owner" 2>/dev/null)" = "$VERILEX_RUN" ]; then
+  command rm -rf "$inst"
+  echo "removed $inst"
+elif [ -e "$inst" ]; then
+  echo "left $inst alone: not owned by run $VERILEX_RUN"
+fi

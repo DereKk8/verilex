@@ -1,0 +1,13 @@
+claim: chain-skipped
+sentence: A proven, admitted chain is skipped on its stamps, launching nothing.
+entry: [cli]
+evidence:
+  action: "After onboarding and one live run `<A>`, a second `verilex run` of the chain exits `0` and prints `green: 3 green, skipped: stamps match run <A>; run <B>`."
+  observation: "`verilex runs` shows `<B>` with `cleanup=none`, and no store exists."
+defects:
+  never-skip: {CANARY_DEFECT: never-skip}
+sources:
+  - ref: verify-verilex/features/run.md#run-skip
+    prose: 1eb27d80ae05
+    requirements:
+      - "Expect the second to print `green: 3 green, skipped: stamps match run <A>; run <B>`, where `<A>` is the run-after-admit id."

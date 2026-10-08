@@ -1,0 +1,80 @@
+# verilex grouping: written only by `verilex onboard`. Each decision says which claim a word is
+# grouped under and for which products it is useful. A decision edited by hand no longer
+# matches its seal, and verilex ignores it until the word is onboarded again.
+words:
+  chain-order-refused:
+    claim: chain-order-refused@35ebdffb4db9
+    entry: cli
+    digest: 691e04eaf79e0d93e3e3b1ed7e0017a18ca1e102dc21db344daf7a120a79d110
+    binding:
+      frame: 9fdf080c3b4e20c6189e03fceb06c0543641d0d90c0c8c3c62ce8c3d30705f17
+      shared: d6b6d7fa49bec73c676c730d111ddf7812f28ca4b1f0cef41c93763c765c905a
+    match: new
+    defects:
+      no-order-check: 343524a2139e
+    uses:
+      verilex:
+        - 1791421749-f006f0870d7f
+        - 1791421751-a3084671e325
+    chain: chain-order-refused
+    claim_sources: 76a1da6d7e02892c10aa7f0e43ae01a380884a740b9516b73010ac2ad407a2df
+    date: "2026-10-08T01:09:14Z"
+    record: 1791421754-223b6e
+    seal: 12bd77e07d88b322f8de89e7b598e9cce8de553482b09e7f72bbc0931f76c304
+  chain-red:
+    claim: chain-red@a5fa50654384
+    entry: cli
+    digest: 578e26aeccf92367d4a0f975b8468bdcbc832aff49465e57b6b64d8844a89a7a
+    binding:
+      frame: 9fdf080c3b4e20c6189e03fceb06c0543641d0d90c0c8c3c62ce8c3d30705f17
+      shared: d6b6d7fa49bec73c676c730d111ddf7812f28ca4b1f0cef41c93763c765c905a
+    match: new
+    defects:
+      fail-is-green: 8ed657e55bb9
+    uses:
+      verilex:
+        - 1791421749-f006f0870d7f
+        - 1791421751-a3084671e325
+    chain: chain-order-refused | chain-red
+    claim_sources: ef067368308fe0f8654cada244d23f28e240d1f29bd72fd69e5ec670346b311d
+    date: "2026-10-08T01:09:17Z"
+    record: 1791421757-162ab4
+    seal: d96402b97f5f3247241120ca616b2e4e9d77dfe794c6fe8b49c7b99698081818
+  chain-runs-live:
+    claim: chain-runs-live@14f20a7ab1be
+    entry: cli
+    digest: e6826a572908692aad7c3e9d738adc1e0ba509a22381460db0dbb17e333aa175
+    binding:
+      frame: 9fdf080c3b4e20c6189e03fceb06c0543641d0d90c0c8c3c62ce8c3d30705f17
+      shared: d6b6d7fa49bec73c676c730d111ddf7812f28ca4b1f0cef41c93763c765c905a
+    match: new
+    defects:
+      skipped-cleanup: 3bc4e7142a5e
+    uses:
+      verilex:
+        - 1791421749-f006f0870d7f
+        - 1791421751-a3084671e325
+    chain: chain-order-refused | chain-red | chain-runs-live
+    claim_sources: 3c218fd4aeeb14a6058cd5765f8aa67abf09e5788df39c1bf2448cd7c4128113
+    date: "2026-10-08T01:09:13Z"
+    record: 1791421753-7cbeb6
+    seal: a2882fe73ff545ea7d3d40218e604dad73302b0de33862ee6ad6c508c2621884
+  chain-skipped:
+    claim: chain-skipped@629142197b43
+    entry: cli
+    digest: 097ac688be9ae2d43e900b1df4982745fa53460a9fa41f90904856f3560c6eda
+    binding:
+      frame: 9fdf080c3b4e20c6189e03fceb06c0543641d0d90c0c8c3c62ce8c3d30705f17
+      shared: d6b6d7fa49bec73c676c730d111ddf7812f28ca4b1f0cef41c93763c765c905a
+    match: new
+    defects:
+      never-skip: 9daab33e4c7c
+    uses:
+      verilex:
+        - 1791421749-f006f0870d7f
+        - 1791421751-a3084671e325
+    chain: chain-order-refused | chain-red | chain-runs-live | chain-skipped
+    claim_sources: 8fba5a0fff2dd724f6183ee32c41ed66fc2717283b42fcca52d7c926bcc0c728
+    date: "2026-10-08T01:09:15Z"
+    record: 1791421755-383386
+    seal: 7f5233b29ac11a7122b2f18b33c9f6dd7c4233c0f8b0ad9c7b9b794be4713e69

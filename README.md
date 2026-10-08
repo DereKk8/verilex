@@ -591,3 +591,11 @@ go build -o verilex ./cmd/verilex
 
 The Go behavior tests drive the compiled CLI against tally. The sample product and its words
 use Python 3, so tests require `python3` and a POSIX shell. The verilex core does not require Python.
+
+`scripts/ci` runs the whole blocking set that CI runs. Its `canary` step has verilex prove its own
+claims: the repository's `.verilex/` holds words that build the verilex under test from the checkout and drive it
+on a scratch tally, each claim anchored on a `verify-verilex` sub-feature. A known-good build pinned in
+`scripts/ci` (`canary_driver`) runs them live in throwaway state, never the build under test, and the step fails
+on a red or inconclusive run and on drift. Onboard a changed canary word with that pinned build.
+Its `canary-guards` step (`scripts/canary-guards`) replays attacks that once passed the canary step on scratch
+copies of the checkout, and each must now fail it.

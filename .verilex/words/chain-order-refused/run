@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True  # keep the shared words directory, and so its stamp, unchanged
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from canary_word import fail, result, runs, verilex
+
+before = runs()
+done = verilex("action", "run", "item-stored apple | store-open")
+want = "verilex: refused: item-stored apple requires store, pinned by claim item-added; nothing earlier provides it"
+if done.returncode != 2 or want not in done.stderr:
+    fail(f"a chain out of order exited {done.returncode}, not 2 with '{want}': {done.stderr.strip()[:300]}")
+after = runs()
+if after != before:
+    fail(f"the refused chain still recorded a run: {sorted(set(after) - set(before))}")
+result("pass", observation=f"verilex runs lists no new run ({len(after)} before and after)")

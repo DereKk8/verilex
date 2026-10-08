@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Regression tests for the canary step: each attack that once made `scripts/ci canary` pass on a broken
+# build must now fail it, naming the cause. Each case runs the real step on a scratch copy of this
+# checkout, with its own git dir that borrows this repository's objects, so neither the checkout nor
+# the repository's refs change. A clean copy must stay green, so an attack cannot pass by breaking the copy.
+# usage: scripts/canary-guards
+set -euo pipefail
+cd "$(dirname "$0")/.."
+work="$(mktemp -d)"
+trap 'chmod -R u+w "$work"; rm -rf "$work"' EXIT
+head="$(git rev-parse HEAD)" main="$(git rev-parse refs/remotes/origin/main)"
+objects="$(cd "$(git rev-parse --git-common-dir)" && pwd)/objects"
+driver="$(sed -n 's/^canary_driver=//p' scripts/ci)"
+cleanup_frame='[]string{project.Frame("cleanup")}'
+store_line='    store = Path(os.environ.get("TALLY_STORES") or tempfile.gettempdir()) / f"tally-{run}"'
+
+# plant <file> <from> <to>: replace one literal, or stop when the attack no longer applies.
+plant() {
+  local code
+  code="$(<"$1")"
+  [[ "$code" == *"$2"* ]] || { echo "canary-guards: $1 no longer holds the line an attack edits" >&2; exit 2; }
+  printf '%s\n' "${code/"$2"/"$3"}" > "$1"
+}
+
+# copy <case>: a scratch checkout of the tracked files as they are now, at HEAD, with origin/main where it is.
+copy() {
+  local dir="$work/$1"
+  mkdir -p "$dir/tree" "$dir/tmp"
+  git ls-files -z | tar --null -T - -cf - | tar -xf - -C "$dir/tree"
+  git init -q --bare "$dir/git"
+  echo "$objects" > "$dir/git/objects/info/alternates"
+  GIT_DIR="$dir/git" git update-ref refs/heads/canary-guards "$head"
+  GIT_DIR="$dir/git" git symbolic-ref HEAD refs/heads/canary-guards
+  GIT_DIR="$dir/git" git update-ref refs/remotes/origin/main "$main"
+  GIT_DIR="$dir/git" GIT_WORK_TREE="$dir/tree" git read-tree HEAD
+}
+
+# canary <case>: run the real step in the copy; its output goes to <case>.log.
+canary() {
+  local dir="$work/$1"
+  (cd "$dir/tree" && GIT_DIR="$dir/git" GIT_WORK_TREE="$dir/tree" TMPDIR="$dir/tmp" scripts/ci canary) > "$dir.log" 2>&1
+}
+
+failed=0
+# expect <case> <fails|passes> <text>: the step's exit and a line its output must hold.
+expect() {
+  local code=0
+  canary "$1" || code=$?
+  if { [ "$2" = fails ] && [ "$code" -eq 0 ]; } || { [ "$2" = passes ] && [ "$code" -ne 0 ]; } ||
+    ! grep -qF -- "$3" "$work/$1.log"; then
+    echo "FAIL $1: want the step to $2 with '$3', got exit $code:"
+    grep -vE '^ +(next|unmapped|uncovered) ' "$work/$1.log" | sed 's/^/  /'
+    failed=1
+  else
+    echo "ok   $1"
+  fi
+}
+
+copy clean
+expect clean passes "check: no drift ($(find .verilex/words -mindepth 2 -maxdepth 2 -name word.md | wc -l | tr -d ' ') admitted)"
+
+# A tag named origin/main points at a driver commit whose Red exits 0; the pin names that commit.
+copy tag-origin-main
+(
+  export GIT_DIR="$work/tag-origin-main/git" GIT_INDEX_FILE="$work/tag-origin-main/index" \
+    GIT_AUTHOR_NAME=canary-guards GIT_AUTHOR_EMAIL=canary-guards@localhost \
+    GIT_COMMITTER_NAME=canary-guards GIT_COMMITTER_EMAIL=canary-guards@localhost
+  git read-tree "$driver"
+  git show "$driver:internal/verdict/verdict.go" > "$work/verdict.go"
+  plant "$work/verdict.go" $'case Red:\n\t\treturn 1' $'case Red:\n\t\treturn 0'
+  git update-index --cacheinfo "100644,$(git hash-object -w "$work/verdict.go"),internal/verdict/verdict.go"
+  weak="$(git commit-tree "$(git write-tree)" -p "$driver" -m "canary-guards: Red exits 0")"
+  git update-ref refs/tags/origin/main "$weak"
+  plant "$work/tag-origin-main/tree/scripts/ci" "canary_driver=$driver" "canary_driver=$weak"
+)
+plant "$work/tag-origin-main/tree/internal/runner/runner.go" "$cleanup_frame" '[]string{"true"}'
+expect tag-origin-main fails "is not on origin/main"
+
+# The fixture reports a store the canary's own process resolves elsewhere: relative, or through /proc/self/cwd.
+for store in relative:'    store = Path(f"tally-{run}")' proc-cwd:'    store = Path("/proc/self/cwd") / f"tally-{run}"'; do
+  copy "store-${store%%:*}"
+  plant "$work/store-${store%%:*}/tree/tests/fixtures/tally/.verilex/frame/launch" "$store_line" "${store#*:}"
+  plant "$work/store-${store%%:*}/tree/internal/runner/runner.go" "$cleanup_frame" '[]string{"true"}'
+  expect "store-${store%%:*}" fails "launched its store at"
+done
+
+# The fixture ignores TALLY_STORES and puts its stores in the temp directory.
+copy store-tmpdir
+plant "$work/store-tmpdir/tree/tests/fixtures/tally/.verilex/frame/launch" "$store_line" \
+  '    store = Path(tempfile.gettempdir()) / f"tally-{run}"'
+plant "$work/store-tmpdir/tree/internal/runner/runner.go" "$cleanup_frame" '[]string{"true"}'
+expect store-tmpdir fails "launched its store at"
+
+[ "$failed" -eq 0 ] || { echo "canary-guards: a guard failed; reproduce with scripts/canary-guards"; exit 1; }

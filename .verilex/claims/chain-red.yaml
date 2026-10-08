@@ -1,0 +1,14 @@
+claim: chain-red
+sentence: A broken product gives a red verdict and exit 1.
+entry: [cli]
+evidence:
+  action: "`TALLY_DEFECT=drop-adds verilex run 'store-open | item-stored apple | item-listed apple'` exits `1`; its output starts `red: 1 green, 1 red, 1 not run` and names `item-stored apple: tally said 'added apple' but store.json lacks apple`."
+  observation: "The red run's `02-item-stored/store.json` evidence holds `[]`."
+defects:
+  fail-is-green: {CANARY_DEFECT: fail-is-green}
+sources:
+  - ref: verify-verilex/features/verdicts.md#verdict-red
+    prose: f2c770aad86e
+    requirements:
+      - "`verdict-red` reports red and exits 1 when a word fails with its preconditions held and the doctor still vouches for the instance."
+      - "Output starts `red: 1 green, 1 red, 1 not run`, names `item-stored apple: tally said 'added apple' but store.json lacks apple`, and exit is `1`."

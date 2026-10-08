@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True  # keep the shared words directory, and so its stamp, unchanged
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from canary_word import CHAIN, evidence, fail, instance, result, run_id, said, verilex
+
+done = verilex("action", "run", CHAIN, TALLY_DEFECT="drop-adds")
+named = "item-stored apple: tally said 'added apple' but store.json lacks apple"
+if done.returncode != 1 or not done.stdout.startswith("red: 1 green, 1 red, 1 not run") or named not in done.stdout:
+    fail(f"a broken tally gave exit {done.returncode}, not 1 with `red: 1 green, 1 red, 1 not run` naming {named!r}: {said(done)}")
+store = instance / "home" / "tally" / "runs" / run_id(done) / "02-item-stored" / "store.json"
+held = store.read_text().strip() if store.is_file() else "no file"
+(evidence / "store.json").write_text(held)
+if held != "[]":
+    fail(f"the red run's {store.relative_to(instance)} holds {held}, not []")
+result("pass", observation=f"the red run's {store.relative_to(instance)} evidence holds []")

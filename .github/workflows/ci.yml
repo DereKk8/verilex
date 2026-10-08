@@ -43,10 +43,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the canary builds its driver from a pinned commit and diffs against origin/main
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: scripts/ci test build smoke | tee ci.log
+      - run: scripts/ci test build smoke canary canary-guards | tee ci.log
         shell: bash
       - name: coverage
         if: always()

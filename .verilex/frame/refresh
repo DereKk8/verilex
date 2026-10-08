@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Canary Refresh: every canary run builds a new verilex, so a kept instance is never continued.
+set -euo pipefail
+echo "refresh: the canary does not support --continue" >&2
+exit 2

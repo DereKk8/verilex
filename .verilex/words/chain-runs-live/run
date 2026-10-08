@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True  # keep the shared words directory, and so its stamp, unchanged
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from canary_word import CHAIN, fail, launched, result, run_id, run_line, said, stores, verilex
+
+done = verilex("action", "run", CHAIN)
+if done.returncode == 2:
+    result("blocked", detail=f"the verilex under test was inconclusive: {said(done)}")
+if done.returncode != 0 or "green: 3 green; run " not in done.stdout:
+    fail(f"verilex run exited {done.returncode}, not 0 with `green: 3 green; run`: {said(done)}")
+run = run_id(done)
+line = run_line(run)
+if "green" not in line.split() or "cleanup=done" not in line.split():
+    fail(f"verilex runs does not show {run} green with cleanup=done: {line!r}")
+if run not in launched():
+    fail(f"run {run} was green but its record holds no launched store")
+if stores():
+    fail(f"run {run} was green but left stores behind: {stores()}")
+result("pass", observation=f"verilex runs shows {run} green and cleanup=done; no store is left")

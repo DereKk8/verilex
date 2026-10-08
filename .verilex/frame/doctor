@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Canary Doctor: the instance belongs to this run, and its verilex build and tally copy answer.
+set -euo pipefail
+inst="$(python3 -c 'import json, os; print(json.loads(os.environ["VERILEX_INSTANCE"])["dir"])')"
+[ "$(cat "$inst/owner" 2>/dev/null)" = "$VERILEX_RUN" ] || { echo "doctor: $inst is not owned by run $VERILEX_RUN" >&2; exit 1; }
+"$inst/bin/verilex" --help >/dev/null
+[ -x "$inst/tally/bin/tally" ] || { echo "doctor: no tally in $inst" >&2; exit 1; }
+echo "doctor: ok $inst"

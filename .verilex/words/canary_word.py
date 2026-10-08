@@ -43,16 +43,18 @@ def stores() -> list:
 
 
 def launched() -> dict:
-    """The store each inner run's launch reported, by run id, read from the inner run's own record."""
-    runs_dir = instance / "home" / "tally" / "runs"
-    return {out.parent.parent.name: Path(json.loads(out.read_text())["instance"]["store"])
-            for out in sorted(runs_dir.glob("*/frame-launch/stdout"))}
-
-
-def left_behind() -> list:
-    """Stores still on disk: every store an inner launch reported, wherever it put it, and any under TALLY_STORES."""
-    return sorted({str(store) for store in launched().values() if store.exists()}
-                  | {str(instance / "stores" / name) for name in stores()})
+    """The store each inner run's launch reported, by run id, read from the inner run's own record. A reported
+    path is resolved to an absolute one first, from the product's directory where the launch ran, and must then
+    sit directly under TALLY_STORES, so `stores()` sees whatever cleanup left behind."""
+    root = (instance / "stores").resolve()
+    found = {}
+    for out in sorted((instance / "home" / "tally" / "runs").glob("*/frame-launch/stdout")):
+        run, reported = out.parent.parent.name, json.loads(out.read_text())["instance"]["store"]
+        store = (instance / "tally" / reported).resolve()  # an absolute reported path replaces the base
+        if store.parent != root:
+            fail(f"run {run} launched its store at {reported} ({store}), not directly under TALLY_STORES {root}")
+        found[run] = store
+    return found
 
 
 def runs() -> list:

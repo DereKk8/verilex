@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True  # keep the shared words directory, and so its stamp, unchanged
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from canary_word import CHAIN, fail, launched, left_behind, must, result, run_id, run_line, said, verilex
+from canary_word import CHAIN, fail, launched, must, result, run_id, run_line, said, stores, verilex
 
 # Two counted uses, onboarding of every tally word, then the first (live) run after admission.
 must("use-1", "run", CHAIN)
@@ -21,6 +21,6 @@ if "cleanup=none" not in line.split():
     fail(f"verilex runs does not show {skipped} with cleanup=none: {line!r}")
 if skipped in launched():
     fail(f"the skipped run {skipped} launched a store: {launched()[skipped]}")
-if left_behind():
-    fail(f"the skipped run {skipped} left stores behind: {left_behind()}")
+if stores():
+    fail(f"the skipped run {skipped} left stores behind: {stores()}")
 result("pass", observation=f"verilex runs shows {skipped} with cleanup=none, and no store exists")

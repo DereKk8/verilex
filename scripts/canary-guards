@@ -62,7 +62,9 @@ expect clean passes "check: no drift ($(find .verilex/words -mindepth 2 -maxdept
 # A tag named origin/main points at a driver commit whose Red exits 0; the pin names that commit.
 copy tag-origin-main
 (
-  export GIT_DIR="$work/tag-origin-main/git" GIT_INDEX_FILE="$work/tag-origin-main/index"
+  export GIT_DIR="$work/tag-origin-main/git" GIT_INDEX_FILE="$work/tag-origin-main/index" \
+    GIT_AUTHOR_NAME=canary-guards GIT_AUTHOR_EMAIL=canary-guards@localhost \
+    GIT_COMMITTER_NAME=canary-guards GIT_COMMITTER_EMAIL=canary-guards@localhost
   git read-tree "$driver"
   git show "$driver:internal/verdict/verdict.go" > "$work/verdict.go"
   plant "$work/verdict.go" $'case Red:\n\t\treturn 1' $'case Red:\n\t\treturn 0'

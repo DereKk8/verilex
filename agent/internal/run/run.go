@@ -32,6 +32,18 @@ type Options struct {
 	Suggest, AllowHarness, JSON, KeepWork  bool
 }
 
+// A Timer starts a run's time budget. The context it returns ends with context.DeadlineExceeded
+// when the budget ends, and never for a zero budget. Run takes the timer from its caller.
+type Timer func(budget time.Duration) (context.Context, context.CancelFunc)
+
+// WallClock is the launcher's Timer: the budget ends once that much wall-clock time has passed.
+func WallClock(budget time.Duration) (context.Context, context.CancelFunc) {
+	if budget <= 0 {
+		return context.WithCancel(context.Background())
+	}
+	return context.WithTimeout(context.Background(), budget)
+}
+
 // Result is what the command prints. Stdout is verilex's document, never the brain's message.
 // Work is the run's directory when KeepWork kept it, also when the run returns an error.
 type Result struct {
@@ -101,7 +113,8 @@ func newDirs() (dirs, error) {
 
 // Run resolves the spec through the verilex CLI, starts the brain in the sandbox, and returns
 // verilex's verdict. It applies rows 1-8 of README "Verdict rule", and verdict.Decide the rest.
-func Run(opts Options) (result Result, err error) {
+// timer starts the spec's time budget, and the launcher passes WallClock.
+func Run(opts Options, timer Timer) (result Result, err error) {
 	project, err := abs(opts.Project)
 	if err != nil {
 		return Result{}, err
@@ -151,10 +164,7 @@ func Run(opts Options) (result Result, err error) {
 		return Result{}, fmt.Errorf("time_budget: %v", err)
 	}
 	// One deadline covers the intent lookup and both brain phases, so none can stretch the budget.
-	ctx, cancel := context.WithCancel(context.Background())
-	if budget > 0 {
-		ctx, cancel = context.WithTimeout(context.Background(), budget)
-	}
+	ctx, cancel := timer(budget)
 	defer cancel()
 	named, err := floor(ctx, verilex, project, spec.Intent, opts.Claims)
 	if err != nil {

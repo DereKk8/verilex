@@ -179,58 +179,64 @@ var verdictRule = []rule{
 	},
 	{
 		name: "14 a red, then the time budget ends (F4)", ticket: ticket(apple, "2s"), plan: []string{"hide-lists"},
-		brain:  "verilex run --claim item-listed > \"$HOME/1\"\nsleep 30\n",
-		within: 8 * time.Second,
-		exit:   1, stdout: "1",
+		brain:     "verilex run --claim item-listed > \"$HOME/1\"\ntouch \"$HOME/ran\"\nsleep 30\n",
+		endsAfter: "ran", within: 8 * time.Second,
+		exit: 1, stdout: "1",
 	},
 	{
 		name: "15 a green, then the time budget ends (F4)", ticket: ticket(apple, "2s"),
-		brain:  "verilex run --claim item-listed > \"$HOME/1\"\nsleep 30\n",
-		within: 8 * time.Second,
-		exit:   2, stderr: []string{"inconclusive: the time budget ended before the brain finished"},
+		brain:     "verilex run --claim item-listed > \"$HOME/1\"\ntouch \"$HOME/ran\"\nsleep 30\n",
+		endsAfter: "ran", within: 8 * time.Second,
+		exit: 2, stderr: []string{"inconclusive: the time budget ended before the brain finished\n"}, check: verdictOf("1", "green"),
 	},
 	{
-		name: "16 no run, only a refused run and a plan", spec: intent(store),
+		// The wall clock ends this budget: the sandbox tool never answers, so the brain never starts.
+		name: "16 the time budget ends before the brain starts (F4)", ticket: "diff: HEAD\nharness: stub\nmodel: stub\ntime_budget: 1s\n", neverStarts: true,
+		setup: fakeSandboxTool("#!/bin/sh\nexec sleep 30\n"),
+		exit:  2, stderr: []string{"inconclusive: the time budget ended before the brain finished\n"},
+	},
+	{
+		name: "17 no run, only a refused run and a plan", spec: intent(store),
 		brain: "printf '%s\\n' green\nverilex run --keep --claim store-opened 2> /dev/null\nverilex plan --claim store-opened > /dev/null\n",
 		exit:  2, stderr: []string{"inconclusive: the brain " + noRun},
 	},
 	{
-		name: "17 a chain alone is refused (F10)", spec: intent(store),
+		name: "18 a chain alone is refused (F10)", spec: intent(store),
 		brain: "verilex run '" + dupChain + "' > \"$HOME/1\" 2>> \"$HOME/refused\"\n",
 		exit:  2, refused: 1, stderr: []string{"inconclusive: brain exited: exit status 2, and " + noRun},
 	},
 	{
-		name: "18 a chain on other inputs is refused, so the claim plan keeps the admitted inputs (F9, F11)", spec: intent(apple), plan: []string{"hide-apple", "hide-apple"},
+		name: "19 a chain on other inputs is refused, so the claim plan keeps the admitted inputs (F9, F11)", spec: intent(apple), plan: []string{"hide-apple", "hide-apple"},
 		brain: "verilex run --changed bin/tally '" + pearChain + "' > \"$HOME/1\" 2>> \"$HOME/refused\"\nverilex run --claim item-listed > \"$HOME/2\"\n",
 		exit:  1, stdout: "2", refused: 1, check: listedApple("2"),
 	},
 	{
-		name: "19 the same with --fresh (F11)", spec: intent(apple), plan: []string{"hide-apple", "hide-apple"},
+		name: "20 the same with --fresh (F11)", spec: intent(apple), plan: []string{"hide-apple", "hide-apple"},
 		brain: "verilex run '" + pearChain + "' > \"$HOME/1\" 2>> \"$HOME/refused\"\nverilex run --fresh --claim item-listed > \"$HOME/2\"\n",
 		exit:  1, stdout: "2", refused: 1, check: listedApple("2"),
 	},
 	{
-		name: "20 a green, then an inconclusive, last", spec: intent(apple), plan: []string{"", "lock"},
+		name: "21 a green, then an inconclusive, last", spec: intent(apple), plan: []string{"", "lock"},
 		brain: "verilex run --claim item-listed > \"$HOME/1\"\nverilex run --claim item-listed > \"$HOME/2\"\n",
 		exit:  2, stdout: "2", check: verdictOf("1", "green"),
 	},
 	{
-		name: "21 a chain is refused, then a green covers the spec (F7)", spec: intent(store),
+		name: "22 a chain is refused, then a green covers the spec (F7)", spec: intent(store),
 		brain: "verilex run '" + dupChain + "' > \"$HOME/1\" 2>> \"$HOME/refused\"\nverilex run --claim store-opened > \"$HOME/2\"\n",
 		exit:  0, stdout: "2", refused: 1,
 	},
 	{
-		name: "22 a green covers the spec, then a chain is refused (F10)", spec: intent(store),
+		name: "23 a green covers the spec, then a chain is refused (F10)", spec: intent(store),
 		brain: "verilex run --claim store-opened > \"$HOME/1\"\nverilex run '" + dupChain + "' > \"$HOME/2\" 2>> \"$HOME/refused\"\n",
 		exit:  0, stdout: "1", refused: 1,
 	},
 	{
-		name: "23 an inconclusive, then a green that proves its claims", spec: intent(apple), plan: []string{"lock", ""},
+		name: "24 an inconclusive, then a green that proves its claims", spec: intent(apple), plan: []string{"lock", ""},
 		brain: "verilex run --claim item-listed > \"$HOME/1\"\nverilex run --claim item-listed > \"$HOME/2\"\n",
 		exit:  0, stdout: "2", check: verdictOf("1", "inconclusive"),
 	},
 	{
-		name: "24 an inconclusive, then a narrower green", spec: intent(store),
+		name: "25 an inconclusive, then a narrower green", spec: intent(store),
 		fake: []fakeRun{
 			{claimDoc("inconclusive", "r1", []string{"item-listed"}, []string{"store-opened", "item-added", "item-listed"}), 2},
 			{claimDoc("green", "r2", []string{"store-opened"}, []string{"store-opened"}), 0},
@@ -239,7 +245,7 @@ var verdictRule = []rule{
 		exit:  2, stderr: []string{"inconclusive: run r2 is green but did not prove item-listed, item-added, which run r1 left inconclusive"},
 	},
 	{
-		name: "25 a green that covers the spec", spec: intent(apple),
+		name: "26 a green that covers the spec", spec: intent(apple),
 		brain: "cp \"$VERILEX_AGENT_PROMPT\" \"$HOME/prompt\"\nverilex run --claim item-listed > \"$HOME/1\"\n",
 		exit:  0, stdout: "1",
 		check: func(t *testing.T, r *ruleRun, got kept) {
@@ -249,37 +255,37 @@ var verdictRule = []rule{
 		},
 	},
 	{
-		name: "26 a green below the intent's floor", spec: intent(apple),
+		name: "27 a green below the intent's floor", spec: intent(apple),
 		brain: "verilex run --claim item-listed > \"$HOME/1\"\nverilex run --claim store-opened > \"$HOME/2\"\n",
 		exit:  2, stderr: []string{"is green but was not asked about claim item-listed, claim item-added"},
 	},
 	{
-		name: "27 a green below the --claim floor", spec: append(intent(store), "--claim", "item-listed"),
+		name: "28 a green below the --claim floor", spec: append(intent(store), "--claim", "item-listed"),
 		brain: "verilex run --claim store-opened > \"$HOME/1\"\n",
 		exit:  2, stderr: []string{"is green but was not asked about claim item-listed"},
 	},
 	{
-		name: "28 the intent names no claim, and --claim stands for it", spec: append(intent(nothing), "--claim", "store-opened"),
+		name: "29 the intent names no claim, and --claim stands for it", spec: append(intent(nothing), "--claim", "store-opened"),
 		brain: "verilex run --claim store-opened > \"$HOME/1\"\n",
 		exit:  0, stdout: "1",
 	},
 	{
-		name: "29 a green not asked about the diff", spec: diff(),
+		name: "30 a green not asked about the diff", spec: diff(),
 		brain: "verilex run --claim store-opened > \"$HOME/1\"\n",
 		exit:  2, stderr: []string{"is green but was not asked about change bin/tally"},
 	},
 	{
-		name: "30 a green on the diff that proves every touched claim", spec: diff(),
+		name: "31 a green on the diff that proves every touched claim", spec: diff(),
 		brain: "verilex run --changed bin/tally > \"$HOME/1\"\n",
 		exit:  0, stdout: "1", check: warning(""),
 	},
 	{
-		name: "31 a green on the diff, with verilex's warning", spec: diff(),
+		name: "32 a green on the diff, with verilex's warning", spec: diff(),
 		brain: "verilex run --claim store-opened --changed bin/tally > \"$HOME/1\"\n",
 		exit:  0, stdout: "1", check: warning("2 touched claims not covered"),
 	},
 	{
-		name: "32 a green on a diff with a rename and a non-ASCII name (F3)", spec: append(intent(store), "--diff", "HEAD"),
+		name: "33 a green on a diff with a rename and a non-ASCII name (F3)", spec: append(intent(store), "--diff", "HEAD"),
 		setup: renamedProduct,
 		brain: "cp \"$VERILEX_AGENT_PROMPT\" \"$HOME/prompt\"\nset --\n" +
 			"for path in $(sed -n 's/^changed: //p' \"$VERILEX_AGENT_PROMPT\"); do set -- \"$@\" --changed \"$path\"; done\n" +
@@ -327,8 +333,14 @@ type rule struct {
 	neverStarts bool
 	// setup prepares the row; during runs while the brain holds, before its first run.
 	setup, during func(t *testing.T, r *ruleRun)
-	within        time.Duration
-	exit          int
+	// endsAfter is the file the brain touches in its home once its runs are done. The row then runs
+	// the launcher in this process with a timer that the test ends only after that file appears,
+	// so the budget ends after the brain's runs however long the launcher takes to set up.
+	endsAfter string
+	// within bounds how long the launcher takes: from its start, or with endsAfter, from the end
+	// of the budget.
+	within time.Duration
+	exit   int
 	// stdout names the file in the brain's home that holds the launcher's stdout; "" is none.
 	stdout string
 	stderr []string
@@ -373,11 +385,22 @@ func (row rule) run(t *testing.T, product string) {
 	args = append(args, row.spec...)
 	start := time.Now()
 	var got kept
-	if row.during != nil {
+	switch {
+	case row.during != nil:
 		held := launchHeldEnv(t, r.dir, verilex, brain, r.env, args...)
 		row.during(t, r)
 		got = held.release(t)
-	} else {
+	case row.endsAfter != "":
+		var timer *testTimer
+		got, timer = launchTimed(t, r.dir, verilex, brain, r.env, row.endsAfter, args...)
+		if want := ticketBudget(t, row.ticket); !timer.started || timer.budget != want {
+			t.Fatalf("the launcher started the budget timer: %v, with %s, want %s\nstderr: %s", timer.started, timer.budget, want, got.stderr)
+		}
+		if timer.ended.IsZero() {
+			t.Fatalf("the brain never touched %s, so the test never ended the budget\nexit %d\nstdout: %s\nstderr: %s", row.endsAfter, got.code, got.stdout, got.stderr)
+		}
+		start = timer.ended
+	default:
 		got = launchKeptEnv(t, r.dir, verilex, brain, r.env, args...)
 	}
 	if row.within > 0 && time.Since(start) > row.within {
@@ -461,6 +484,18 @@ func diff() []string { return []string{"--diff", "HEAD"} }
 
 func ticket(intent, budget string) string {
 	return "intent: " + intent + "\nharness: stub\nmodel: stub\ntime_budget: " + budget + "\n"
+}
+
+// ticketBudget is the time_budget a row's ticket gives.
+func ticketBudget(t *testing.T, text string) time.Duration {
+	t.Helper()
+	_, rest, _ := strings.Cut(text, "time_budget: ")
+	value, _, _ := strings.Cut(rest, "\n")
+	budget, err := time.ParseDuration(value)
+	if err != nil {
+		t.Fatalf("ticket time_budget %q: %v", value, err)
+	}
+	return budget
 }
 
 // fakeSandboxTool puts body first on PATH as the sandbox tool.

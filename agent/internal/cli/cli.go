@@ -19,8 +19,9 @@ verilex-agent launches the brain named by the run spec, hands it the verilex ski
 Every verilex run and plan of the brain gets --no-chain, so verilex refuses a chain the brain wrote. A green that does not cover the named claims and the diff, or no verilex run at all, is inconclusive (exit 2).
 `
 
-// Main runs one launcher invocation.
-func Main(argv []string, stdout, stderr io.Writer) int {
+// Main runs one launcher invocation. timer starts the run's time budget, and the launcher passes
+// run.WallClock.
+func Main(argv []string, stdout, stderr io.Writer, timer run.Timer) int {
 	if len(argv) > 0 && argv[0] == "relay" {
 		return relay(argv[1:], stdout, stderr)
 	}
@@ -37,7 +38,7 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "verilex-agent: error: %v\n", err)
 		return 2
 	}
-	result, err := run.Run(opts)
+	result, err := run.Run(opts, timer)
 	if result.Work != "" {
 		defer fmt.Fprintf(stderr, "verilex-agent: run files kept in %s\n", result.Work)
 	}

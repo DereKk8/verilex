@@ -1,6 +1,7 @@
 package e2e_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -10,10 +11,13 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/DereKk8/verilex/agent/internal/cli"
 	"github.com/DereKk8/verilex/agent/internal/prompt"
+	agentrun "github.com/DereKk8/verilex/agent/internal/run"
 )
 
 var (
@@ -23,6 +27,11 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	// A launcher that a test runs in this process (launchTimed) starts this binary as its sandbox
+	// helper and as the brain's verilex relay, as the shipped launcher starts itself.
+	if len(os.Args) > 1 && (os.Args[1] == "sandbox-init" || os.Args[1] == "relay") {
+		os.Exit(cli.Main(os.Args[1:], os.Stdout, os.Stderr, agentrun.WallClock))
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -596,6 +605,88 @@ func (h held) release(t *testing.T) kept {
 	run := <-h.done
 	run.root = h.root
 	return run
+}
+
+// testTimer is an agentrun.Timer that the test ends itself, never the wall clock. Like the context
+// of agentrun.WallClock when the budget runs out, its context then ends with context.DeadlineExceeded.
+type testTimer struct {
+	done chan struct{}
+	once sync.Once
+	// budget is what the launcher started the timer with, and ended is when the test ended it.
+	budget  time.Duration
+	started bool
+	ended   time.Time
+}
+
+func newTestTimer() *testTimer { return &testTimer{done: make(chan struct{})} }
+
+// start is the agentrun.Timer. The launcher's own cancel also ends the budget, as WallClock's does.
+func (tt *testTimer) start(budget time.Duration) (context.Context, context.CancelFunc) {
+	tt.budget, tt.started = budget, true
+	return timerContext{tt.done}, tt.stop
+}
+
+func (tt *testTimer) stop() { tt.once.Do(func() { close(tt.done) }) }
+
+// timerContext is the testTimer's context: no deadline and no values, and DeadlineExceeded once
+// the test ends the budget.
+type timerContext struct{ done chan struct{} }
+
+func (c timerContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c timerContext) Done() <-chan struct{}       { return c.done }
+func (c timerContext) Value(any) any               { return nil }
+func (c timerContext) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+// launchTimed runs the launcher in this process, with --keep-work, env set for the run, and a
+// testTimer that the test ends once the brain has touched marker in its home. So "the brain's run,
+// then the end of the budget" happens in that order however long the launcher takes to set up.
+func launchTimed(t *testing.T, dir, verilex, brain string, env []string, marker string, args ...string) (kept, *testTimer) {
+	t.Helper()
+	tmp := runTemp(t)
+	for _, entry := range append([]string{"TMPDIR=" + tmp}, env...) {
+		key, value, _ := strings.Cut(entry, "=")
+		t.Setenv(key, value)
+	}
+	argv, err := launcherArgs(dir, verilex, brain, append(args, "--keep-work")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	timer := newTestTimer()
+	returned := make(chan struct{})
+	var watch sync.WaitGroup
+	watch.Add(1)
+	go func() {
+		defer watch.Done()
+		for {
+			select {
+			case <-returned:
+				return
+			default:
+			}
+			if matches, _ := filepath.Glob(filepath.Join(tmp, "verilex-agent-*", "brain", "home", marker)); len(matches) == 1 {
+				timer.ended = time.Now()
+				timer.stop()
+				return
+			}
+			select {
+			case <-returned:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}()
+	var stdout, stderr strings.Builder
+	code := cli.Main(argv, &stdout, &stderr, timer.start)
+	close(returned)
+	watch.Wait()
+	return kept{stdout: stdout.String(), stderr: stderr.String(), code: code, root: runRoot(t, tmp)}, timer
 }
 
 // runTemp is a short TMPDIR for one launcher run: its run directory lands there.

@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "summary": "The docs explain how verilex works instead of how it was built, the site draws real diagrams, and table cells no longer clip long commands.",
+  "files": [
+    {
+      "path": "site/web/diagram.js",
+      "summary": "Draws `tree` and `flow` fenced blocks as themed HTML.",
+      "annotations": [
+        {
+          "newRange": [1, 102],
+          "summary": "diagram.js renders tree and flow fences with the site's own tokens, so diagrams follow the dark and light themes.",
+          "rationale": "The docs server serves only the page bundle and web/, so an image file in docs/ would need Go changes. A fence keeps the source readable as plain text on GitHub. Verified in headless Chromium at 1440 and 390 px wide, in both themes, and in a static build opened from disk. The Ask panel renders the same fences if a model quotes one; that path is not exercised.",
+          "author": "fm/verilex-docs-prune"
+        }
+      ]
+    },
+    {
+      "path": "site/web/md.js",
+      "summary": "Hands diagram fences to diagram.js and splits commands in table cells into unbreakable groups.",
+      "annotations": [
+        {
+          "newRange": [85, 110],
+          "summary": "codeSpan wraps each word or bracketed group of a multi-word code span in a table cell in a nowrap span.",
+          "rationale": "The old rule kept every first-column code span on one line, so the 1,000 px claim-run command pushed the Does column off screen and made rows tall and empty. A cell now wraps only between groups such as `[--named <claim> ...]`, and copied text is unchanged because the spaces stay. Checked on every page at 1440, 1280, 1100 and 390 px with a scrollWidth audit.",
+          "author": "fm/verilex-docs-prune"
+        }
+      ]
+    },
+    {
+      "path": "site/web/app.css",
+      "summary": "Styles the diagrams and fixes table sizing.",
+      "annotations": [
+        {
+          "newRange": [457, 459],
+          "summary": "Wide tables shrink to 640 px minimum with wrapping headers and tighter cell padding.",
+          "rationale": "At 860 px minimum with nowrap headers, the ledger tables hid their last columns at a 1440 px desktop. They now fit at 1100 px and wider. Between 900 and 1000 px, and on phones, they still scroll inside their box.",
+          "author": "fm/verilex-docs-prune"
+        },
+        {
+          "newRange": [1289, 1297],
+          "summary": "On a phone, a two-column table stacks each row and a tree note moves under its name.",
+          "rationale": "The stacking selector uses :has(), so a browser without :has() keeps the side-by-side layout, which still wraps and does not clip.",
+          "author": "fm/verilex-docs-prune"
+        }
+      ]
+    },
+    {
+      "path": "docs/onboarding.md",
+      "summary": "The onboarding checks become a flow diagram.",
+      "annotations": [
+        {
+          "newRange": [13, 24],
+          "summary": "The flow keeps the ASCII diagram's order and its undecided branch, named after the numbered checks below it.",
+          "rationale": "The order matches Onboard and decide in internal/onboarding/onboarding.go: uses, mapping, non-proofs, candidates, trials (4 in parallel), gate, behavioral check, then the grouping file for onboarded or undecided words.",
+          "author": "fm/verilex-docs-prune"
+        }
+      ]
+    },
+    {
+      "path": "docs/ledger-placement.md",
+      "summary": "The ledger page reads as a design explanation, not a decision record.",
+      "annotations": [
+        {
+          "newRange": [3, 3],
+          "summary": "The Linear id, the date and the issue framing are gone; the measurements stay.",
+          "rationale": "docs/ledger-placement/measure still compares HEAD with its merge base on origin/main, so on main it no longer rebuilds the single-file baseline. The script is left unchanged and reported.",
+          "author": "fm/verilex-docs-prune"
+        }
+      ]
+    }
+  ]
+}

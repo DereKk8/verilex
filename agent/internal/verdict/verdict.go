@@ -1,4 +1,4 @@
-// Package verdict owns the launcher's verdict rule, README "Verdict rule": it reads the JSON
+// Package verdict owns the launcher's verdict rule, docs/verdict-rule.md: it reads the JSON
 // every verilex run printed and decides which one the launcher returns. It never invents a
 // verdict.
 package verdict
@@ -118,7 +118,7 @@ func Exit(doc Doc, verilexExit int) (int, error) {
 	return want, nil
 }
 
-// Decide is the verdict rule, rows 9-33 of README "Verdict rule"; prompt.Rule states it to the
+// Decide is the verdict rule, rows 9-33 of docs/verdict-rule.md; prompt.Rule states it to the
 // brain. It turns every run the brain made, in the order the runs finished, into the verdict the
 // launcher returns and its exit code; an error is the reason there is none. unfinished is why the
 // brain did not finish, such as an ended time budget, or nil. The proxy passes --no-chain to every

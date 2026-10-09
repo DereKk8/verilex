@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# The docs site: serve docs/ with search and Ask, build it as static files, or check the docs.
+# usage: scripts/docs [serve|build|check] [flags]     (scripts/docs serve -h lists the flags)
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+bin="${XDG_CACHE_HOME:-$HOME/.cache}/verilex/docs"
+# site/ is a module of its own, outside go.work, so the verilex core keeps no dependencies.
+GOWORK=off go -C "$root/site" build -o "$bin" .
+exec "$bin" "$@" -root "$root"

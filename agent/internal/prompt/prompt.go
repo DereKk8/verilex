@@ -59,7 +59,7 @@ func shared(in Input) string {
 	return b.String()
 }
 
-// Rule is README "Verdict rule" as the brain reads it: how the launcher turns the brain's verilex
+// Rule is docs/verdict-rule.md as the brain reads it: how the launcher turns the brain's verilex
 // runs into one result. verdict.Decide implements it, so change the three together.
 const Rule = "The launcher returns verilex's own JSON verdict and ignores your message. It adds --no-chain to every verilex run and plan, so verilex refuses any chain argument, an empty one too: run only planned commands, with --claim, --named and --changed. The first case that applies decides:\n" +
 	"1. A run whose exit code disagrees with its JSON, or that verilex did not plan: inconclusive.\n" +

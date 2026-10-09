@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>verilex docs</title>
+<meta name="description" content="verilex runs product verification as a chain of words, Unix-pipe style. Docs with instant search and answers grounded in them.">
+<meta name="theme-color" content="#06080c">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Martian+Mono:wdth,wght@87.5..112.5,400..700&display=swap">
+<link rel="stylesheet" href="app.css">
+<script src="theme.js"></script>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+
+<header class="topbar">
+  <button class="icon-btn menu-btn" id="menu" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+  </button>
+  <a class="brand" href="#/" aria-label="verilex docs home">
+    <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <rect x="1" y="1" width="30" height="30" rx="9" style="fill:var(--panel);stroke:var(--line-2)"/>
+      <path d="M7 16h18" stroke-width="2" stroke-linecap="round" style="stroke:var(--line-2)"/>
+      <path class="pulse" d="M7 16h18" stroke-width="2" stroke-linecap="round" style="stroke:var(--signal)"/>
+      <circle cx="8" cy="16" r="2.6" style="fill:var(--green)"/>
+      <circle cx="16" cy="16" r="2.6" style="fill:var(--signal)"/>
+      <circle cx="24" cy="16" r="2.6" style="fill:var(--ink)"/>
+      <path d="M12 9.5v13M20 9.5v13" stroke-width="1.6" stroke-linecap="round" opacity=".55" style="stroke:var(--signal)"/>
+    </svg>
+    verilex<span class="brand-tag">docs</span>
+  </a>
+  <button class="searchbox" id="open-search" type="button" aria-label="Search the docs">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span>Search the docs</span><kbd id="kbd-k">⌘K</kbd>
+  </button>
+  <div class="actions">
+    <button class="ask-btn" id="open-ask" type="button" aria-label="Ask the docs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
+      <span>Ask</span><kbd id="kbd-i">⌘I</kbd>
+    </button>
+    <button class="icon-btn" id="theme" type="button" aria-label="Theme: system">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/></svg>
+    </button>
+    <a class="icon-btn" id="repo" href="https://github.com/DereKk8/verilex" target="_blank" rel="noopener" aria-label="verilex on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.46-1.16-1.11-1.47-1.11-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02a9.56 9.56 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z"/></svg>
+    </a>
+  </div>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell" id="shell">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"></nav>
+  <main id="main" tabindex="-1"></main>
+  <aside class="toc" id="toc" aria-label="On this page"></aside>
+</div>
+
+<div class="nav-scrim" aria-hidden="true"></div>
+<div id="palette-root"></div>
+<aside class="ask" id="ask" aria-label="Ask the docs" aria-hidden="true"></aside>
+<div id="toast-root" aria-live="polite"></div>
+
+<script src="docs-data.js"></script>
+<script src="md.js"></script>
+<script src="search.js"></script>
+<script src="ask.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

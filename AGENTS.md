@@ -8,5 +8,5 @@
 6. Go core; words in any language.
 7. No harness machinery inside the verilex core; harness code lives only in agent/. Resuming a run comes from stamps, the ledger and a kept instance's history.
 
-Entrypoint: `cmd/verilex/main.go`. Word contract: README.md, "Adding verilex to a project".
+Entrypoint: `cmd/verilex/main.go`. Word contract: docs/adding-verilex.md. Documentation map: docs/README.md.
 Behavior tests: `go test ./...`.

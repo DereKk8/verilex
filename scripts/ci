@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The blocking checks. CI calls each step; run with no argument to run them all.
-# usage: scripts/ci [lint|mod|vuln|test|build|smoke|boundary|canary|canary-guards ...]
+# usage: scripts/ci [lint|mod|vuln|test|build|smoke|boundary|site|canary|canary-guards ...]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -10,7 +10,7 @@ lint() {
   go vet ./...
   go tool staticcheck ./...
   go tool actionlint
-  shellcheck .cursor/skills/verify-verilex/scripts/* .verilex/frame/* scripts/ci scripts/canary-guards scripts/smoke
+  shellcheck .cursor/skills/verify-verilex/scripts/* .verilex/frame/* scripts/ci scripts/canary-guards scripts/smoke scripts/docs
   go vet ./agent/...
   go tool staticcheck ./agent/...
 }
@@ -18,9 +18,31 @@ mod() {
   go mod verify
   go mod tidy -diff || { echo "go.mod or go.sum is stale (run go mod tidy)"; return 1; }
   (cd agent && go mod tidy -diff) || { echo "agent/go.mod is stale (run go mod tidy in agent)"; return 1; }
+  (cd site && GOWORK=off go mod verify && GOWORK=off go mod tidy -diff) ||
+    { echo "site/go.mod is stale (run GOWORK=off go mod tidy in site)"; return 1; }
 }
 boundary() { go run scripts/boundary.go; }
-vuln() { go tool govulncheck ./...; }
+vuln() {
+  go tool govulncheck ./...
+  # site/ keeps its own dependencies, outside go.work; the same govulncheck checks them.
+  tools="$(mktemp -d)"
+  go build -o "$tools" golang.org/x/vuln/cmd/govulncheck
+  (cd site && GOWORK=off "$tools/govulncheck" ./...)
+}
+# The docs web app: a module of its own, outside go.work, so the core and the launcher keep no
+# dependencies. Vetted with the core's staticcheck, tested, and every docs link and anchor checked.
+site() {
+  tools="$(mktemp -d)"
+  go build -o "$tools" honnef.co/go/tools/cmd/staticcheck
+  (
+    cd site
+    export GOWORK=off
+    go vet ./...
+    "$tools/staticcheck" ./...
+    go test -race ./...
+    go run . check -root ..
+  )
+}
 test_() {
   # tests/ builds verilex itself; the instrumented binary writes coverage to GOCOVERDIR, which go test would override
   cover="${COVER_OUT:-$(mktemp -d)}"
@@ -84,11 +106,11 @@ canary() (
   return 1
 )
 
-steps=("$@"); [ $# -gt 0 ] || steps=(lint mod vuln test build smoke boundary canary canary-guards)
+steps=("$@"); [ $# -gt 0 ] || steps=(lint mod vuln test build smoke boundary site canary canary-guards)
 for step in "${steps[@]}"; do
   echo "== $step"
   case "$step" in
-    lint|mod|vuln|build|smoke|boundary|canary) "$step" ;;
+    lint|mod|vuln|build|smoke|boundary|site|canary) "$step" ;;
     test) test_ ;;
     canary-guards) scripts/canary-guards ;;
     *) echo "unknown step: $step" >&2; exit 2 ;;

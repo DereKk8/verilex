@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// TestVerdictRule checks README "Verdict rule" row by row: subtest NN is row NN, with that row's
+// TestVerdictRule checks docs/verdict-rule.md row by row: subtest NN is row NN, with that row's
 // spec, the brain's runs and the verdict. Change the two together.
 func TestVerdictRule(t *testing.T) {
 	_, product, _ := changedProduct(t)
@@ -21,17 +21,15 @@ func TestVerdictRule(t *testing.T) {
 	}
 }
 
-// The README table and verdictRule hold the same rows in the same order, with the same verdict,
+// The docs table and verdictRule hold the same rows in the same order, with the same verdict,
 // exit and printed run, so neither can change alone.
-func TestVerdictRuleMatchesREADME(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(repo, "README.md"))
+func TestVerdictRuleMatchesDocs(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repo, "docs", "verdict-rule.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, section, _ := strings.Cut(string(data), "\n### Verdict rule\n")
-	section, _, _ = strings.Cut(section, "\n### ")
 	var table [][]string
-	for _, line := range strings.Split(section, "\n") {
+	for _, line := range strings.Split(string(data), "\n") {
 		// An escaped pipe is part of a chain inside a cell.
 		cells := strings.Split(strings.ReplaceAll(line, `\|`, ""), " | ")
 		if strings.HasPrefix(line, "| ") && cells[0] != "| #" {
@@ -39,19 +37,19 @@ func TestVerdictRuleMatchesREADME(t *testing.T) {
 		}
 	}
 	if len(table) != len(verdictRule) {
-		t.Fatalf("README has %d rows, verdictRule %d", len(table), len(verdictRule))
+		t.Fatalf("docs/verdict-rule.md has %d rows, verdictRule %d", len(table), len(verdictRule))
 	}
 	for i, row := range verdictRule {
 		cells := table[i]
 		if len(cells) != 6 {
-			t.Fatalf("README row %d has %d cells, want 6: %q", i+1, len(cells), cells)
+			t.Fatalf("docs/verdict-rule.md row %d has %d cells, want 6: %q", i+1, len(cells), cells)
 		}
 		verdict := []string{"green", "red", "inconclusive"}[row.exit] + ", no JSON"
 		if row.stdout != "" {
 			verdict = []string{"green", "red", "inconclusive"}[row.exit] + ", run " + row.stdout
 		}
 		if !strings.HasPrefix(row.name, fmt.Sprintf("%02d ", i+1)) || cells[0] != fmt.Sprintf("| %d", i+1) || cells[3] != verdict || cells[4] != fmt.Sprint(row.exit) {
-			t.Errorf("row %d: README %q, test %q with %q and exit %d", i+1, strings.Join(cells, " | "), row.name, verdict, row.exit)
+			t.Errorf("row %d: docs %q, test %q with %q and exit %d", i+1, strings.Join(cells, " | "), row.name, verdict, row.exit)
 		}
 	}
 }
@@ -313,7 +311,7 @@ var verdictRule = []rule{
 	},
 }
 
-// rule is one row of README "Verdict rule".
+// rule is one row of docs/verdict-rule.md.
 type rule struct {
 	name string
 	// spec is the launcher's run spec flags; ticket is a ticket file used instead, for a time budget.

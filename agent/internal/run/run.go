@@ -112,7 +112,7 @@ func newDirs() (dirs, error) {
 }
 
 // Run resolves the spec through the verilex CLI, starts the brain in the sandbox, and returns
-// verilex's verdict. It applies rows 1-8 of README "Verdict rule", and verdict.Decide the rest.
+// verilex's verdict. It applies rows 1-8 of docs/verdict-rule.md, and verdict.Decide the rest.
 // timer starts the spec's time budget, and the launcher passes WallClock.
 func Run(opts Options, timer Timer) (result Result, err error) {
 	project, err := abs(opts.Project)

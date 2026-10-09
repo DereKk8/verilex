@@ -1,5 +1,6 @@
 // md.js: the Markdown the docs use, rendered to HTML. Headings get GitHub's anchors, code blocks
-// get a header and highlighting, and links are rewritten by the caller.
+// get a header and highlighting, diagram fences are drawn by diagram.js, and links are rewritten by
+// the caller.
 (function () {
   "use strict";
   const VX = (window.VX = window.VX || {});
@@ -81,9 +82,30 @@
     return null;
   }
 
-  function codeSpan(code) {
+  function codeSpan(code, ctx) {
+    if (ctx.cell && /\s/.test(code)) return `<code class="cmd">${words(code).map((w) => `<span>${esc(w)}</span>`).join(" ")}</code>`;
     const cls = VERDICTS.has(code) ? ` class="v v-${code}"` : "";
     return `<code${cls}>${esc(code)}</code>`;
+  }
+
+  // words splits a command at the spaces outside brackets, so a table cell wraps a long command
+  // between its words and bracketed groups, never inside one.
+  function words(code) {
+    const out = [];
+    let cur = "";
+    let depth = 0;
+    for (const c of code) {
+      if (c === "[") depth++;
+      if (c === "]") depth = Math.max(0, depth - 1);
+      if (c === " " && depth === 0) {
+        if (cur) out.push(cur);
+        cur = "";
+        continue;
+      }
+      cur += c;
+    }
+    if (cur) out.push(cur);
+    return out;
   }
 
   function inline(src, ctx) {
@@ -108,7 +130,7 @@
           flush();
           let code = src.slice(i + k, close).replace(/\n/g, " ");
           if (code.length > 2 && code[0] === " " && code[code.length - 1] === " " && code.trim()) code = code.slice(1, -1);
-          out += codeSpan(code);
+          out += codeSpan(code, ctx);
           i = close + k;
           continue;
         }
@@ -375,11 +397,12 @@
     i += 2;
     const rows = [];
     while (i < lines.length && lines[i].trim() && lines[i].includes("|")) rows.push(splitRow(lines[i++]));
+    const inCell = { ...ctx, cell: true };
     const cell = (tag, c, k) => {
       const a = align[k] ? ` style="text-align:${align[k]}"` : "";
-      let html = inline(c, ctx);
+      let html = inline(c, inCell);
       const v = /^(green|red|inconclusive)(?=,|$)/.exec(c);
-      if (tag === "td" && v) html = `<span class="pill pill-${v[1]}">${v[1]}</span>` + inline(c.slice(v[1].length), ctx);
+      if (tag === "td" && v) html = `<span class="pill pill-${v[1]}">${v[1]}</span>` + inline(c.slice(v[1].length), inCell);
       return `<${tag}${a}>${html}</${tag}>`;
     };
     const wide = head.length >= 5 ? ' class="wide"' : "";
@@ -510,6 +533,8 @@
           return `<a href="${esc(safe)}">${inner}</a>`;
         }),
       code: (code, lang) => {
+        const diagram = VX.diagram && VX.diagram.render(code, lang, (s) => inline(s, ctx));
+        if (diagram) return diagram;
         const h = highlight(code, lang);
         return (
           `<div class="code" data-lang="${esc(h.label)}"><div class="code-head"><span class="code-lang">${esc(h.label)}</span>` +

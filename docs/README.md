@@ -38,6 +38,6 @@ This index is also the navigation of the docs site: each `##` heading is a secti
 - [Adding verilex to a project](adding-verilex.md): the `.verilex` directory, the frame and the word contract.
 - [Development](development.md): building and testing verilex, CI, the canary and the docs site.
 
-## Decisions
+## Design
 
 - [Where the shared ledger lives](ledger-placement.md): why the ledger is a directory of pass files, with measurements.

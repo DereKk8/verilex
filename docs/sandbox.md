@@ -31,16 +31,26 @@ Containers often block user namespaces (Docker's default seccomp profile does), 
 
 Each run keeps its files in one directory, `$TMPDIR/verilex-agent-*`, or under `/tmp` when `$TMPDIR` is longer than 40 characters (unix socket paths are short):
 
-```
+```tree
 verilex-agent-*/
-  share/       prompt.txt, suggest.txt, bin/verilex   brain reads
-  brain/       home/, tmp/                            brain writes
-  log/         verify.out, verify.err, suggest.out, suggest.err,
-               verilex.log, egress.log
-  sock/        the socket behind bin/verilex
-  sandbox/     per phase: egress.sock (Linux) or sandbox.sb (macOS)
-  home/        the verilex home, when --home is not given
-  ticket.yaml  the run spec
+  share/             the brain reads it
+    prompt.txt
+    suggest.txt
+    bin/verilex
+  brain/             the brain writes it
+    home/
+    tmp/
+  log/
+    verify.out
+    verify.err
+    suggest.out
+    suggest.err
+    verilex.log
+    egress.log
+  sock/              the socket behind `bin/verilex`
+  sandbox/           per phase: `egress.sock` (Linux) or `sandbox.sb` (macOS)
+  home/              the verilex home, when `--home` is not given
+  ticket.yaml        the run spec
 ```
 
 The launcher removes the directory at the end. With `--keep-work`, it keeps the directory and prints `verilex-agent: run files kept in <dir>`. `log/verilex.log` lists each verilex command the brain sent to the launcher, with its exit code or the refusal. `log/egress.log` lists each network request and whether the proxy refused it.
@@ -57,8 +67,8 @@ The sandbox does not cover these cases:
 - The brain can reach any public address, so a service that the project publishes on a public address is reachable.
 - On Linux, a unix socket inside a readable directory, such as the project, stays reachable.
 - On macOS, a process that the brain detaches from its process group can outlive the run. The process keeps the sandbox's limits.
-- On macOS, the brain cannot open a pseudo-terminal, so a harness that runs its commands in one fails there. No harness was run on macOS.
+- On macOS, the brain cannot open a pseudo-terminal, so a harness that runs its commands in one fails there. The built-in harnesses are not tested on macOS.
 - The egress proxy serves only `CONNECT`. A client that sends plain HTTP requests to the proxy gets `405`.
 - A harness cannot save a token that it refreshes during a run. If the provider rotates refresh tokens, log in again on the host when the harness reports an expired login.
 
-The project check and the home check, rows 7 and 8 of the [verdict rule](verdict-rule.md), stay as defense in depth. The brain can no longer cause either one, but they still catch a change that something outside the sandbox makes during the run, and a run that something starts around the launcher in its home.
+The project check and the home check, rows 7 and 8 of the [verdict rule](verdict-rule.md), stay as defense in depth. The brain cannot cause either one, but they still catch a change that something outside the sandbox makes during the run, and a run that something starts around the launcher in its home.

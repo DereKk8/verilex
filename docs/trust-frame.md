@@ -1,6 +1,6 @@
 # The trust frame
 
-Every run goes through the project's frame, and no word can opt out of it:
+Every run goes through the project's frame, and no word can opt out of it.
 
 ## The five steps
 

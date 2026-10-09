@@ -1,18 +1,16 @@
 # Where the shared ledger lives
 
-Decision for Linear PER-248, made on 2026-10-06 with the measurements below.
+The shared ledger is a directory of immutable pass files, and `VERILEX_LEDGER` places it. Stateless instances point it at storage they all mount. Instances that share only git can commit the same directory into the repository instead: it merges without conflicts, at a measured cost in pushes and repository growth. verilex does not keep the ledger in one shared file, because one file loses passes under concurrency. verilex has no ledger service: a service is fast, but it adds hosting, credentials and an outage mode to a model-free CLI, and it buys no trust that the directory lacks.
 
-**Decision.** The shared ledger is a directory of immutable pass files, and `VERILEX_LEDGER` places it. Stateless instances should point it at storage they all mount. Instances that share only git can commit the same directory into the repository instead: it merges without conflicts, at a measured cost in pushes and repository growth. A single in-repo ledger file is rejected, because it loses passes under concurrency. A ledger service is not built now: it is fast, but it adds hosting, credentials and an outage mode to a model-free CLI, and it buys no trust that the directory lacks.
-
-The question in the issue was "an in-repo file or a small service". The measurements showed that the deciding property is the format, not the transport: one immutable file per pass loses nothing under any of the three placements, and one shared file loses passes under every one of them.
+The obvious alternatives are a ledger file in the repository and a small service. This page gives the measurements behind the design. They show that the deciding property is the format, not the transport: one immutable file per pass loses nothing under any of the three placements, and one shared file loses passes under every one of them.
 
 ## How it was measured
 
-`docs/ledger-placement/measure` (run from the repository root) drives the real `verilex` CLI on copies of the tally sample product. Each stateless instance is a `verilex` process with a state home of its own. It compares this branch with main at `e4af42f`, whose ledger is one `ledger.json` per state home. `service.go` is a minimal in-memory HTTP ledger service, and `store.go` drives the directory ledger's own record and read calls under the same load. The figures below come from one run on Linux 7.2, a local btrfs disk and 24 cores. Nothing crossed a network: a real service and a real git remote add a round trip to every call.
+`docs/ledger-placement/measure` (run from the repository root) drives the real `verilex` CLI on copies of the tally sample product. Each stateless instance is a `verilex` process with a state home of its own. The figures compare the directory ledger with the single-file format that verilex used before it, one `ledger.json` per state home (commit `e4af42f`). `service.go` is a minimal in-memory HTTP ledger service, and `store.go` drives the directory ledger's own record and read calls under the same load. The figures below come from one run on Linux 7.2, a local btrfs disk and 24 cores. Nothing crossed a network: a real service and a real git remote add a round trip to every call.
 
 ## Write contention and integrity
 
-Concurrent runs of `store-open | item-stored fN | item-listed fN`, one instance each, all recording into one shared directory. `store-open` is one slot that every run writes. `ledger-audit` (from the verify-verilex skill, independent of verilex code) matches every pass against the run records.
+Concurrent runs of `store-open | item-stored fN | item-listed fN`, one instance each, all recording into one shared directory. `store-open` is one slot that every run writes. `ledger-audit`, a script in the repository's own verify skill that shares no code with verilex, matches every pass against the run records.
 
 | Instances | Green runs | Steps proven | Passes recorded | Lost | Forged | Batch time | New instance plans |
 |---|---|---|---|---|---|---|---|
@@ -21,11 +19,11 @@ Concurrent runs of `store-open | item-stored fN | item-listed fN`, one instance 
 | 16 | 16 | 48 | 48 | 0 | 0 | 322 ms | skip 3, run 0 (8 ms) |
 | 32 | 32 | 96 | 96 | 0 | 0 | 586 ms | skip 3, run 0 (9 ms) |
 
-Two "branches" that prove the same chain under different stamps, four concurrent runs each:
+Two branches of the product that prove the same chain under different stamps, four concurrent runs each:
 
 | Ledger | Branch a plans | Branch b plans |
 |---|---|---|
-| one `ledger.json` (main), shared state home | skip 3, run 0 | skip 0, run 3 (`store-open: env TALLY_DEFECT changed`) |
+| one `ledger.json`, shared state home | skip 3, run 0 | skip 0, run 3 (`store-open: env TALLY_DEFECT changed`) |
 | directory, one state home per instance | skip 3, run 0 | skip 3, run 0 |
 
 One file keeps one entry per step, so concurrent branches overwrite each other's passes even under its lock. The directory keeps every pass side by side.
@@ -36,8 +34,8 @@ Each instance is a git clone. It runs its chain, commits its ledger and pushes, 
 
 | Format | Instances | Pushes | Rebase conflicts | Entries on main | Time | Growth per entry (packed) | Fresh clone plans |
 |---|---|---|---|---|---|---|---|
-| `ledger.json` (main) | 4 | 4 | 3 | 3 of 9 | 317 ms | 2,060 B | run 3: `evidence from run ... is gone` |
-| `ledger.json` (main) | 16 | 16 | 15 | 3 of 33 | 496 ms | 4,080 B | run 3: `evidence from run ... is gone` |
+| `ledger.json` | 4 | 4 | 3 | 3 of 9 | 317 ms | 2,060 B | run 3: `evidence from run ... is gone` |
+| `ledger.json` | 16 | 16 | 15 | 3 of 33 | 496 ms | 4,080 B | run 3: `evidence from run ... is gone` |
 | directory | 4 | 10 | 0 | 12 of 12 | 542 ms | 2,009 B | skip 3, run 0 |
 | directory | 16 | 136 | 0 | 48 of 48 | 2,151 ms | 3,343 B | skip 3, run 0 |
 
@@ -54,7 +52,7 @@ The same load, a write of three passes then a read of three steps per client, on
 | 16 | 0.83 / 2.10 ms | 1.98 / 4.34 ms | 0.46 / 0.86 ms | 0.38 / 1.68 ms | 0 |
 | 32 | 1.69 / 13.28 ms | 4.06 / 9.67 ms | 0.86 / 3.33 ms | 6.21 / 10.46 ms | 0 |
 
-Both are lossless and both cost well under the 8 ms that one `verilex plan` takes. A hosted service adds a network round trip, typically 10 to 100 ms, to every read and write, and verilex would need an HTTP client, credentials and an answer for an outage. An outage would only cost re-runs, because a missing pass means "run it live". Still, every outage would cost a whole fleet its skip savings at once.
+Both are lossless and both cost well under the 8 ms that one `verilex plan` takes. A hosted service adds a network round trip, typically 10 to 100 ms, to every read and write, and verilex would need an HTTP client, credentials and an answer for an outage. An outage would only cost re-runs, because a missing pass means "run it live". Still, every outage would cost every instance its skip savings at once.
 
 ## Trust
 
@@ -78,9 +76,9 @@ The reader catches damage, merge accidents, passes from other claim versions or 
 - **In the repository:** 2.0 to 3.3 KB packed per pass, kept in history after it expires, plus every push round trip and its retries.
 - **Service:** hosting, credentials and availability, plus a network round trip per call.
 
-## Consequences
+## Choosing a placement
 
-- One machine: nothing to set. The ledger lives under the state home, as before, in the new format. The old `runs/ledger.json` is no longer read, so the first run after upgrading is live.
+- One machine: nothing to set. The ledger lives under the state home. verilex does not read the older `runs/ledger.json`, so the first run after an upgrade from a version that kept it is live.
 - Stateless instances: set `VERILEX_LEDGER` to a directory every instance mounts.
 - Instances that share only git: point `VERILEX_LEDGER` into the checkout and commit the directory. Keep it outside every path a word declares in `inputs`, or recording a pass would change that word's stamp.
-- A service stays an option for fleets that can mount nothing and outgrow git pushes. It would store these same pass files, and readers would keep re-checking every one.
+- A service stays an option for deployments that can mount nothing and outgrow git pushes. It would store these same pass files, and readers would keep re-checking every one.

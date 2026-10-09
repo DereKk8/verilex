@@ -2,22 +2,24 @@
 
 ## The .verilex directory
 
-```
+```tree
 .verilex/
-  config.yaml          project: <name>; optional secret_patterns: [<regex>, ...];
-                       optional skills: [<dir>, ...] (default .cursor/skills, .claude/skills, .agents/skills)
-  frame/launch         prints {"instance": <anything>} on stdout
-  frame/doctor         exit 0 when the instance is this run's and healthy
-  frame/refresh        brings a kept instance up to the current checkout, keeping its states;
-                       needed only by `verilex run --continue`
-  frame/cleanup        removes what this run launched
-  words/<word>/word.md contract (YAML frontmatter) and a short description
-  words/<word>/run     the executable word
-  words/<word>/admission.json  written by `verilex admit` for a word without a claim
-  claims/<claim>.yaml  a claim (see Claims)
-  profiles.yaml        run ticket defaults and named profiles, optional (see Run tickets)
-  grouping.yaml        written only by `verilex onboard` (see Onboarding)
-  gaps/                notes from `verilex gap` for the verify skill's owner
+  config.yaml        `project: <name>`; optional `secret_patterns: [<regex>, ...]`; optional `skills: [<dir>, ...]` (default `.cursor/skills`, `.claude/skills`, `.agents/skills`)
+  frame/
+    launch           prints `{"instance": <anything>}` on stdout
+    doctor           exits 0 when the instance is this run's and healthy
+    refresh          brings a kept instance up to the current checkout, keeping its states; needed only by `verilex run --continue`
+    cleanup          removes what this run launched
+  words/
+    <word>/
+      word.md        contract (YAML frontmatter) and a short description
+      run            the executable word
+      admission.json  written by `verilex admit` for a word without a claim
+  claims/
+    <claim>.yaml     a claim (see Claims)
+  profiles.yaml      run ticket defaults and named profiles, optional (see Run tickets)
+  grouping.yaml      written only by `verilex onboard` (see Onboarding)
+  gaps/              notes from `verilex gap` for the verify skill's owner
 ```
 
 ## Environment

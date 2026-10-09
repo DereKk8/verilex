@@ -10,19 +10,18 @@ onboarded item-put: variant of item-added@18e2db0cee8f through claim item-put-do
 
 ## The checks
 
-```
- two counted uses ─> mapping ─> non-proofs ─> mechanical match
-                                                    │
-        same / match / ambiguous / new <────────────┘
-                     │
- trials: healthy + every planted defect, 4 at a time
-                     │
- correctness gate ─> behavioral check ─> undecided (ambiguous only)
-                     │                         │ decision request
-                     │                    calling agent:
-                     │                    --same-as or --distinct
-                     │                         │
-          .verilex/grouping.yaml (sealed decision)
+```flow
+Usefulness: two counted uses
+Mapping
+Non-proofs
+Mechanical match: `same`, `match`, `ambiguous` or `new`
+Trials: the healthy product and every planted defect, 4 at a time
+Correctness gate
+Behavioral check
+  Undecided: ambiguous only
+  Decision request
+  Calling agent: `--same-as` or `--distinct`
+.verilex/grouping.yaml: the sealed decision
 ```
 
 1. **Usefulness.** The word needs counted uses (see [the word lifecycle](word-lifecycle.md)) in at least two different runs of this product that proved the claim version it pins. Its claim must not need review, and must declare at least one planted defect.

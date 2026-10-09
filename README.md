@@ -10,7 +10,7 @@ A **word** is a reusable, executable piece that drives the product through a sur
 
 verilex holds execution only. The project's verification skill (a [pstack](https://github.com/cursor/plugins/tree/main/pstack)-style `verify-*` skill with its feature map) keeps the meaning: what a feature is, how a user reaches it, what proves it and its traps. A **claim** pins one piece of that meaning for verilex: what is true once a word passes, and the evidence that proves it. Every word proves a claim (or, in older projects, points straight at feature-map entries), and verilex never replaces the skill. When a word is not green, verilex prints the entries behind it so the agent can continue by hand.
 
-This slice holds the chain runner, its trust frame, the three verdicts, quiet output, stamp-based skipping, `verilex plan`, live reuse of a kept instance (`verilex run --continue`), claims, run tickets, the word lifecycle (invention, onboarding and curation), and the generated word index.
+verilex includes the chain runner, its trust frame, the three verdicts, quiet output, stamp-based skipping, `verilex plan`, live reuse of a kept instance (`verilex run --continue`), claims, run tickets, the word lifecycle (invention, onboarding and curation), and the generated word index.
 
 ## Install
 
@@ -52,7 +52,7 @@ The documentation lives in [`docs/`](docs/README.md).
 | **Claims and words** | [Claims](docs/claims.md) · [The word lifecycle](docs/word-lifecycle.md) · [Onboarding](docs/onboarding.md) · [The word index](docs/word-index.md) |
 | **Agents and the launcher** | [Run tickets](docs/tickets.md) · [Companion launcher](docs/launcher.md) · [Verdict rule](docs/verdict-rule.md) · [Sandbox](docs/sandbox.md) |
 | **Your project** | [Adding verilex to a project](docs/adding-verilex.md) · [Development](docs/development.md) |
-| **Decisions** | [Where the shared ledger lives](docs/ledger-placement.md) |
+| **Design** | [Where the shared ledger lives](docs/ledger-placement.md) |
 
 Browse the same pages as a site, with instant search and Ask, which answers from these docs with your own Claude, ChatGPT or Grok plan, the Claude API, or the docs alone:
 

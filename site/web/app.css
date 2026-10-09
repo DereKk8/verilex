@@ -454,7 +454,9 @@ code.v-inconclusive { color: var(--amber); background: var(--amber-soft); border
 
 .table { overflow-x: auto; margin: 6px 0 26px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
 .table table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.55; }
-.table table.wide { min-width: 860px; }
+.table table.wide { min-width: 640px; }
+.table table.wide th { white-space: normal; letter-spacing: 0.06em; }
+.table table.wide th, .table table.wide td { padding-left: 10px; padding-right: 10px; }
 .table th {
   text-align: left;
   font: 600 10.5px/1.2 var(--font-display);
@@ -472,6 +474,9 @@ code.v-inconclusive { color: var(--amber); background: var(--amber-soft); border
 .table tbody tr:hover { background: var(--panel-2); }
 .table td:first-child code { white-space: nowrap; }
 .table code { font-size: 0.84em; }
+/* A command in a cell wraps between its words and bracketed groups (md.js), never inside one. */
+.table td code.cmd { white-space: normal; overflow-wrap: normal; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.table td code.cmd > span { white-space: nowrap; }
 
 .code { position: relative; margin: 6px 0 24px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--code-bg); overflow: hidden; }
 .code-head {
@@ -540,6 +545,58 @@ code.v-inconclusive { color: var(--amber); background: var(--amber-soft); border
 .pager a:hover { text-decoration: none; transform: translateY(-2px); border-color: var(--signal-line); box-shadow: 0 10px 30px -18px var(--signal-line); }
 .pager small { font: 500 10.5px/1 var(--font-display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
 .pager .next { text-align: right; grid-column: 2; }
+
+/* ---------- diagrams (diagram.js) ---------- */
+.prose > .diagram { max-width: none; }
+.diagram {
+  margin: 6px 0 26px;
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background-color: var(--code-bg);
+  background-image: linear-gradient(var(--grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 22px 22px;
+  background-position: -1px -1px;
+  overflow-x: auto;
+}
+.prose .diagram ul, .prose .diagram ol { list-style: none; margin: 0; padding: 0; }
+.prose .diagram li { margin: 0; padding: 0; }
+.prose .diagram li::marker { content: none; }
+
+/* tree: guides are 3ch columns; a joint draws the branch into its entry. */
+.tree { font: 450 13.4px/1.6 var(--font-mono); color: var(--ink); }
+.prose .diagram .tree-row { display: flex; align-items: stretch; }
+.tree .g { flex: 0 0 3ch; position: relative; }
+.tree .g.on::before, .tree .g.j::before { content: ""; position: absolute; left: 0.9ch; top: 0; bottom: 0; border-left: 1px solid var(--line-2); }
+.tree .g.j.end::before { bottom: auto; height: 14px; }
+.tree .g.j::after { content: ""; position: absolute; left: 0.9ch; top: 14px; width: 1.6ch; border-top: 1px solid var(--line-2); }
+.tree-entry { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; padding: 3px 0; }
+.tree-name { display: inline-flex; align-items: center; min-width: var(--name); padding-right: 3ch; white-space: nowrap; }
+.prose .tree-name code { font: inherit; color: var(--ink-2); background: none; border: 0; padding: 0; border-radius: 0; overflow-wrap: normal; }
+.tree-row.dir > .tree-entry .tree-name code { color: var(--ink); font-weight: 600; }
+.tree-icon { flex: 0 0 auto; width: 1.6ch; height: 1.6ch; margin-right: 0.6ch; background: var(--ink-3); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 1.5h5.2L12.5 4.8V13.5A1 1 0 0 1 11.5 14.5h-7.5A1 1 0 0 1 3 13.5v-11A1 1 0 0 1 4 1.5zM9 1.7V5h3.3' fill='none' stroke='black' stroke-width='1.3' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 1.5h5.2L12.5 4.8V13.5A1 1 0 0 1 11.5 14.5h-7.5A1 1 0 0 1 3 13.5v-11A1 1 0 0 1 4 1.5zM9 1.7V5h3.3' fill='none' stroke='black' stroke-width='1.3' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; }
+.tree-row.dir .tree-icon { background: var(--signal); -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1.5 4A1.5 1.5 0 0 1 3 2.5h3.2l1.6 1.6H13A1.5 1.5 0 0 1 14.5 5.6V12A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12z' fill='none' stroke='black' stroke-width='1.3' stroke-linejoin='round'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1.5 4A1.5 1.5 0 0 1 3 2.5h3.2l1.6 1.6H13A1.5 1.5 0 0 1 14.5 5.6V12A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12z' fill='none' stroke='black' stroke-width='1.3' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.tree-note { flex: 1 1 26ch; min-width: 0; font: 400 13.5px/1.55 var(--font-body); color: var(--ink-2); }
+.prose .tree-note code { font-size: 0.92em; color: var(--ink); background: none; border: 0; padding: 0; }
+
+/* flow: one lane top to bottom; a branch leaves its step dashed and joins the lane before the end. */
+.prose .diagram .flow { position: relative; padding-left: 30px; }
+.flow::before { content: ""; position: absolute; left: 10px; top: 18px; bottom: 18px; border-left: 1.5px solid var(--signal-line); }
+.prose .diagram .flow-node { position: relative; margin-bottom: 10px; }
+.prose .diagram .flow > .flow-node:last-child { margin-bottom: 0; }
+.flow-node::before { content: ""; position: absolute; z-index: 1; left: -25.5px; top: 13px; width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--signal); background: var(--code-bg); }
+.flow > .flow-node + .flow-node::after { content: ""; position: absolute; left: -24px; top: 3px; border: 4px solid transparent; border-bottom: 0; border-top: 5px solid var(--signal); }
+.flow-card { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; row-gap: 2px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.flow-card b { font: 600 13.5px/1.5 var(--font-mono); color: var(--ink); }
+.flow-card > span { font-size: 13.5px; line-height: 1.5; color: var(--ink-2); }
+.prose .flow-card code { font-size: 0.9em; }
+.flow-node.end .flow-card { border-color: var(--signal-line); background: var(--signal-soft); }
+.flow-node.end::before { background: var(--signal); }
+.prose .diagram .flow-branch { position: relative; margin-top: 10px; padding-left: 30px; }
+.flow-branch::before { content: ""; position: absolute; left: 10px; top: -10px; bottom: -6px; border-left: 1.5px dashed var(--ink-3); }
+.flow-branch::after { content: ""; position: absolute; left: -20px; width: 31px; bottom: -6px; border-top: 1.5px dashed var(--ink-3); }
+.flow-branch .flow-node::before { border-color: var(--ink-3); }
+.flow-branch > .flow-node::after { content: ""; position: absolute; left: -24px; top: 3px; border: 4px solid transparent; border-bottom: 0; border-top: 5px solid var(--ink-3); }
 
 /* ---------- table of contents ---------- */
 .toc { position: sticky; top: var(--top); height: calc(100vh - var(--top)); overflow-y: auto; padding: 44px 20px 40px 8px; scrollbar-width: none; }
@@ -1229,6 +1286,15 @@ mark { background: var(--signal-soft); color: var(--ink); border-radius: 3px; pa
   .palette-input .seg { display: none; }
   .r-go { display: none; }
   .result { grid-template-columns: 30px minmax(0, 1fr); }
+  .diagram { padding: 16px 14px; }
+  .tree-name { min-width: 0; }
+  .tree-note { flex-basis: 100%; padding: 0 0 2px 2.2ch; }
+  /* A two-column table stacks each row: its first cell, then the second under it. */
+  .table table:not(.wide):not(:has(th:nth-child(3))) thead { display: none; }
+  .table table:not(.wide):not(:has(th:nth-child(3))) tr { display: block; border-top: 1px solid var(--line); }
+  .table table:not(.wide):not(:has(th:nth-child(3))) tbody tr:first-child { border-top: 0; }
+  .table table:not(.wide):not(:has(th:nth-child(3))) td { display: block; border-top: 0; }
+  .table table:not(.wide):not(:has(th:nth-child(3))) td + td { padding-top: 0; }
 }
 
 @media (hover: none) {

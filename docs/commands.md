@@ -1,5 +1,7 @@
 # Commands
 
+Every command takes `--project <dir>` before the command name, the product checkout to work in (default: the current directory).
+
 | Command | Does |
 |---|---|
 | `verilex run '<chain>' [--keep] [--fresh] [--ticket <file>] [--json]` | Plans the chain, skips it when every proof stamp matches and every word is admitted, else launches an owned instance, runs each word, cleans up |
@@ -10,7 +12,7 @@
 | `verilex ticket <file> [--json]` | Validates a run ticket and prints each field with the level it came from |
 | `verilex words` | Lists the dictionary with each word's promise, claim, `requires`, `provides` and lifecycle status |
 | `verilex claims [--json]` | Lists each claim's current version, the words that prove it, and why it needs review |
-| `verilex runs` | Lists this project's runs and whether each instance was cleaned up; a run without a verdict shows `running` while its process lives and `died` once it is gone |
+| `verilex runs [--json]` | Lists this project's runs and whether each instance was cleaned up; a run without a verdict shows `running` while its process lives and `died` once it is gone |
 | `verilex cleanup <run>` | Tears down an instance kept with `--keep`, or left behind by a run whose process died; refuses a run that is still going |
 | `verilex new <word> --implements <ref>` | Scaffolds a provisional word that implements a feature-map section |
 | `verilex onboard <word> [--json]` | Admits a word that proves a claim: checks its uses, mapping and evidence, matches its claim against the vocabulary, gates it on planted defects, and records the decision in `.verilex/grouping.yaml` |

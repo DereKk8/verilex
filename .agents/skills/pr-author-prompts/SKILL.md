@@ -32,7 +32,7 @@ Tell the author once, when you save the answer, that they change it by editing o
 
 - Take only the author's own prompts that led to this change. Put the most relevant first.
 - Keep the author's words. Never include the full conversation, agent replies, tool output or your summary.
-- When an orchestrator's instructions quote the author (for example a "Captain's intent" section), those quoted words are the author prompts.
+- When an orchestrator's instructions quote the author (for example a section that quotes the author's request), those quoted words are the author prompts.
 - Leave out prompts about unrelated work.
 
 ## 3. Sanitize

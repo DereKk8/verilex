@@ -450,6 +450,11 @@
         </section>
 
         <section class="band">
+          <div class="band-head"><h2>Any harness drives it. Only the verdict comes back.</h2><p>Each brain works in its own sandbox; verilex runs every word outside it. <a href="${hrefFor("launcher")}">The launcher →</a></p></div>
+          <div class="stage" id="stage"></div>
+        </section>
+
+        <section class="band">
           <div class="band-head"><h2>Three verdicts, never a guess</h2><p>An environment failure is never reported as a product failure. <a href="${hrefFor("verdicts")}">Verdicts →</a></p></div>
           <div class="verdicts">
             <div class="verdict g"><header><code>green</code><span>exit<b>0</b></span></header><p>The product works, backed by evidence.</p></div>
@@ -485,6 +490,7 @@
       </div>
       ${footer()}`;
     terminal.mount($("#term"));
+    VX.agents.mount($("#stage"));
   }
 
   // The home terminal plays real verilex runs: typing, words lighting up as they run, the verdict.

@@ -103,7 +103,7 @@ func TestBuildWritesAStaticSite(t *testing.T) {
 	if err := Build(b, dir); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"index.html", "app.css", "app.js", "docs-data.js"} {
+	for _, f := range []string{"index.html", "app.css", "app.js", "agents.js", "docs-data.js"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Error(err)
 		}

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "summary": "Rewords the author-prompts example in the PR skill so it no longer names a section label from the private orchestration tool.",
+  "files": [
+    {
+      "path": ".agents/skills/pr-author-prompts/SKILL.md",
+      "summary": "Rewords one example sentence in step 2, which collects the author's prompts.",
+      "annotations": [
+        {
+          "newRange": [35, 35],
+          "summary": "The example now describes a section that quotes the author's request instead of naming the private tool's label.",
+          "rationale": "The removed label came from the private agent-orchestration tool that built verilex, so public readers would not know it. The sentence keeps its meaning, because quoted author words are still the author prompts. Verified with the case-insensitive word search, which prints no lines, and scripts/docs check, which resolves every page link and anchor. No code or test logic changed, so nothing else remains unverified.",
+          "author": "fm/verilex-fleet-words"
+        }
+      ]
+    }
+  ]
+}

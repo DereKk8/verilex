@@ -1,6 +1,6 @@
 module github.com/DereKk8/verilex/site
 
-go 1.27.1
+go 1.27.2
 
 require github.com/anthropics/anthropic-sdk-go v1.79.1
 

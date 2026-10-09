@@ -53,4 +53,4 @@ Plans are personal. The server listens on `127.0.0.1` and answers only requests 
 
 ### The module
 
-`site/` is a Go module of its own, outside the workspace in `go.work`, so the verilex core and the launcher keep no dependencies. `scripts/docs` builds it with `GOWORK=off`. `scripts/ci site` vets and tests it and checks the docs; CI runs that step with `lint`.
+`site/` is a Go module of its own, outside the workspace in `go.work`, so the verilex core and the launcher keep no dependencies. `scripts/docs` builds it with `GOWORK=off`. Because it is a server, its `go.mod` requires Go 1.27.2, the first release with that line's `net/http` and `crypto/tls` fixes; the `go` command downloads it when yours is older, unless `GOTOOLCHAIN=local` is set. `scripts/ci site` vets and tests it and checks the docs; CI runs that step with `lint`.

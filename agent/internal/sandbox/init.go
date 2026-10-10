@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -50,9 +51,27 @@ func Init(argv []string, stderr io.Writer) int {
 	}
 	fmt.Fprintln(ready, "ok")
 	ready.Close()
+	// The launcher's SIGTERM asks this process to end the sandbox before it exits.
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM)
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, stderr
-	err = cmd.Run()
+	if err = cmd.Start(); err != nil {
+		fmt.Fprintf(stderr, "verilex-agent: brain: %v\n", err)
+		return 127
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	select {
+	case err = <-exited:
+		// Whatever the brain left running ends with it, even a process that left its session.
+		endSandbox()
+	case <-stop:
+		// The brain ends at once, then whatever it left running.
+		cmd.Process.Kill()
+		endSandbox()
+		err = <-exited
+	}
 	var exit *exec.ExitError
 	switch {
 	case err == nil:
@@ -69,7 +88,8 @@ func Init(argv []string, stderr io.Writer) int {
 }
 
 // holds checks the sandbox from the inside: the project takes no new file, no hidden path shows
-// anything, and the host's loopback is out of reach. It returns why the sandbox does not hold.
+// anything, no process outside the sandbox takes a signal (checked on macOS), and the host's
+// loopback is out of reach. It returns why the sandbox does not hold.
 func holds(cfg config) string {
 	if cfg.ReadOnly != "" {
 		probe := filepath.Join(cfg.ReadOnly, ".verilex-agent-check-"+token())
@@ -83,6 +103,9 @@ func holds(cfg config) string {
 		if reachable(path) {
 			return "the brain could read " + path
 		}
+	}
+	if reason := contained(); reason != "" {
+		return reason
 	}
 	if cfg.Closed != "" {
 		if conn, err := net.DialTimeout("tcp", cfg.Closed, 2*time.Second); err == nil {

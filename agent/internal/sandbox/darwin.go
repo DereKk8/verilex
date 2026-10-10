@@ -9,10 +9,27 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 )
 
 func egressEndpoint(spec Spec) (string, string) {
 	return "tcp", "127.0.0.1:0"
+}
+
+// stopWait bounds how long stop waits for the sandbox's first process to end the sandbox. Ending
+// it takes well under a second, so the bound is reached only when the brain stopped that process.
+const stopWait = 2 * time.Second
+
+// stop asks the sandbox's first process to end every process in the sandbox and waits for it to
+// exit. Only a process inside the sandbox can reach them all: a process that left the brain's
+// session is out of killGroup's reach, and macOS has no pid namespace to end with it.
+func (p *Process) stop() {
+	p.cmd.Process.Signal(syscall.SIGTERM)
+	select {
+	case <-p.exited:
+	case <-time.After(stopWait):
+	}
 }
 
 // command is sandbox-exec with a profile that denies by default. The brain may read the system

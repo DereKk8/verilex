@@ -1,8 +1,11 @@
 package e2e_test
 
 import (
+	"bufio"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -49,6 +52,52 @@ while [ ! -e "$HOME/locked" ]; do sleep 0.05; done
 				t.Fatalf("stderr: %s", run.stderr)
 			}
 		})
+	}
+}
+
+// The launcher's SIGTERM asks the sandbox's first process to end the sandbox: it ends the brain
+// at once instead of waiting for it. On macOS the same process refuses to start a brain where it
+// can signal a process outside its sandbox, as it can when no sandbox holds it, because there
+// ending the sandbox signals every pid.
+func TestSandboxInitEndsTheBrainWhenAskedToStop(t *testing.T) {
+	cfgRead, cfgWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	readyRead, readyWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(agentBin, "sandbox-init", "--", "sleep", "30")
+	cmd.ExtraFiles = []*os.File{cfgRead, readyWrite}
+	if err = cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cmd.Process.Kill() })
+	cfgRead.Close()
+	readyWrite.Close()
+	cfgWrite.WriteString("{}\n")
+	cfgWrite.Close()
+	line, _ := bufio.NewReader(readyRead).ReadString('\n')
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	if runtime.GOOS == "darwin" {
+		if want := "fail: the brain could signal a process outside its sandbox\n"; line != want {
+			t.Fatalf("sandbox-init outside a sandbox reported %q, want %q", line, want)
+		}
+		return
+	}
+	if line != "ok\n" {
+		t.Fatalf("sandbox-init reported %q, want ok", line)
+	}
+	cmd.Process.Signal(syscall.SIGTERM)
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sandbox-init still waits for the brain 5s after SIGTERM")
+	}
+	if code := cmd.ProcessState.ExitCode(); code != 128+int(syscall.SIGKILL) {
+		t.Fatalf("sandbox-init exited %d, want %d for a brain ended by SIGKILL", code, 128+int(syscall.SIGKILL))
 	}
 }
 

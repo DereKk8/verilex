@@ -67,6 +67,8 @@ func Init(argv []string, stderr io.Writer) int {
 		// Whatever the brain left running ends with it, even a process that left its session.
 		endSandbox()
 	case <-stop:
+		// The brain ends at once, then whatever it left running.
+		cmd.Process.Kill()
 		endSandbox()
 		err = <-exited
 	}

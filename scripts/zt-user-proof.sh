@@ -23,7 +23,7 @@ if [ -n "$user" ]; then
   as=(sudo -u "$user" env HOME="$w/home" TMPDIR="$w/tmp" PATH="$PATH")
 fi
 set +e
-time "${as[@]}" "$w/verilex-agent" --verilex "$w/verilex" --skill "$w/skill.md" --project "$w/project" --brain "$w/brain" \
+time ${as[@]+"${as[@]}"} "$w/verilex-agent" --verilex "$w/verilex" --skill "$w/skill.md" --project "$w/project" --brain "$w/brain" \
   --intent 'prove the store opens' --claim store-opened --harness stub --model stub
 echo "launcher exit $?"
 set -e

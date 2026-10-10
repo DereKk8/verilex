@@ -341,17 +341,23 @@ func TestTimeBudgetWithoutAVerdictIsInconclusive(t *testing.T) {
 	if err := os.WriteFile(ticket, []byte("intent: prove the store opens\nharness: stub\nmodel: stub\neffort: low\ntime_budget: 200ms\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	brain := writeBrain(t, dir, "#!/bin/sh\nsleep 30\n")
-	start := time.Now()
-	stdout, stderr, code := launch(t, dir, coreBin, brain, "--project", copyProduct(t, dir), "--ticket", ticket)
-	if time.Since(start) > 2*time.Second {
-		t.Fatalf("budget did not stop the brain after %s", time.Since(start))
+	brain := writeBrain(t, dir, "#!/bin/sh\ntouch \"$HOME/ran\"\nsleep 30\n")
+	// The test ends the budget once the brain has started, and the bound counts from then.
+	run, timer := launchTimed(t, dir, coreBin, brain, nil, "ran", "--project", copyProduct(t, dir), "--ticket", ticket)
+	if !timer.started || timer.budget != 200*time.Millisecond {
+		t.Fatalf("the launcher started the budget timer: %v, with %s, want 200ms\nstderr: %s", timer.started, timer.budget, run.stderr)
 	}
-	if code != 2 || !strings.Contains(stderr, "time budget") {
-		t.Fatalf("exit %d stdout %s stderr %s", code, stdout, stderr)
+	if timer.ended.IsZero() {
+		t.Fatalf("the brain never touched ran, so the test never ended the budget\nexit %d\nstderr: %s", run.code, run.stderr)
 	}
-	if strings.Contains(stdout, "green") {
-		t.Fatalf("budget expiry reported green: %s", stdout)
+	if took := time.Since(timer.ended); took > 2*time.Second {
+		t.Fatalf("budget did not stop the brain after %s", took)
+	}
+	if run.code != 2 || !strings.Contains(run.stderr, "time budget") {
+		t.Fatalf("exit %d stdout %s stderr %s", run.code, run.stdout, run.stderr)
+	}
+	if strings.Contains(run.stdout, "green") {
+		t.Fatalf("budget expiry reported green: %s", run.stdout)
 	}
 }
 

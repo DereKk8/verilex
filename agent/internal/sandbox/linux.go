@@ -130,3 +130,7 @@ func masks(v *view, binds []bind) []mask {
 	}
 	return out
 }
+
+// stop has nothing to add on Linux: killGroup ends bwrap, and the whole sandbox, every session in
+// its pid namespace included, dies with it.
+func (p *Process) stop() {}

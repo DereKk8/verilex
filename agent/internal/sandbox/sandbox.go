@@ -67,18 +67,27 @@ func unavailable(format string, args ...any) error {
 type Process struct {
 	cmd    *exec.Cmd
 	egress *egress.Proxy
+	// exited is closed once the sandbox's first process has exited, and err is then its error.
+	exited chan struct{}
+	err    error
 }
 
 // Wait waits for the brain to exit, then ends everything it started and closes its network.
 func (p *Process) Wait() error {
-	err := p.cmd.Wait()
-	p.Kill()
+	<-p.exited
+	p.killGroup()
 	p.egress.Close()
-	return err
+	return p.err
 }
 
-// Kill ends the brain and every process it started.
+// Kill ends the brain and every process it started, including one that left its session.
 func (p *Process) Kill() {
+	p.stop()
+	p.killGroup()
+}
+
+// killGroup ends the sandbox's first process and every process still in its session.
+func (p *Process) killGroup() {
 	syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
 }
 
@@ -143,7 +152,7 @@ func start(ctx context.Context, spec Spec, v *view, self string, eg *egress.Prox
 	cmd.Stdout = spec.Stdout
 	cmd.Stderr = spec.Stderr
 	// A session of its own: the brain has no controlling terminal, so it cannot write into the
-	// terminal the launcher runs in. The session is also the process group Kill ends.
+	// terminal the launcher runs in. The session is also the process group killGroup ends.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	err = cmd.Start()
 	cfgRead.Close()
@@ -152,7 +161,11 @@ func start(ctx context.Context, spec Spec, v *view, self string, eg *egress.Prox
 		cfgWrite.Close()
 		return nil, unavailable("%s did not start: %v", filepath.Base(cmd.Path), err)
 	}
-	proc := &Process{cmd: cmd, egress: eg}
+	proc := &Process{cmd: cmd, egress: eg, exited: make(chan struct{})}
+	go func() {
+		proc.err = cmd.Wait()
+		close(proc.exited)
+	}()
 	json.NewEncoder(cfgWrite).Encode(cfg)
 	cfgWrite.Close()
 	line := make(chan string, 1)
@@ -166,14 +179,14 @@ func start(ctx context.Context, spec Spec, v *view, self string, eg *egress.Prox
 			return proc, nil
 		}
 		proc.Kill()
-		cmd.Wait()
+		<-proc.exited
 		if reason, ok := strings.CutPrefix(text, "fail: "); ok {
 			return nil, unavailable("the sandbox did not hold: %s", reason)
 		}
 		return nil, unavailable("%s could not start the sandbox: %s", filepath.Base(cmd.Path), firstLine(spec.Stderr))
 	case <-ctx.Done():
 		proc.Kill()
-		cmd.Wait()
+		<-proc.exited
 		return nil, ctx.Err()
 	}
 }

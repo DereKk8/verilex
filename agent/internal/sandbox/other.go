@@ -16,3 +16,5 @@ func egressEndpoint(spec Spec) (string, string) {
 func command(spec Spec, v *view, self string, egressAddr net.Addr) (*exec.Cmd, []Bridge, error) {
 	return nil, nil, unavailable("verilex-agent has no sandbox for %s", runtime.GOOS)
 }
+
+func (p *Process) stop() {}

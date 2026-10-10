@@ -13,8 +13,10 @@ import (
 )
 
 // A child that leaves the brain's session with setsid still ends with the run, whether the time
-// budget stops the brain or the brain exits on its own. The child holds a lock on a file in the
-// brain's home for as long as it lives, so the lock comes free exactly when it is gone.
+// budget stops the brain or the brain exits on its own. On Linux it ends even when the brain kills
+// the sandbox's first process; on macOS that case is a documented limit (docs/sandbox.md). The
+// child holds a lock on a file in the brain's home for as long as it lives, so the lock comes free
+// exactly when it is gone.
 func TestNoChildOfTheBrainOutlivesTheRun(t *testing.T) {
 	escape := `python3 -c '
 import fcntl, os, time
@@ -26,13 +28,18 @@ time.sleep(60)' &
 while [ ! -e "$HOME/locked" ]; do sleep 0.05; done
 `
 	for _, tc := range []struct {
-		name, body, budget string
-		exit               int
+		name, body, budget, stderr string
+		exit                       int
+		linuxOnly                  bool
 	}{
-		{"budget ends", escape + "sleep 60\n", "5s", 2},
-		{"brain exits", escape + "verilex run --named store-opened > /dev/null\n", "", 0},
+		{"budget ends", escape + "sleep 60\n", "5s", "inconclusive: the time budget ended", 2, false},
+		{"brain exits", escape + "verilex run --named store-opened > /dev/null\n", "", "", 0, false},
+		{"brain kills the sandbox's first process", escape + "kill -9 $PPID\nsleep 60\n", "5s", "inconclusive: brain exited: exit status 137", 2, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.linuxOnly && runtime.GOOS != "linux" {
+				t.Skip("on macOS a brain that kills the sandbox's first process can leave a setsid child behind: docs/sandbox.md lists the limit and its workarounds")
+			}
 			dir := t.TempDir()
 			ticket := `{"intent":"prove the store opens","harness":"stub","model":"stub","time_budget":"` + tc.budget + `"}`
 			fake := writeFake(t, dir, fakeFiles{ticket: []byte(ticket + "\n"), run: claimRun("green", "r1", []string{"store-opened"}, nil)})
@@ -48,7 +55,7 @@ while [ ! -e "$HOME/locked" ]; do sleep 0.05; done
 			if !lockFrees(t, filepath.Join(home, "held"), 5*time.Second) {
 				t.Fatal("the setsid child still holds its lock after the launcher returned: it outlived the run")
 			}
-			if tc.exit == 2 && !strings.Contains(run.stderr, "inconclusive: the time budget ended") {
+			if !strings.Contains(run.stderr, tc.stderr) {
 				t.Fatalf("stderr: %s", run.stderr)
 			}
 		})

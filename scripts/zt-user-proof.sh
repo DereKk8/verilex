@@ -28,12 +28,16 @@ time ${as[@]+"${as[@]}"} "$w/verilex-agent" --verilex "$w/verilex" --skill "$w/s
 echo "launcher exit $?"
 set -e
 sleep 1
-echo "== leftovers right after the run"
-if [ -n "$user" ]; then pgrep -l -u "$user" || echo "none"; else pgrep -lf '[v]x-leftover-child' || echo "none"; fi
+echo "== escaped child right after the run"
+pgrep -lf '[v]x-leftover-child' || echo "none"
 if [ -n "$user" ]; then
+  echo "== every process of $user right after the run"
+  pgrep -l -u "$user" || echo "none"
   echo "== sudo pkill -KILL -u $user"
   sudo pkill -KILL -u "$user" || true
   sleep 1
-  echo "== leftovers after pkill"
+  echo "== escaped child after pkill"
+  pgrep -lf '[v]x-leftover-child' || echo "none"
+  echo "== every process of $user after pkill"
   pgrep -l -u "$user" || echo "none"
 fi

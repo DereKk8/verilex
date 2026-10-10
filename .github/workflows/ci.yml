@@ -82,7 +82,7 @@ jobs:
           scripts/zt-user-proof.sh
           pkill -KILL -f '[v]x-leftover-child' || true
           echo "##### dedicated user vxbrain"
-          PATH=/usr/bin:/bin:/usr/sbin:/sbin:$(dirname "$(command -v go)") scripts/zt-user-proof.sh vxbrain
+          PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$(dirname "$(command -v go)") scripts/zt-user-proof.sh vxbrain
 
   # The only required check: passes only when every job above succeeded.
   ci:

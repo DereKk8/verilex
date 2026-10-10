@@ -75,8 +75,8 @@ func TestBudgetBoundsTheRunWhateverTheBrainStarts(t *testing.T) {
 		suggest            bool
 		exit               int
 	}{
-		{"setsid child", escape + "touch \"$HOME/ran\"\nsleep 8\n", "300ms", false, 2},
-		{"suggest phase", "if [ \"$VERILEX_AGENT_PHASE\" = suggest ]; then touch \"$HOME/ran\"; sleep 8; fi\nverilex run --named store-opened\n", "300ms", true, 2},
+		{"setsid child", escape + overrunBrain, "300ms", false, 2},
+		{"suggest phase", "if [ \"$VERILEX_AGENT_PHASE\" = suggest ]; then\n" + overrunBrain + "fi\nverilex run --named store-opened\n", "300ms", true, 2},
 		{"background child, no budget", "sleep 8 &\n" + escape + "verilex run --named store-opened\ntouch \"$HOME/ran\"\n", "", false, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -117,6 +117,9 @@ func TestBudgetBoundsTheRunWhateverTheBrainStarts(t *testing.T) {
 			}
 			if tc.exit == 2 && (run.stdout != "" || !strings.Contains(run.stderr, "inconclusive: the time budget ended")) {
 				t.Fatalf("stdout: %s\nstderr: %s", run.stdout, run.stderr)
+			}
+			if tc.budget != "" {
+				stoppedAtBudgetEnd(t, run)
 			}
 		})
 	}

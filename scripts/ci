@@ -55,7 +55,7 @@ test_() {
   go test -race -c -o "$cover/tests.test" ./tests
   (cd tests && GOFLAGS="${GOFLAGS:-} -cover" GOCOVERDIR="$cover" "$cover/tests.test")
   go tool covdata percent -i="$cover"
-  (cd agent && go test -race ./...)
+  (cd agent && go test -v -race ./...)
 }
 build() {
   go build -o /dev/null ./cmd/verilex

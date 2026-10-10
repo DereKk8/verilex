@@ -12,10 +12,17 @@ import (
 	"time"
 )
 
+func logProof(t *testing.T, format string, args ...any) {
+	t.Helper()
+	msg := fmt.Sprintf(format, args...)
+	t.Log(msg)
+	fmt.Fprintf(os.Stderr, "PROOF [%s]: %s\n", runtime.GOOS, msg)
+}
+
 // TestProof_AcceptedIntent verifies that a setsid child is terminated at budget end
 // and on brain exit on the current platform.
 func TestProof_AcceptedIntent(t *testing.T) {
-	t.Logf("Testing accepted intent on %s/%s", runtime.GOOS, runtime.GOARCH)
+	logProof(t, "Testing accepted intent on %s/%s", runtime.GOOS, runtime.GOARCH)
 	escape := `python3 -c '
 import fcntl, os, time
 os.setsid()
@@ -40,7 +47,7 @@ while [ ! -e "$HOME/locked" ]; do sleep 0.05; done
 			start := time.Now()
 			run := launchKept(t, dir, fake, brain, "--intent", "prove the store opens", "--claim", "store-opened", "--harness", "stub", "--model", "stub")
 			elapsed := time.Since(start)
-			t.Logf("[%s] launchKept returned in %v with exit code %d", tc.name, elapsed, run.code)
+			logProof(t, "[%s] launchKept returned in %v with exit code %d", tc.name, elapsed, run.code)
 			if run.code != tc.exit {
 				t.Fatalf("exit %d, want %d\nstdout: %s\nstderr: %s", run.code, tc.exit, run.stdout, run.stderr)
 			}
@@ -51,7 +58,7 @@ while [ ! -e "$HOME/locked" ]; do sleep 0.05; done
 			if !lockFrees(t, filepath.Join(home, "held"), 5*time.Second) {
 				t.Fatal("the setsid child still holds its lock after launcher returned")
 			}
-			t.Logf("[%s] PASSED: setsid child stopped promptly, lock freed", tc.name)
+			logProof(t, "[%s] PASSED: setsid child stopped promptly, lock freed on %s", tc.name, runtime.GOOS)
 		})
 	}
 }
@@ -59,7 +66,7 @@ while [ ! -e "$HOME/locked" ]; do sleep 0.05; done
 // TestProof_R1_SyscallDuration benchmarks the duration of two passes of 99,998 kill
 // syscalls on the current platform to evaluate suspicion R1.
 func TestProof_R1_SyscallDuration(t *testing.T) {
-	t.Logf("Platform: %s/%s", runtime.GOOS, runtime.GOARCH)
+	logProof(t, "Benchmarking 100k kill syscalls on %s/%s", runtime.GOOS, runtime.GOARCH)
 	const pidMax = 99999
 	passes := 2
 	start := time.Now()
@@ -69,18 +76,18 @@ func TestProof_R1_SyscallDuration(t *testing.T) {
 		}
 	}
 	duration := time.Since(start)
-	t.Logf("R1 benchmark: %d passes of 99,998 kill syscalls took %v (average %v per pass)",
+	logProof(t, "R1 benchmark: %d passes of 99,998 kill syscalls took %v (average %v per pass)",
 		passes, duration, duration/time.Duration(passes))
 	if duration > 2*time.Second {
-		t.Logf("R1 WARNING: Syscall duration exceeds 2.0s stopWait!")
+		logProof(t, "R1 WARNING: Syscall duration exceeds 2.0s stopWait!")
 	} else {
-		t.Logf("R1 RESULT: Syscall duration is well under 2.0s stopWait bound (%v < 2.0s)", duration)
+		logProof(t, "R1 RESULT (DISPROVED): Syscall duration is well under 2.0s stopWait bound (%v < 2.0s)", duration)
 	}
 }
 
 // TestProof_R2_EndSandboxLoop evaluates suspicion R2 regarding loop termination and bounds.
 func TestProof_R2_EndSandboxLoop(t *testing.T) {
-	t.Logf("Platform: %s/%s", runtime.GOOS, runtime.GOARCH)
+	logProof(t, "Inspecting endSandbox loop structure on %s/%s", runtime.GOOS, runtime.GOARCH)
 	content, err := os.ReadFile("internal/sandbox/init_darwin.go")
 	if err != nil {
 		t.Skip("init_darwin.go not accessible")
@@ -88,10 +95,10 @@ func TestProof_R2_EndSandboxLoop(t *testing.T) {
 	s := string(content)
 	hasLoop := strings.Contains(s, "for ended := true; ended; {")
 	hasMaxIter := strings.Contains(s, "iter") || strings.Contains(s, "timeout") || strings.Contains(s, "deadline")
-	t.Logf("endSandbox() has outer loop 'for ended := true; ended;': %v", hasLoop)
-	t.Logf("endSandbox() has iteration limit or timeout: %v", hasMaxIter)
+	logProof(t, "R2 code inspection: outer loop 'for ended := true; ended;' present: %v", hasLoop)
+	logProof(t, "R2 code inspection: iteration limit or timeout present: %v", hasMaxIter)
 	if hasLoop && !hasMaxIter {
-		t.Logf("R2 CODE PROOF: endSandbox() lacks iteration limit or timeout, looping as long as syscall.Kill returns nil.")
+		logProof(t, "R2 CODE PROOF: endSandbox() lacks iteration limit or timeout; loops as long as syscall.Kill returns nil.")
 	}
 }
 
@@ -123,27 +130,27 @@ func TestProof_R3_LinuxSigterm(t *testing.T) {
 	buf := make([]byte, 64)
 	n, _ := r4.Read(buf)
 	r4.Close()
-	t.Logf("sandbox-init ready output: %q", string(buf[:n]))
+	logProof(t, "sandbox-init ready output: %q", string(buf[:n]))
 
 	time.Sleep(200 * time.Millisecond)
-	t.Log("Sending SIGTERM to sandbox-init...")
+	logProof(t, "Sending SIGTERM to sandbox-init...")
 	start := time.Now()
 	cmd.Process.Signal(syscall.SIGTERM)
 
 	waitErr := cmd.Wait()
 	elapsed := time.Since(start)
-	t.Logf("sandbox-init exit error: %v, elapsed: %v", waitErr, elapsed)
+	logProof(t, "sandbox-init exit error: %v, elapsed: %v", waitErr, elapsed)
 	if elapsed >= 2500*time.Millisecond {
-		t.Logf("R3 REPRODUCED: sandbox-init intercepted SIGTERM, did not kill brain, and hung for %v until sleep 3 completed!", elapsed)
+		logProof(t, "R3 REPRODUCED: sandbox-init intercepted SIGTERM, did not kill brain, and hung for %v until sleep 3 completed!", elapsed)
 	} else {
-		t.Logf("sandbox-init exited in %v", elapsed)
+		logProof(t, "sandbox-init exited in %v", elapsed)
 	}
 }
 
 // TestProof_R4_BrainKillsSandboxInit tests whether an untrusted brain killing its parent
 // ($PPID) bypasses sandbox cleanup of setsid children.
 func TestProof_R4_BrainKillsSandboxInit(t *testing.T) {
-	t.Logf("Platform: %s/%s", runtime.GOOS, runtime.GOARCH)
+	logProof(t, "Testing R4 parent-kill escape on %s/%s", runtime.GOOS, runtime.GOARCH)
 	escape := `python3 -c '
 import fcntl, os, time
 os.setsid()
@@ -161,23 +168,24 @@ while [ ! -e "$HOME/locked" ]; do sleep 0.05; done
 	start := time.Now()
 	run := launchKept(t, dir, fake, brain, "--intent", "prove the store opens", "--claim", "store-opened", "--harness", "stub", "--model", "stub")
 	elapsed := time.Since(start)
-	t.Logf("launchKept finished in %v with exit code %d", elapsed, run.code)
+	logProof(t, "launchKept finished in %v with exit code %d", elapsed, run.code)
 	home := filepath.Join(run.root, "brain", "home")
 	freed := lockFrees(t, filepath.Join(home, "held"), 3*time.Second)
 	pidBytes, _ := os.ReadFile(filepath.Join(home, "child_pid"))
 	pidStr := strings.TrimSpace(string(pidBytes))
-	t.Logf("R4 setsid child PID: %s", pidStr)
-	t.Logf("R4 result on %s: lock freed = %v", runtime.GOOS, freed)
+	logProof(t, "R4 setsid child PID: %s", pidStr)
+	logProof(t, "R4 result on %s: lock freed = %v", runtime.GOOS, freed)
 	if !freed {
-		t.Logf("R4 REPRODUCED on %s: setsid child outlived the run because brain killed sandbox-init parent!", runtime.GOOS)
+		logProof(t, "R4 REPRODUCED on %s: setsid child outlived the run because brain killed sandbox-init parent ($PPID)!", runtime.GOOS)
 		if pidStr != "" {
 			var pid int
 			if _, err := fmt.Sscanf(pidStr, "%d", &pid); err == nil && pid > 0 {
+				logProof(t, "Cleaning up orphaned setsid child PID %d", pid)
 				syscall.Kill(pid, syscall.SIGKILL)
 			}
 		}
 	} else {
-		t.Logf("R4 NOT REPRODUCED on %s: setsid child was terminated despite brain killing $PPID.", runtime.GOOS)
+		logProof(t, "R4 NOT REPRODUCED on %s: setsid child was terminated despite brain killing $PPID.", runtime.GOOS)
 	}
 }
 
@@ -190,10 +198,10 @@ func TestProof_R5_DarwinProfileSignal(t *testing.T) {
 	s := string(content)
 	hasSignal := strings.Contains(s, "(allow signal (target same-sandbox))")
 	hasProcessInfo := strings.Contains(s, "(allow process-info* (target same-sandbox))")
-	t.Logf("darwin.go contains (allow signal (target same-sandbox)): %v", hasSignal)
-	t.Logf("darwin.go contains (allow process-info* (target same-sandbox)): %v", hasProcessInfo)
+	logProof(t, "darwin.go contains (allow signal (target same-sandbox)): %v", hasSignal)
+	logProof(t, "darwin.go contains (allow process-info* (target same-sandbox)): %v", hasProcessInfo)
 	if hasSignal {
-		t.Log("R5 DISPROVED: sandbox profile explicitly permits same-sandbox signals.")
+		logProof(t, "R5 DISPROVED: sandbox profile explicitly permits same-sandbox signals.")
 	} else {
 		t.Fatal("R5 REPRODUCED: sandbox profile missing same-sandbox signal permission!")
 	}

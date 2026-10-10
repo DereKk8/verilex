@@ -18,7 +18,7 @@ func egressEndpoint(spec Spec) (string, string) {
 }
 
 // stopWait bounds how long stop waits for the sandbox's first process to end the sandbox. Ending
-// it takes well under a second; the bound holds only if a brain stopped that process.
+// it takes well under a second, so the bound is reached only when the brain stopped that process.
 const stopWait = 2 * time.Second
 
 // stop asks the sandbox's first process to end every process in the sandbox and waits for it to

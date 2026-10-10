@@ -86,7 +86,8 @@ func Init(argv []string, stderr io.Writer) int {
 }
 
 // holds checks the sandbox from the inside: the project takes no new file, no hidden path shows
-// anything, and the host's loopback is out of reach. It returns why the sandbox does not hold.
+// anything, no process outside the sandbox takes a signal (checked on macOS), and the host's
+// loopback is out of reach. It returns why the sandbox does not hold.
 func holds(cfg config) string {
 	if cfg.ReadOnly != "" {
 		probe := filepath.Join(cfg.ReadOnly, ".verilex-agent-check-"+token())

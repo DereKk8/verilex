@@ -10,11 +10,12 @@ The brain runs untrusted, in a sandbox: bubblewrap (`bwrap`) on Linux, `sandbox-
 - runs verilex only through `<run>/share/bin/verilex`, which sends each command to the launcher. The launcher runs it with its own home and ledger;
 - reaches the network only through an egress proxy (`HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY`). The proxy serves `CONNECT` to public addresses only. It refuses loopback, private, link-local, CGNAT and reserved addresses, and the host's own addresses;
 - on Linux, sees only its own processes and has no host network, IPC or abstract sockets. Every process it starts ends with the run;
+- on macOS, can signal only processes in its own sandbox. When the brain exits or the time budget ends, the sandbox's first process ends every process in the sandbox, so a process that the brain moved to a session of its own also ends with the run;
 - has no terminal. It runs in a session of its own with no controlling terminal, so it cannot type into the user's shell. On macOS the profile also denies every terminal device (`/dev/tty*`, `/dev/pty*` and `/dev/ptmx`), so the brain cannot read or write a terminal by its path. On Linux, `/dev` is the sandbox's own, with its own pseudo-terminals.
 
 ## Preflight checks
 
-Before the brain starts, a helper inside the sandbox checks that the project refuses a new file, that each hidden path shows nothing, and that a port on the host's loopback is out of reach. When the sandbox tool is missing or fails, or a check fails, the brain does not run, and the launcher prints `verilex-agent: inconclusive: the brain runs only in a sandbox, and the sandbox is not available here: <reason>`. The launcher never runs a brain without the sandbox.
+Before the brain starts, a helper inside the sandbox checks that the project refuses a new file, that each hidden path shows nothing, that a port on the host's loopback is out of reach, and, on macOS, that a signal to the launcher is refused. When the sandbox tool is missing or fails, or a check fails, the brain does not run, and the launcher prints `verilex-agent: inconclusive: the brain runs only in a sandbox, and the sandbox is not available here: <reason>`. The launcher never runs a brain without the sandbox.
 
 ## Platforms
 
@@ -66,7 +67,7 @@ The sandbox does not cover these cases:
 - The brain gets the launcher's environment, except `HOME`, `TMPDIR`, the `XDG_*` directories, `NO_PROXY`, `VERILEX_HOME` and `VERILEX_LEDGER`. A secret in that environment reaches the brain, so start the launcher with only the variables the harness needs.
 - The brain can reach any public address, so a service that the project publishes on a public address is reachable.
 - On Linux, a unix socket inside a readable directory, such as the project, stays reachable.
-- On macOS, a process that the brain detaches from its process group can outlive the run. The process keeps the sandbox's limits.
+- On macOS, a brain that kills or stops the sandbox's first process (`verilex-agent sandbox-init`) before the run ends stops the clean-up. A process that the brain moved to a session of its own can then outlive the run. The process keeps the sandbox's limits.
 - On macOS, the brain cannot open a pseudo-terminal, so a harness that runs its commands in one fails there. The built-in harnesses are not tested on macOS.
 - The egress proxy serves only `CONNECT`. A client that sends plain HTTP requests to the proxy gets `405`.
 - A harness cannot save a token that it refreshes during a run. If the provider rotates refresh tokens, log in again on the host when the harness reports an expired login.

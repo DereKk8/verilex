@@ -66,6 +66,8 @@ func TestBrainCannotEditTheProject(t *testing.T) {
 
 // The time budget bounds the whole run, both brain phases, and no child of the brain can hold
 // the launcher past it. Without a budget, a background child cannot hold the launcher either.
+// Each bound counts from the moment the brain touched ran in its home: with a budget, the test
+// ends the budget then, so a slow setup before the brain cannot fail the bound.
 func TestBudgetBoundsTheRunWhateverTheBrainStarts(t *testing.T) {
 	escape := "python3 -c 'import os, time; os.setsid(); time.sleep(8)' &\n"
 	for _, tc := range []struct {
@@ -73,9 +75,9 @@ func TestBudgetBoundsTheRunWhateverTheBrainStarts(t *testing.T) {
 		suggest            bool
 		exit               int
 	}{
-		{"setsid child", escape + "sleep 8\n", "300ms", false, 2},
-		{"suggest phase", "if [ \"$VERILEX_AGENT_PHASE\" = suggest ]; then sleep 8; fi\nverilex run --named store-opened\n", "300ms", true, 2},
-		{"background child, no budget", "sleep 8 &\n" + escape + "verilex run --named store-opened\n", "", false, 0},
+		{"setsid child", escape + overrunBrain, "300ms", false, 2},
+		{"suggest phase", "if [ \"$VERILEX_AGENT_PHASE\" = suggest ]; then\n" + overrunBrain + "fi\nverilex run --named store-opened\n", "300ms", true, 2},
+		{"background child, no budget", "sleep 8 &\n" + escape + "verilex run --named store-opened\ntouch \"$HOME/ran\"\n", "", false, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -86,16 +88,38 @@ func TestBudgetBoundsTheRunWhateverTheBrainStarts(t *testing.T) {
 			if tc.suggest {
 				args = append(args, "--suggest")
 			}
-			start := time.Now()
-			stdout, stderr, code := launch(t, dir, fake, brain, args...)
+			var run kept
+			var start time.Time
+			if tc.budget == "" {
+				// A zero budget never ends, so the bound counts from the brain's last line.
+				run = launchKept(t, dir, fake, brain, args...)
+				info, err := os.Stat(filepath.Join(run.root, "brain", "home", "ran"))
+				if err != nil {
+					t.Fatalf("the brain never touched ran: %v\nstderr: %s", err, run.stderr)
+				}
+				start = info.ModTime()
+			} else {
+				var timer *testTimer
+				run, timer = launchTimed(t, dir, fake, brain, nil, "ran", args...)
+				if want, _ := time.ParseDuration(tc.budget); !timer.started || timer.budget != want {
+					t.Fatalf("the launcher started the budget timer: %v, with %s, want %s\nstderr: %s", timer.started, timer.budget, want, run.stderr)
+				}
+				if timer.ended.IsZero() {
+					t.Fatalf("the brain never touched ran, so the test never ended the budget\nexit %d\nstderr: %s", run.code, run.stderr)
+				}
+				start = timer.ended
+			}
 			if took := time.Since(start); took > 3*time.Second {
-				t.Fatalf("launcher took %s\nstderr: %s", took, stderr)
+				t.Fatalf("launcher took %s after the brain touched ran\nstderr: %s", took, run.stderr)
 			}
-			if code != tc.exit {
-				t.Fatalf("exit %d, want %d\nstdout: %s\nstderr: %s", code, tc.exit, stdout, stderr)
+			if run.code != tc.exit {
+				t.Fatalf("exit %d, want %d\nstdout: %s\nstderr: %s", run.code, tc.exit, run.stdout, run.stderr)
 			}
-			if tc.exit == 2 && (stdout != "" || !strings.Contains(stderr, "inconclusive: the time budget ended")) {
-				t.Fatalf("stdout: %s\nstderr: %s", stdout, stderr)
+			if tc.exit == 2 && (run.stdout != "" || !strings.Contains(run.stderr, "inconclusive: the time budget ended")) {
+				t.Fatalf("stdout: %s\nstderr: %s", run.stdout, run.stderr)
+			}
+			if tc.budget != "" {
+				stoppedAtBudgetEnd(t, run)
 			}
 		})
 	}

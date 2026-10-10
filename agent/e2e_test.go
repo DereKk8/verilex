@@ -341,18 +341,25 @@ func TestTimeBudgetWithoutAVerdictIsInconclusive(t *testing.T) {
 	if err := os.WriteFile(ticket, []byte("intent: prove the store opens\nharness: stub\nmodel: stub\neffort: low\ntime_budget: 200ms\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	brain := writeBrain(t, dir, "#!/bin/sh\nsleep 30\n")
-	start := time.Now()
-	stdout, stderr, code := launch(t, dir, coreBin, brain, "--project", copyProduct(t, dir), "--ticket", ticket)
-	if time.Since(start) > 2*time.Second {
-		t.Fatalf("budget did not stop the brain after %s", time.Since(start))
+	brain := writeBrain(t, dir, "#!/bin/sh\n"+overrunBrain)
+	// The test ends the budget once the brain has started, and the bound counts from then.
+	run, timer := launchTimed(t, dir, coreBin, brain, nil, "ran", "--project", copyProduct(t, dir), "--ticket", ticket)
+	if !timer.started || timer.budget != 200*time.Millisecond {
+		t.Fatalf("the launcher started the budget timer: %v, with %s, want 200ms\nstderr: %s", timer.started, timer.budget, run.stderr)
 	}
-	if code != 2 || !strings.Contains(stderr, "time budget") {
-		t.Fatalf("exit %d stdout %s stderr %s", code, stdout, stderr)
+	if timer.ended.IsZero() {
+		t.Fatalf("the brain never touched ran, so the test never ended the budget\nexit %d\nstderr: %s", run.code, run.stderr)
 	}
-	if strings.Contains(stdout, "green") {
-		t.Fatalf("budget expiry reported green: %s", stdout)
+	if took := time.Since(timer.ended); took > 2*time.Second {
+		t.Fatalf("budget did not stop the brain after %s", took)
 	}
+	if run.code != 2 || !strings.Contains(run.stderr, "time budget") {
+		t.Fatalf("exit %d stdout %s stderr %s", run.code, run.stdout, run.stderr)
+	}
+	if strings.Contains(run.stdout, "green") {
+		t.Fatalf("budget expiry reported green: %s", run.stdout)
+	}
+	stoppedAtBudgetEnd(t, run)
 }
 
 type fakeFiles struct {
@@ -687,6 +694,30 @@ func launchTimed(t *testing.T, dir, verilex, brain string, env []string, marker 
 	close(returned)
 	watch.Wait()
 	return kept{stdout: stdout.String(), stderr: stderr.String(), code: code, root: runRoot(t, tmp)}, timer
+}
+
+// overrunBrain is a brain body that touches ran, the marker launchTimed ends the budget on, and
+// then waits for the test's release, it and a background child of its own. Whichever of them still
+// runs at the release touches late or late-child. Each gives up after about 8s, so a launcher
+// that waits for the brain fails the test's time bound instead of hanging it.
+const overrunBrain = "(" + overrun + "late-child\") &\ntouch \"$HOME/ran\"\n" + overrun + "late\"\n"
+
+const overrun = `i=0; while [ ! -f "$HOME/release" ] && [ $i -lt 400 ]; do sleep 0.02; i=$((i+1)); done; [ ! -f "$HOME/release" ] || touch "$HOME/`
+
+// stoppedAtBudgetEnd releases an overrunBrain after the launcher returned and fails the test if
+// the brain or its child still ran then: the end of the budget must stop them, not only return.
+func stoppedAtBudgetEnd(t *testing.T, run kept) {
+	t.Helper()
+	home := filepath.Join(run.root, "brain", "home")
+	if err := os.WriteFile(filepath.Join(home, "release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	for _, name := range []string{"late", "late-child"} {
+		if _, err := os.Stat(filepath.Join(home, name)); err == nil {
+			t.Fatalf("%s appeared after the launcher returned, so the end of the budget did not stop the brain\nstderr: %s", name, run.stderr)
+		}
+	}
 }
 
 // runTemp is a short TMPDIR for one launcher run: its run directory lands there.

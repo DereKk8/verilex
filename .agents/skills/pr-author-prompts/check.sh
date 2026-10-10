@@ -24,6 +24,8 @@ awk '
     else {
       words = split(why, w, /[[:space:]]+/) - 1
       if (words < 30) fail("Why this PR exists has " words " words; a cold reader needs the problem, the intended outcome and the context (at least 30 words)")
+      w1 = why; sub(/^[[:space:]]+/, "", w1)
+      if (w1 !~ /^The author (wants|wanted|asked|asks|needs|needed|decided|chose|requested) /) fail("Why this PR exists must start from the author'\''s own desire, for example: The author wants ... (derive it from the author'\''s prompts, not from your diagnosis)")
       l = tolower(why)
       if (l ~ /as discussed|see above|the above|this session|that report|these decisions|those answers/) fail("Why this PR exists points at context the reader does not have; say it instead")
     }

@@ -41,11 +41,15 @@ Ask, on every invocation: could a person or agent who never saw the conversation
 
 The latest prompt often fails that test. It can be an answer to a question the reader never sees ("1. yeah review 2. A"), a go-ahead ("send patching for the review findings"), or a general rule that does not name this change. Such a fragment is not the reason the PR exists.
 
-When the prompts alone fail the test:
+The Why comes from the author, not from you. State what the author wants and the capability or outcome they are asking for, as the author's own prompts show it. Never substitute your own diagnosis of the problem, a reviewer's finding, or an issue's wording for the author's motive.
 
-- Trace back to the original problem: the earlier prompts, the task instructions, the linked issue, the review report or the PR description.
-- Write the **Why this PR exists** paragraph from that: the problem, the intended outcome, and the context a reader needs. Write it in your own words and never present it as a quote.
+When the latest prompt alone fails the test:
+
+- Trace back through the author's own words: the earlier prompts in the conversation, and the author's words quoted in the task instructions. Find the prompt where the author first said what they want and why.
+- Write the **Why this PR exists** paragraph from that. Start it with the author as the subject ("The author wants ...", "The author asked ..."), then say what they want, why they want it in their terms, and what that means for this change. Write it in your own words and never present it as a quote.
+- Technical sources (the linked issue, a review report, the PR description) may add facts a reader needs, after the author's motive. They never replace it.
 - Keep a fragment quote only when it adds the author's voice on top of that paragraph; drop answer lists that only make sense next to their questions.
+- When the author's own words never say why, write only what they asked for and say plainly that they gave no reason. Do not invent one.
 
 Always write the paragraph, even when the quotes are clear. Rewrite it on a later push when the PR's purpose has grown.
 
@@ -68,7 +72,7 @@ Write the comment body to a file in this exact shape:
 ```markdown
 ## Author prompts
 
-**Why this PR exists:** the problem, the intended outcome, and the context, readable without the conversation.
+**Why this PR exists:** The author wants ... (what they asked for, why in their terms, and what it means for this change), readable without the conversation.
 
 > first prompt, most relevant, in the author's words
 
@@ -81,6 +85,6 @@ Post it only through this skill's script, run from the repository root. It runs 
 .agents/skills/pr-author-prompts/post.sh "$PR" prompts.md
 ```
 
-The checker refuses a missing or thin Why paragraph, one that points at context the reader lacks, and quotes that are numbered answers to unseen questions. It cannot judge meaning, so passing it does not replace step 3. The script keeps one comment per PR: it edits the existing `## Author prompts` comment in place and creates one only when none exists. Never post or edit the comment with `gh` directly.
+The checker refuses a missing or thin Why paragraph, one that does not start from the author, one that points at context the reader lacks, and quotes that are numbered answers to unseen questions. It cannot judge meaning, so passing it does not replace step 3. The script keeps one comment per PR: it edits the existing `## Author prompts` comment in place and creates one only when none exists. Never post or edit the comment with `gh` directly.
 
 On a later push, add any new author prompts for that push, redo step 3, and edit the same comment.

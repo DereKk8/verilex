@@ -754,7 +754,7 @@ func TestAdmittedWordWhoseChainNoLongerBindsItIsNeverRebound(t *testing.T) {
 	proveOn(t, root, "store-open | item-stored | item-listed apple", "item-stored")
 	green(t, root, nil, "store-open | item-stored pear | item-listed pear")
 	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n"+
-		"  item-stored: its onboarded chain no longer binds its arguments; onboard it again\n")
+		"  item-stored: its onboarded chain no longer binds its arguments, so claim plans refuse it; onboard it again\n")
 	done := verilex(t, root, nil, "plan", "--claim", "item-added")
 	equal(t, done.code, 2)
 	equal(t, done.stderr, "verilex: refused: item-stored: its onboarded chain no longer binds its arguments; onboard it again\n")
@@ -780,4 +780,66 @@ func proveOn(t *testing.T, root, onChain string, words ...string) {
 	if err = grouping.Save(project, g); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Rule: a plan whose provider would provide its own requirement by running again on other arguments
+// ends in a refusal, never a loop. item-derived provides item:{name} and requires item:{name}x, so
+// each step of it would need another.
+func TestPlanRefusesAProviderThatOnlyItselfCanFeed(t *testing.T) {
+	root := curated(t)
+	proveOn(t, root, chain, "store-open", "item-stored", "item-listed")
+	dir := filepath.Join(root, ".verilex", "words", "item-derived")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "word.md"), "---\nword: item-derived\npromise: An item derived from another item.\nargs: [name]\n"+
+		"implements: [verify-tally/features/items.md#item-list]\nentry: cli\ninputs: [bin/tally]\n"+
+		"requires: [\"item:{name}x\"]\nprovides: [\"item:{name}\"]\n---\n", 0644)
+	write(t, filepath.Join(dir, "run"), "#!/bin/sh\ncat >/dev/null\nexit 1\n", 0755)
+	for _, args := range [][]string{{"plan", "--claim", "item-listed"}, {"run", "--claim", "item-listed"}} {
+		p := start(t, root, nil, args...)
+		timer := time.AfterFunc(10*time.Second, func() { _ = p.cmd.Process.Kill() })
+		done := p.wait(t)
+		timer.Stop()
+		equal(t, done, output{code: 2, stderr: "verilex: refused: word dependencies cycle: item-derived apple requires item:applex, " +
+			"which item-derived would provide again on other arguments; no chain order is safe\n"})
+	}
+	equal(t, runCount(t, root), 0)
+}
+
+// Rule: a step that only provides a state proves no claim, but its failure is still a failure: the
+// quiet output prints it, labelled, with its evidence, and leaves the claim it fed not run.
+func TestFailingProviderStepIsPrintedAsAFailure(t *testing.T) {
+	root := curated(t)
+	proveOn(t, root, "store-open | item-stored apple", "store-open", "item-stored")
+	proveOn(t, root, "store-open | item-stored pear | item-listed pear", "item-listed")
+	done := verilex(t, root, map[string]string{"TALLY_DEFECT": "drop-adds"}, "run", "--claim", "item-listed")
+	record := lastRun(t, root)
+	equal(t, done.code, 1)
+	equal(t, done.stdout, "red: 1 green, 1 red, 1 not run; run "+record.Run+"\n"+
+		"  red  item-stored pear (only provides a state): tally said 'added pear' but store.json lacks pear\n"+
+		"    evidence: "+record.Words[1].Evidence+"\n"+
+		"  inconclusive  item-listed: not run\n"+
+		"    next: verilex run --fresh --claim 'item-listed'\n")
+	equal(t, record.Words[1].ProvidesOnly, true)
+	var claims []string
+	for _, c := range record.Claims {
+		claims = append(claims, c.Claim+" "+string(c.Verdict))
+	}
+	equal(t, claims, []string{"store-opened green", "item-listed inconclusive"})
+}
+
+// Rule: an admitted word whose claim has a newer version is refused with that reason, the one
+// onboarding gives too, not as a word to onboard again.
+func TestPlanRefusesAStaleAdmittedWordWithItsPin(t *testing.T) {
+	root := curated(t)
+	proveOn(t, root, chain, "store-open", "item-stored", "item-listed")
+	v1 := pinOf(t, root, "item-listed")
+	edit(t, claimFile(root, "item-listed"), "observation: The listing matches store.json.", "observation: The listing matches store.json exactly.")
+	v2 := pinOf(t, root, "item-listed")
+	for _, cmd := range []string{"plan", "run"} {
+		done := verilex(t, root, nil, cmd, "--claim", "item-listed")
+		equal(t, done, output{code: 2, stderr: stale("item-listed", v1, v2)})
+	}
+	equal(t, verilex(t, root, nil, "onboard", "item-listed").stderr, stale("item-listed", v1, v2))
 }

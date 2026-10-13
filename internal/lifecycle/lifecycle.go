@@ -212,7 +212,7 @@ func onboarded(p dictionary.Project, w dictionary.Word) (Status, error) {
 	// binds them leaves the word nothing it was admitted on.
 	if d.Chain != "" && w.Stale == "" {
 		if _, ok := dictionary.OwnStep(d.Chain, w); !ok {
-			s.Drift = append(s.Drift, "its onboarded chain no longer binds its arguments; onboard it again")
+			s.Drift = append(s.Drift, "its onboarded chain no longer binds its arguments, so claim plans refuse it; onboard it again")
 		}
 	}
 	if d.Proves != "" {

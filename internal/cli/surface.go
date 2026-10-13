@@ -102,7 +102,8 @@ func coverChain(project dictionary.Project, chain string, steps []dictionary.Ste
 }
 
 // attachCoverage reports one verdict per claim the run proved or failed. proves, when set, says
-// which steps prove their claim; a claim plan's step that only provides a state proves none.
+// which steps prove their claim; a claim plan's step that only provides a state proves none, and
+// is marked ProvidesOnly so its failure is still reported as a step's.
 func attachCoverage(record *runner.Record, ix index.Index, proves func(word string, argv []string) bool, selected, missed []string, changed []string) error {
 	words := map[string]dictionary.Word{}
 	for _, word := range ix.Words() {
@@ -110,9 +111,12 @@ func attachCoverage(record *runner.Record, ix index.Index, proves func(word stri
 	}
 	record.Claims = []runner.ClaimReport{}
 	seen := map[string]bool{}
-	for _, step := range record.Words {
+	for i, step := range record.Words {
 		word, ok := words[step.Word]
-		if !ok || word.Claim == nil || (proves != nil && !proves(step.Word, step.Args)) {
+		if ok && word.Claim != nil && proves != nil && !proves(step.Word, step.Args) {
+			record.Words[i].ProvidesOnly = true
+		}
+		if !ok || word.Claim == nil || record.Words[i].ProvidesOnly {
 			continue
 		}
 		name := ix.GroupOf(word.Claim.Name)
@@ -126,7 +130,7 @@ func attachCoverage(record *runner.Record, ix index.Index, proves func(word stri
 		}
 		if step.Verdict != verdict.Green {
 			item.Expected = expectedOf(word)
-			item.Got = gotOf(step)
+			item.Got = report.Got(step)
 			item.Next = nextCommand(name, changed, true)
 		}
 		record.Claims = append(record.Claims, item)
@@ -166,19 +170,6 @@ func expectedOf(word dictionary.Word) string {
 		}
 	}
 	return report.OneLine(text)
-}
-
-func gotOf(step runner.WordRecord) string {
-	switch {
-	case dictionary.Truthy(step.Detail):
-		return report.OneLine(fmt.Sprint(step.Detail))
-	case dictionary.Truthy(step.Reason):
-		return report.OneLine(fmt.Sprint(step.Reason))
-	case dictionary.Truthy(step.Observation):
-		return report.OneLine(fmt.Sprint(step.Observation))
-	default:
-		return step.Reported
-	}
 }
 
 func nextCommand(claim string, changed []string, fresh bool) string {

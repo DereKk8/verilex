@@ -1,6 +1,7 @@
 package index
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -232,9 +233,13 @@ func (ix Index) resolveClaim(name string) (string, error) {
 
 // order builds a runnable chain for the selected claims and returns the claims that chain
 // proves, in dependency order. A word may run twice: once on the arguments it proves its claim
-// on, and once on other arguments only to provide a state another word requires.
+// on, and once on other arguments only to provide a state another word requires. A provider is
+// never added below a step of its own word, so the chain is finite: such a word could only
+// provide its requirement by running again, without end.
 func (ix Index) order(b binding, selected []string) (string, []string, error) {
 	var queue []planned
+	// parent is the step whose requirement added each step of queue; -1 for a selected claim's.
+	var parent []int
 	for _, name := range selected {
 		word, err := ix.wordFor(name)
 		if err != nil {
@@ -245,6 +250,7 @@ func (ix Index) order(b binding, selected []string) (string, []string, error) {
 			return "", nil, err
 		}
 		queue = append(queue, planned{word, argv})
+		parent = append(parent, -1)
 	}
 	included := map[string]bool{}
 	var steps []planned
@@ -263,7 +269,14 @@ func (ix Index) order(b binding, selected []string) (string, []string, error) {
 			if !ok {
 				return "", nil, fmt.Errorf("%s requires %s; no word provides it", step.word.Name, state)
 			}
+			for at := i; at >= 0; at = parent[at] {
+				if queue[at].word.Name == provider.Name {
+					return "", nil, fmt.Errorf("word dependencies cycle: %s requires %s, which %s would provide again on other arguments; no chain order is safe",
+						step.label(), state, provider.Name)
+				}
+			}
 			queue = append(queue, planned{provider, argv})
+			parent = append(parent, i)
 		}
 	}
 	ordered, err := topo(steps)
@@ -372,6 +385,10 @@ func (ix Index) takeBindings(b binding, chain string) {
 
 // argsOf is the arguments a selected word proves its claim on.
 func (b binding) argsOf(word dictionary.Word) ([]string, error) {
+	// A stale pin is why no chain binds the word, and why onboarding refuses it.
+	if word.Stale != "" {
+		return nil, errors.New(word.Stale)
+	}
 	if argv, ok := b.own[word.Name]; ok {
 		return argv, nil
 	}

@@ -482,6 +482,14 @@ $`).FindStringSubmatch(done.stdout)
 	equal(t, strings.SplitN(onboard(t, root, "item-stored").stdout, "\n", 2)[0], "onboarded item-stored: claim "+v+" joins the vocabulary; caught dropped-add, lost-add")
 	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
 
+	// A planted defect removed from the claim later is drift too: the record holds one the claim no longer declares.
+	edit(t, claimFile(root, "item-added"), "  lost-add: {TALLY_DEFECT: drop-adds}\n", "")
+	equal(t, pinOf(t, root, "item-added"), v)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n"+
+		"  item-stored: claim item-added no longer declares planted defect lost-add, which item-stored was gated against; onboard it again\n")
+	edit(t, claimFile(root, "item-added"), "  dropped-add: {TALLY_DEFECT: drop-adds}\n", "  dropped-add: {TALLY_DEFECT: drop-adds}\n  lost-add: {TALLY_DEFECT: drop-adds}\n")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
+
 	// A claim without a planted defect cannot show that any word catches one.
 	bare := claimLike(t, root, "item-bare", [2]string{"defects:\n  dropped-add: {TALLY_DEFECT: drop-adds}\n  lost-add: {TALLY_DEFECT: drop-adds}\n", ""})
 	variant(t, root, "item-bared", bare, storedRun(t, root))

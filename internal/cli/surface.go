@@ -68,7 +68,7 @@ func claimSurface(project dictionary.Project, words []dictionary.Word, args opti
 	record.Requested = requested(args)
 	record.Touched = plan.Touched
 	record.Gaps = plan.Gaps
-	if err = attachCoverage(&record, ix, plan.Selected, plan.Unpicked, args.changed); err != nil {
+	if err = attachCoverage(&record, ix, plan.Proves, plan.Selected, plan.Unpicked, args.changed); err != nil {
 		return refuse(err)
 	}
 	if record.Dir != "" {
@@ -92,7 +92,7 @@ func coverChain(project dictionary.Project, chain string, steps []dictionary.Ste
 	record.Requested = &runner.Request{Claims: []string{}, Named: []string{}, Changed: listed(changed), Chain: &chain}
 	record.Touched = ix.TouchedClaims(project, changed)
 	record.Gaps = ix.Gaps(project, changed, steps)
-	if err = attachCoverage(record, ix, nil, record.Touched, changed); err != nil {
+	if err = attachCoverage(record, ix, nil, nil, record.Touched, changed); err != nil {
 		return err
 	}
 	if record.Dir != "" {
@@ -101,16 +101,22 @@ func coverChain(project dictionary.Project, chain string, steps []dictionary.Ste
 	return nil
 }
 
-func attachCoverage(record *runner.Record, ix index.Index, selected, missed []string, changed []string) error {
+// attachCoverage reports one verdict per claim the run proved or failed. proves, when set, says
+// which steps prove their claim; a claim plan's step that only provides a state proves none, and
+// is marked ProvidesOnly so its failure is still reported as a step's.
+func attachCoverage(record *runner.Record, ix index.Index, proves func(word string, argv []string) bool, selected, missed []string, changed []string) error {
 	words := map[string]dictionary.Word{}
 	for _, word := range ix.Words() {
 		words[word.Name] = word
 	}
 	record.Claims = []runner.ClaimReport{}
 	seen := map[string]bool{}
-	for _, step := range record.Words {
+	for i, step := range record.Words {
 		word, ok := words[step.Word]
-		if !ok || word.Claim == nil {
+		if ok && word.Claim != nil && proves != nil && !proves(step.Word, step.Args) {
+			record.Words[i].ProvidesOnly = true
+		}
+		if !ok || word.Claim == nil || record.Words[i].ProvidesOnly {
 			continue
 		}
 		name := ix.GroupOf(word.Claim.Name)
@@ -124,7 +130,7 @@ func attachCoverage(record *runner.Record, ix index.Index, selected, missed []st
 		}
 		if step.Verdict != verdict.Green {
 			item.Expected = expectedOf(word)
-			item.Got = gotOf(step)
+			item.Got = report.Got(step)
 			item.Next = nextCommand(name, changed, true)
 		}
 		record.Claims = append(record.Claims, item)
@@ -164,19 +170,6 @@ func expectedOf(word dictionary.Word) string {
 		}
 	}
 	return report.OneLine(text)
-}
-
-func gotOf(step runner.WordRecord) string {
-	switch {
-	case dictionary.Truthy(step.Detail):
-		return report.OneLine(fmt.Sprint(step.Detail))
-	case dictionary.Truthy(step.Reason):
-		return report.OneLine(fmt.Sprint(step.Reason))
-	case dictionary.Truthy(step.Observation):
-		return report.OneLine(fmt.Sprint(step.Observation))
-	default:
-		return step.Reported
-	}
 }
 
 func nextCommand(claim string, changed []string, fresh bool) string {

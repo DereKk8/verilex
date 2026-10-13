@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
@@ -17,15 +18,20 @@ import (
 	"github.com/DereKk8/verilex/internal/report"
 	"github.com/DereKk8/verilex/internal/runner"
 	"github.com/DereKk8/verilex/internal/ticket"
+	"github.com/DereKk8/verilex/internal/usage"
 	"github.com/DereKk8/verilex/internal/verdict"
 )
 
-const usage = "usage: verilex [-h] [--project PROJECT] {run,plan,ticket,words,claims,index,runs,cleanup,new,onboard,propose,admit,gap,check} ...\n"
+const usageText = "usage: verilex [-h] [--project PROJECT] {run,plan,ticket,words,claims,index,runs,usage,cleanup,new,onboard,propose,admit,gap,check} ...\n"
 
 type options struct {
 	project, command, operand, verdict, from, ticket, intent, sameAs string
 	implements, changed, operands, claims, named                     []string
 	keep, fresh, json, distinct, noChain                             bool
+	change, miss                                                     string
+	tokens                                                           *usage.Tokens
+	estimated                                                        bool
+	capture                                                          *usageCapture
 }
 
 func Main(argv []string, out, stderr io.Writer) int {
@@ -51,12 +57,18 @@ func Main(argv []string, out, stderr io.Writer) int {
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
 		root = resolved
 	}
+	if args.command == "usage" {
+		return usageCommand(args, out, refuse)
+	}
 	if args.command == "new" {
 		return scaffold(root, args, out, refuse)
 	}
 	project, err := dictionary.FindProject(root)
 	if err != nil {
 		return refuse(err)
+	}
+	if args.command == "run" {
+		args.capture = newUsage(project, args)
 	}
 	switch args.command {
 	case "propose", "admit", "gap", "check":
@@ -182,7 +194,9 @@ func Main(argv []string, out, stderr io.Writer) int {
 	if err != nil {
 		return refuse(err)
 	}
+	args.capture.begin(run.Snapshot(), stderr)
 	record, runErr := run.Execute(plan, opts)
+	defer func() { args.capture.finish(record, stderr) }()
 	if refused := (runner.Refused{}); errors.As(runErr, &refused) {
 		return refuse(refused.Err)
 	}
@@ -223,16 +237,17 @@ type command struct {
 }
 
 // optional lists, for a command without a required operand, the positional operands it may take, in order.
-var optional = map[string][]string{"index": {"claim", "word"}}
+var optional = map[string][]string{"index": {"claim", "word"}, "usage": {"RUN"}}
 
 var commands = map[string]command{
-	"run":     {"chain", "[--keep] [--fresh] [--no-chain] [--continue RUN] [--ticket FILE] [--claim CLAIM ...] [--named CLAIM ...] [--changed CHANGE ...] [--json] [chain]", "run a chain, or the chain planned from claims and a diff", []string{"--keep", "--fresh", "--no-chain", "--json"}, []string{"--continue", "--ticket", "--claim", "--named", "--changed"}},
+	"run":     {"chain", "[--keep] [--fresh] [--no-chain] [--continue RUN] [--ticket FILE] [--claim CLAIM ...] [--named CLAIM ...] [--changed CHANGE ...] [--tokens N] [--estimated] [--change REF] [--json] [chain]", "run a chain, or the chain planned from claims and a diff", []string{"--keep", "--fresh", "--no-chain", "--json", "--estimated"}, []string{"--continue", "--ticket", "--claim", "--named", "--changed", "--tokens", "--change"}},
 	"plan":    {"chain", "[--no-chain] [--continue RUN] [--ticket FILE] [--claim CLAIM ...] [--named CLAIM ...] [--changed CHANGE ...] [--json] [chain]", "show whether a chain would be skipped, or plan claims and a diff, running nothing", []string{"--no-chain", "--json"}, []string{"--continue", "--ticket", "--claim", "--named", "--changed"}},
 	"ticket":  {"file", "[--json] file", "validate a run ticket and resolve its profile and defaults", []string{"--json"}, nil},
 	"words":   {"", "", "list the dictionary and each word's lifecycle status", nil, nil},
 	"claims":  {"", "[--json]", "list each claim's current version, the words that prove it, and any review it needs", []string{"--json"}, nil},
 	"index":   {"", "[--intent TEXT | --changed FILE ...] [--json] [claim [word]]", "show the product's active claims, one claim's words, or one word's run details; or look claims up by intent or by changed files", []string{"--json"}, []string{"--intent", "--changed"}},
 	"runs":    {"", "[--json]", "list this project's runs and any instance still alive", []string{"--json"}, nil},
+	"usage":   {"", "[--json] [RUN --tokens N [--estimated] | RUN --miss REVIEW]", "read the durable usage ledger, or attach caller tokens or a later review miss", []string{"--json", "--estimated"}, []string{"--tokens", "--miss"}},
 	"cleanup": {"run", "run", "tear down a kept run's instance", nil, nil},
 	"new":     {"word", "--implements REF [--implements REF ...] word", "scaffold a provisional word", nil, []string{"--implements"}},
 	"onboard": {"word", "[--same-as CLAIM | --distinct] [--json] word", "onboard a word that proves a claim: group it under its claim, gate its correctness, record the decision; or answer its open grouping question", []string{"--distinct", "--json"}, []string{"--same-as"}},
@@ -242,7 +257,7 @@ var commands = map[string]command{
 	"check":   {"", "", "report admitted words whose files, claim or feature-map sections changed (drift-suspect)", nil, nil},
 }
 
-var order = []string{"run", "plan", "ticket", "words", "claims", "index", "runs", "cleanup", "new", "onboard", "propose", "admit", "gap", "check"}
+var order = []string{"run", "plan", "ticket", "words", "claims", "index", "runs", "usage", "cleanup", "new", "onboard", "propose", "admit", "gap", "check"}
 
 func parse(argv []string) (options, bool, error) {
 	cwd, err := os.Getwd()
@@ -298,6 +313,7 @@ func parse(argv []string) (options, bool, error) {
 			o.json = o.json || arg == "--json"
 			o.distinct = o.distinct || arg == "--distinct"
 			o.noChain = o.noChain || arg == "--no-chain"
+			o.estimated = o.estimated || arg == "--estimated"
 			continue
 		}
 		if name, value, inline := strings.Cut(arg, "="); !literal && slices.Contains(spec.values, name) {
@@ -309,6 +325,19 @@ func parse(argv []string) (options, bool, error) {
 				value = argv[i]
 			}
 			switch name {
+			case "--tokens":
+				count, err := strconv.ParseInt(value, 10, 64)
+				if err != nil || count < 0 {
+					return o, false, fmt.Errorf("--tokens needs a nonnegative integer")
+				}
+				o.tokens = &usage.Tokens{Count: count}
+			case "--change":
+				o.change = value
+			case "--miss":
+				if strings.TrimSpace(value) == "" {
+					return o, false, fmt.Errorf("--miss needs a nonempty review reference or finding")
+				}
+				o.miss = value
 			case "--implements":
 				o.implements = append(o.implements, value)
 			case "--changed":
@@ -337,6 +366,15 @@ func parse(argv []string) (options, bool, error) {
 			return o, false, fmt.Errorf("unrecognized arguments: %s", arg)
 		}
 		pos = append(pos, arg)
+	}
+	if o.estimated && o.tokens == nil {
+		return o, false, fmt.Errorf("--estimated needs --tokens")
+	}
+	if o.tokens != nil {
+		o.tokens.Estimated = o.estimated
+	}
+	if o.command == "usage" && len(pos) == 0 && (o.tokens != nil || o.miss != "") {
+		return o, false, fmt.Errorf("caller data needs a RUN id")
 	}
 	if o.command == "plan" || o.command == "run" {
 		if len(pos) > 1 {
@@ -390,7 +428,7 @@ func parse(argv []string) (options, bool, error) {
 func usageFor(name string) string {
 	spec, ok := commands[name]
 	if !ok {
-		return usage
+		return usageText
 	}
 	return strings.TrimSpace("usage: verilex "+name+" [-h] "+spec.usage) + "\n"
 }
@@ -420,6 +458,10 @@ func printHelp(name string, out io.Writer) {
 }
 
 var flagHelp = map[string]string{
+	"--tokens":     "--tokens N   caller-reported agent tokens; unknown when omitted",
+	"--estimated":  "--estimated  mark caller tokens as an estimate",
+	"--change":     "--change REF  caller's change reference for the usage ledger",
+	"--miss":       "--miss REVIEW  later review reference or finding: only a green can be a miss",
 	"--keep":       "--keep      skip cleanup; tear down later with `verilex cleanup`",
 	"--fresh":      "--fresh     run live even when every proof stamp matches",
 	"--no-chain":   "--no-chain  refuse a chain argument, an empty one too; plan only from --claim, --named and --changed",

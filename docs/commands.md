@@ -13,6 +13,9 @@ Every command takes `--project <dir>` before the command name, the product check
 | `verilex words` | Lists the dictionary with each word's promise, claim, `requires`, `provides` and lifecycle status |
 | `verilex claims [--json]` | Lists each claim's current version, the words that prove it, and why it needs review |
 | `verilex runs [--json]` | Lists this project's runs and whether each instance was cleaned up; a run without a verdict shows `running` while its process lives and `died` once it is gone |
+| `verilex usage [--json]` | Reads the durable cross-product usage ledger and totals, separate from proof stamps |
+| `verilex usage <run> --tokens <count> [--estimated]` | Attaches caller token cost without double-counting a run |
+| `verilex usage <run> --miss '<review>'` | Marks a green run as a miss found by later review |
 | `verilex cleanup <run>` | Tears down an instance kept with `--keep`, or left behind by a run whose process died; refuses a run that is still going |
 | `verilex new <word> --implements <ref>` | Scaffolds a provisional word that implements a feature-map section |
 | `verilex onboard <word> [--json]` | Admits a word that proves a claim: checks its uses, mapping and evidence, matches its claim against the vocabulary, gates it on planted defects, and records the decision in `.verilex/grouping.yaml` |
@@ -24,6 +27,8 @@ Every command takes `--project <dir>` before the command name, the product check
 | `verilex admit <word> --verdict <file>` | Records an outside curator's `admit` or `reject` verdict on such a packet |
 | `verilex gap '<description>'` | Notes a product moment the feature map has no section for |
 | `verilex check` | Reports admitted words that are drift-suspect, including those whose claim needs review |
+
+`run` also accepts `--change <reference>`, `--tokens <count>` and `--estimated` for the [usage ledger](usage-ledger.md). Set `VERILEX_USAGE_LEDGER` to persistent shared storage when callers use temporary state homes.
 
 ## Exit codes
 

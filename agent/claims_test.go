@@ -75,6 +75,41 @@ verilex run --claim store-opened "$@" > "$HOME/printed"
 	}
 }
 
+// The launcher looks up the touched claims in the project with each path as the brain sends it,
+// relative, so a very wide diff needs no more argument space for the lookup than for the brain's run.
+func TestTouchedClaimLookupSendsRelativePathsFromTheProject(t *testing.T) {
+	dir, product, ledger := changedProduct(t)
+	log := filepath.Join(dir, "index-changed.log")
+	spy := filepath.Join(dir, "verilex-spy")
+	script := fmt.Sprintf(`#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in --changed=*) { pwd -P; echo "$arg"; } >> %q ;; esac
+done
+exec %q "$@"
+`, log, coreBin)
+	if err := os.WriteFile(spy, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	brain := writeBrain(t, dir, "#!/bin/sh\nverilex run --changed bin/tally > /dev/null\n")
+	run := launchKept(t, dir, spy, brain,
+		"--project", product, "--home", filepath.Join(dir, "home"), "--ledger", ledger,
+		"--intent", "prove the store opens", "--diff", "HEAD", "--harness", "stub", "--model", "stub")
+	if run.code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", run.code, run.stdout, run.stderr)
+	}
+	text, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wd, err := filepath.EvalSymlinks(product)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := wd + "\n--changed=bin/tally\n"; string(text) != want {
+		t.Fatalf("index --changed ran as %q, want %q", text, want)
+	}
+}
+
 // The brain drives verilex only through the launcher, which refuses commands that change what
 // verilex trusts or keep an instance past the run.
 func TestBrainCannotChangeTrustOrKeepAnInstance(t *testing.T) {

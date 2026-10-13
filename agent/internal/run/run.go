@@ -605,8 +605,9 @@ func floor(ctx context.Context, verilex, project, intent string, claims, changed
 func touchedClaims(ctx context.Context, verilex, project string, changed []string) ([]string, error) {
 	args := []string{"index", "--json"}
 	for _, path := range changed {
-		// verilex reads a relative path from its working directory, not from --project.
-		args = append(args, "--changed="+filepath.Join(project, path))
+		// The path stays relative, as the brain's own run sends it, so a wide diff needs no more
+		// argument space here than there. verilexJSON runs verilex in the project, where it resolves it.
+		args = append(args, "--changed="+path)
 	}
 	var found struct {
 		Claims []struct {
@@ -636,11 +637,14 @@ func touchedClaims(ctx context.Context, verilex, project string, changed []strin
 const lookupTimeout = 30 * time.Second
 
 // verilexJSON runs one read-only verilex command for the launcher itself and decodes its JSON
-// into out. A refusal comes back as verilex worded it, and a deadline as context.DeadlineExceeded.
+// into out, with the project as its working directory (verilex reads a relative path from there,
+// not from --project). A refusal comes back as verilex worded it, and a deadline as
+// context.DeadlineExceeded.
 func verilexJSON(ctx context.Context, verilex, project string, out any, args ...string) error {
 	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, verilex, append([]string{"--project", project}, args...)...)
+	cmd.Dir = project
 	cmd.Env = os.Environ()
 	// A process group of its own, so the deadline ends every process it started.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

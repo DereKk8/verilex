@@ -30,21 +30,13 @@ type Doc struct {
 	Unmapped  []string    `json:"unmapped"`
 	Unclaimed []string    `json:"unclaimed"`
 	Unrun     []string    `json:"unrun"`
-	// Claims is every claim a claim run selected, with the verdict verilex gave it.
+	// Claims is every claim a claim run selected or proved, with the verdict verilex gave it.
 	Claims []Claim `json:"claims"`
-	// Words is every word the run ran or reused.
-	Words []Step `json:"words"`
 }
 
 // Claim is one selected claim of a claim run.
 type Claim struct {
 	Claim   string `json:"claim"`
-	Verdict string `json:"verdict"`
-}
-
-// Step is one word of a run: the claim version it proves (<claim>@<version>) and its verdict.
-type Step struct {
-	Proves  string `json:"proves"`
 	Verdict string `json:"verdict"`
 }
 
@@ -118,7 +110,7 @@ func Exit(doc Doc, verilexExit int) (int, error) {
 	return want, nil
 }
 
-// Decide is the verdict rule, rows 9-33 of docs/verdict-rule.md; prompt.Rule states it to the
+// Decide is the verdict rule, rows 9-34 of docs/verdict-rule.md; prompt.Rule states it to the
 // brain. It turns every run the brain made, in the order the runs finished, into the verdict the
 // launcher returns and its exit code; an error is the reason there is none. unfinished is why the
 // brain did not finish, such as an ended time budget, or nil. The proxy passes --no-chain to every
@@ -191,8 +183,9 @@ func isPlanned(doc Doc) bool {
 	return doc.Format == RunFormat && doc.Requested != nil && doc.Requested.Chain == nil
 }
 
-// provenBy is every claim a green run proved: the claims it was asked for, and each selected
-// claim and word it gave a green.
+// provenBy is every claim a green run proved: the claims it was asked for, and each claim it gave
+// a green. Only verilex's claims say what a word proved: a word that ran on other arguments than
+// those it was admitted on only provided a state, so its green proves nothing.
 func provenBy(doc Doc) map[string]bool {
 	out := map[string]bool{}
 	for _, name := range append(slices.Clone(doc.Requested.Claims), doc.Requested.Named...) {
@@ -203,16 +196,11 @@ func provenBy(doc Doc) map[string]bool {
 			out[claim.Claim] = true
 		}
 	}
-	for _, step := range doc.Words {
-		if step.Verdict == "green" && claimOf(step) != "" {
-			out[claimOf(step)] = true
-		}
-	}
 	return out
 }
 
-// selected is every claim a run set out to prove: the claims it was asked for, the claims it
-// selected, and the claim each of its words proves.
+// selected is every claim a run set out to prove: the claims it was asked for, and the claims it
+// selected or proved.
 func selected(doc Doc) []string {
 	var out []string
 	add := func(name string) {
@@ -226,16 +214,7 @@ func selected(doc Doc) []string {
 	for _, claim := range doc.Claims {
 		add(claim.Claim)
 	}
-	for _, step := range doc.Words {
-		add(claimOf(step))
-	}
 	return out
-}
-
-// claimOf is the claim a word proves, without its version; empty for a word with no claim.
-func claimOf(step Step) string {
-	name, _, _ := strings.Cut(step.Proves, "@")
-	return name
 }
 
 // check refuses a green that does not cover the spec: one that neither was asked for nor proved a

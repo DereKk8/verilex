@@ -104,6 +104,9 @@ type WordRecord struct {
 	Evidence    string          `json:"evidence"`
 	Stamp       string          `json:"stamp,omitempty"`
 	ReliesOn    string          `json:"relies_on,omitempty"`
+	// ProvidesOnly marks a claim plan's step that ran only to provide a state another step
+	// requires: it proves no claim, and its verdict is no claim's verdict.
+	ProvidesOnly bool `json:"provides_only,omitempty"`
 }
 
 type Record struct {

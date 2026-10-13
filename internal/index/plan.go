@@ -322,19 +322,19 @@ func (ix Index) wordFor(claim string) (dictionary.Word, error) {
 
 func (ix Index) bindings(p dictionary.Project) map[string][]string {
 	found := map[string][]string{}
-	records, err := runner.LoadRuns(p)
-	if err == nil {
-		slices.SortFunc(records, func(a, b runner.Record) int { return strings.Compare(b.Started, a.Started) })
-		for _, record := range records {
-			ix.takeBindings(found, record.Chain)
-		}
-	}
 	for _, word := range ix.words {
 		if _, ok := found[word.Name]; ok {
 			continue
 		}
 		if d, ok := ix.g.Sound(word.Name); ok && d.Chain != "" {
 			ix.takeBindings(found, d.Chain)
+		}
+	}
+	records, err := runner.LoadRuns(p)
+	if err == nil {
+		slices.SortFunc(records, func(a, b runner.Record) int { return strings.Compare(b.Started, a.Started) })
+		for _, record := range records {
+			ix.takeBindings(found, record.Chain)
 		}
 	}
 	return found

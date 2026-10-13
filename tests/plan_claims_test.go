@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/DereKk8/verilex/internal/dictionary"
+	"github.com/DereKk8/verilex/internal/grouping"
 )
 
 // claimPlan is the verilex-claim-plan-1 JSON a launcher binds to.
@@ -649,4 +652,40 @@ func TestForcedHitOnOtherWordOfClaim(t *testing.T) {
 	equal(t, record["unrun"], any([]any{"item-listed-b"}))
 	contains(t, verilex(t, root, nil, "run", "--changed", "config:tally.listb").stdout,
 		"  unrun  item-listed-b: proves a claim this chain proves through another word; run a chain that uses it\n")
+}
+
+// Rule: a claim plan binds each word's arguments from the admitted onboarding chain. A newer run on
+// other inputs never changes what the plan skips or runs, so the plan and the run cannot go green on them.
+func TestPlanBindsAdmittedChainNotNewestRun(t *testing.T) {
+	root := curated(t)
+	proveOn(t, root, chain, "store-open", "item-stored", "item-listed")
+	green(t, root, nil, chain)
+	green(t, root, nil, "store-open | item-stored pear | item-listed pear")
+	plan := planClaims(t, root, "--claim", "item-listed")
+	equal(t, plan.Chain, chain)
+	if len(plan.Skip) != 1 || plan.Skip[0].Word != "item-listed" {
+		t.Fatalf("skip: %+v", plan.Skip)
+	}
+	contains(t, plan.Skip[0].Step, "item-listed apple")
+}
+
+// proveOn records the chain onboarding proved each named admitted word on.
+func proveOn(t *testing.T, root, onChain string, words ...string) {
+	t.Helper()
+	project, err := dictionary.FindProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := grouping.Load(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, word := range words {
+		d := g.Words[word]
+		d.Chain = onChain
+		g.Set(word, d)
+	}
+	if err = grouping.Save(project, g); err != nil {
+		t.Fatal(err)
+	}
 }

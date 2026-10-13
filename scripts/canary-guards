@@ -79,8 +79,9 @@ copy tag-origin-main
 plant "$work/tag-origin-main/tree/internal/runner/runner.go" "$cleanup_frame" '[]string{"true"}'
 expect tag-origin-main fails "is not on origin/main"
 
-# The fixture reports a store the canary's own process resolves elsewhere: relative, or through /proc/self/cwd.
+# The fixture reports a store the canary's own process resolves elsewhere: relative, or through /proc/self/cwd (only where /proc exists).
 for store in relative:'    store = Path(f"tally-{run}")' proc-cwd:'    store = Path("/proc/self/cwd") / f"tally-{run}"'; do
+  [ "${store%%:*}" != proc-cwd ] || [ -e /proc/self/cwd ] || continue
   copy "store-${store%%:*}"
   plant "$work/store-${store%%:*}/tree/tests/fixtures/tally/.verilex/frame/launch" "$store_line" "${store#*:}"
   plant "$work/store-${store%%:*}/tree/internal/runner/runner.go" "$cleanup_frame" '[]string{"true"}'

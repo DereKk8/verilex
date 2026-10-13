@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "summary": "CI drives a fixed Linux brain through permitted capabilities and refusal edges on all three verdicts.",
+  "files": [
+    {
+      "path": "agent/standin_linux_test.go",
+      "summary": "The host test checks the scripted brain against the real launcher and tally product.",
+      "annotations": [
+        {
+          "newRange": [15, 202],
+          "summary": "TestScriptedStandinBrain checks 37 commands and 69 probes against healthy, defective and locked-store fixtures.",
+          "rationale": "The brain must not choose expected results, so the host retains assertions and compares the launcher's bytes with the core's verdict. Three repeats and post-rebase scripts/ci test lint build boundary canary passed. The sweep is Linux-only. Existing agent tests still cover macOS, budgets, child cleanup and verdict ordering.",
+          "author": "fm/verilex-standin-brain"
+        }
+      ]
+    },
+    {
+      "path": "agent/testdata/standin-brain.py",
+      "summary": "The fixed script attempts sandbox actions without a model or an external service.",
+      "annotations": [
+        {
+          "newRange": [118, 154],
+          "summary": "Public-address probes use an invalid port to prove admission without making public connections.",
+          "rationale": "A public service would make CI depend on network availability, so these probes require the proxy's local dial failure after address admission. Private targets must instead return 403. The test also checks host files because Linux scratch paths can resemble writable host paths. Successful public tunnels and boundary fuzzing remain unverified.",
+          "author": "fm/verilex-standin-brain"
+        }
+      ]
+    },
+    {
+      "path": "docs/sandbox.md",
+      "summary": "The sandbox guide names the deterministic test and its limits.",
+      "annotations": [
+        {
+          "newRange": [16, 29],
+          "summary": "The guide explains repeatable outcomes, Linux scratch paths and the existing CI entry point.",
+          "rationale": "The existing scripts/ci test already runs the agent package, so no parallel workflow or harness is needed. Run ids and timestamps vary while fixed outcomes repeat. Verilex itself reports that no claim covers the changed paths, as recorded in the task's usage report.",
+          "author": "fm/verilex-standin-brain"
+        }
+      ]
+    }
+  ]
+}

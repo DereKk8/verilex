@@ -26,10 +26,16 @@ def drift():
     expect("item-stored: claim item-added declares planted defect another-dropped-add" in changed,
            "new planted defect not reported as drift")
     expect("drift-suspect" in doc("defect-plan", "plan", c.CHAIN).get("rerun", ""), "new defect left plan skippable")
+    claim.write_text(old.replace("  dropped-add: {TALLY_DEFECT: drop-adds}\n", ""))
+    removed = c.must("removed-defect", "check").stdout
+    expect("item-stored: claim item-added no longer declares planted defect dropped-add" in removed,
+           "removed planted defect not reported as drift")
+    expect("drift-suspect" in doc("removed-plan", "plan", c.CHAIN).get("rerun", ""),
+           "removed defect left plan skippable")
     claim.write_text(old)
     expect(c.must("restored", "check").stdout.strip() == "check: no drift (3 admitted)", "restoring files did not clear drift")
     expect(all(s["skipped"] for s in doc("restored-plan", "plan", c.CHAIN)["steps"]), "restoring files did not restore skip")
-    c.result("pass", observation="check names changed item-listed and new another-dropped-add defect as drift; plan runs each drifted chain live; restoring files clears drift and restores skip")
+    c.result("pass", observation="check names changed item-listed, new another-dropped-add and removed dropped-add defects as drift; plan runs each drifted chain live; restoring files clears drift and restores skip")
 
 
 try:

@@ -24,6 +24,8 @@ if [ -n "${CANARY_DEFECT:-}" ]; then
     ledger-trust-evidence) f=internal/ledger/store.go; from='if digest(stdout) != p.Result {'; to='if false && digest(stdout) != p.Result {' ;;
     drift-ignore-word) f=internal/lifecycle/lifecycle.go; from='if digest != d.Digest {'; to='if false && digest != d.Digest {' ;;
     drift-ignore-defect) f=internal/lifecycle/lifecycle.go; from='if d.Defects[name] != w.Claim.Defects[name].Digest() {'; to='if false && d.Defects[name] != w.Claim.Defects[name].Digest() {' ;;
+    drift-ignore-removed) f=internal/lifecycle/lifecycle.go; from='if _, ok := w.Claim.Defects[name]; !ok {'; to='if _, ok := w.Claim.Defects[name]; false && !ok {' ;;
+    index-hide-drift) f=internal/cli/index.go; from='if w.Drift {'; to='if false && w.Drift {' ;;
     plan-no-binding) f=internal/index/plan.go; from='ix.takeBindings(found, d.Chain)'; to='// planted: drop admitted bindings' ;;
     agent-drop-diff) f=agent/internal/run/run.go; from='Changed: changed}, unfinished)'; to='Changed: nil}, unfinished)' ;;
     skill-unpinned-bin) f=.cursor/skills/verify-verilex/scripts/launch; from="cp \"\$bin\" \"\$S/bin/verilex\""; to="ln -s \"\$bin\" \"\$S/bin/verilex\"" ;;

@@ -156,6 +156,23 @@ func TestSkillIntentAndSuggestionsReachTheBrain(t *testing.T) {
 	}
 }
 
+// A claim the diff touches is on the floor, though neither --claim nor the brain names it, so a
+// green that proves only the --claim is inconclusive and names the touched claim.
+func TestTouchedClaimIsOnTheFloor(t *testing.T) {
+	dir := t.TempDir()
+	gitRepo(t, filepath.Join(dir, "project"), "notes.txt")
+	fake := writeFake(t, dir, fakeFiles{
+		ticket:  []byte("{\"diff\":\"HEAD\",\"harness\":\"stub\",\"model\":\"stub\"}\n"),
+		run:     claimRun("green", "r5", []string{"store-opened"}, []string{"notes.txt"}),
+		changed: []byte(`{"files":[],"claims":[{"claim":"item-added"}]}` + "\n"),
+	})
+	brain := writeBrain(t, dir, "#!/bin/sh\nverilex run --named store-opened --changed notes.txt\n")
+	stdout, stderr, code := launch(t, dir, fake, brain, "--diff", "HEAD", "--claim", "store-opened", "--harness", "stub", "--model", "stub")
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "inconclusive: run r5 is green but was not asked about claim item-added\n") {
+		t.Fatalf("exit %d stdout %q stderr %s", code, stdout, stderr)
+	}
+}
+
 func TestUnreadableDiffIsRefusedBeforeTheBrain(t *testing.T) {
 	dir := t.TempDir()
 	gitRepo(t, filepath.Join(dir, "project"), "notes.txt")
@@ -371,6 +388,8 @@ type fakeFiles struct {
 	runs []fakeRun
 	// index answers verilex index; by default the intent names store-opened.
 	index []byte
+	// changed answers verilex index --changed; by default the diff touches no claim.
+	changed []byte
 }
 
 type fakeRun struct {
@@ -394,7 +413,12 @@ for arg in "$@"; do
 done
 case "$cmd" in
   ticket) cat "$FAKE_TICKET"; exit 0 ;;
-  index) cat "$FAKE_INDEX"; exit 0 ;;
+  index)
+    case "$*" in
+      *--changed*) cat "$FAKE_CHANGED" ;;
+      *) cat "$FAKE_INDEX" ;;
+    esac
+    exit 0 ;;
   plan) cat "$FAKE_PLAN"; exit 0 ;;
   run)
     if [ -n "$FAKE_RUNS" ]; then
@@ -430,6 +454,10 @@ func writeFake(t *testing.T, dir string, files fakeFiles) string {
 	}
 	t.Setenv("FAKE_TICKET", write("ticket.json", files.ticket))
 	t.Setenv("FAKE_INDEX", write("index.json", files.index))
+	if files.changed == nil {
+		files.changed = []byte(`{"files":[],"claims":[]}` + "\n")
+	}
+	t.Setenv("FAKE_CHANGED", write("changed.json", files.changed))
 	t.Setenv("FAKE_PLAN", write("plan.json", files.plan))
 	t.Setenv("FAKE_RUN", write("run.json", files.run))
 	t.Setenv("FAKE_RUN_EXIT", fmt.Sprint(files.runExit))

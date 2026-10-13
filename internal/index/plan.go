@@ -323,29 +323,35 @@ func (ix Index) wordFor(claim string) (dictionary.Word, error) {
 func (ix Index) bindings(p dictionary.Project) map[string][]string {
 	found := map[string][]string{}
 	for _, word := range ix.words {
-		if _, ok := found[word.Name]; ok {
-			continue
-		}
 		if d, ok := ix.g.Sound(word.Name); ok && d.Chain != "" {
-			ix.takeBindings(found, d.Chain)
+			ix.takeBindings(found, d.Chain, word.Name)
+		}
+	}
+	for _, word := range ix.words {
+		if d, ok := ix.g.Sound(word.Name); ok && d.Chain != "" {
+			ix.takeBindings(found, d.Chain, "")
 		}
 	}
 	records, err := runner.LoadRuns(p)
 	if err == nil {
 		slices.SortFunc(records, func(a, b runner.Record) int { return strings.Compare(b.Started, a.Started) })
 		for _, record := range records {
-			ix.takeBindings(found, record.Chain)
+			ix.takeBindings(found, record.Chain, "")
 		}
 	}
 	return found
 }
 
-func (ix Index) takeBindings(found map[string][]string, chain string) {
+// takeBindings binds the words of chain not yet bound; a non-empty only binds just that word.
+func (ix Index) takeBindings(found map[string][]string, chain, only string) {
 	steps, err := dictionary.ParseChain(chain, ix.words)
 	if err != nil {
 		return
 	}
 	for _, step := range steps {
+		if only != "" && step.Word.Name != only {
+			continue
+		}
 		if _, ok := found[step.Word.Name]; !ok {
 			found[step.Word.Name] = step.Argv
 		}

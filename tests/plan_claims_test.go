@@ -669,6 +669,23 @@ func TestPlanBindsAdmittedChainNotNewestRun(t *testing.T) {
 	contains(t, plan.Skip[0].Step, "item-listed apple")
 }
 
+// Rule: a word binds from its own admitted chain before another word's. item-stored is admitted on apple
+// and item-listed on pear, so a run of item-added meets the apple defect and cannot go green on pear.
+func TestRunClaimBindsEachWordFromItsOwnAdmittedChain(t *testing.T) {
+	root := curated(t)
+	pear := "store-open | item-stored pear | item-listed pear"
+	proveOn(t, root, "store-open | item-stored apple", "store-open", "item-stored")
+	proveOn(t, root, pear, "item-listed")
+	green(t, root, nil, pear)
+	plan := planClaims(t, root, "--claim", "item-added")
+	equal(t, plan.Chain, "store-open | item-stored apple")
+	done := verilex(t, root, map[string]string{"TALLY_DEFECT": "drop-apple"}, "run", "--claim", "item-added")
+	if done.code != 1 {
+		t.Fatalf("run --claim item-added with apple broken: exit %d\n%s", done.code, done.stdout)
+	}
+	contains(t, done.stdout, "red  item-added: tally said 'added apple' but store.json lacks apple")
+}
+
 // proveOn records the chain onboarding proved each named admitted word on.
 func proveOn(t *testing.T, root, onChain string, words ...string) {
 	t.Helper()

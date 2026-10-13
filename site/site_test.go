@@ -84,6 +84,23 @@ func TestIndexItemsMustBePageLinks(t *testing.T) {
 	}
 }
 
+// A claim anchor is an HTML comment, which GitHub renders as nothing: the site drops it too, so no
+// page, search result or Ask answer shows it, while an anchor shown as an example stays.
+func TestPagesLeaveOutClaimAnchors(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "docs/README.md", "# Docs\n\n## Start\n\n- [Alpha](a.md): the first page.\n")
+	write(t, root, "docs/a.md", "# Alpha\n\n## Skipping\n<!-- claims: chain-skipped -->\n\nA proven chain is skipped.\n\n"+
+		"```markdown\n<!-- claims: chain-red -->\n```\n")
+	b, err := Load(root, defaultRepo, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Alpha\n\n## Skipping\n\nA proven chain is skipped.\n\n```markdown\n<!-- claims: chain-red -->\n```\n"
+	if got := b.Pages[0].Markdown; got != want {
+		t.Errorf("markdown:\n%q\nwant:\n%q", got, want)
+	}
+}
+
 func TestHeadingsMatchGitHubAnchors(t *testing.T) {
 	hs := Headings("# Claims\n\n## Words pin a version\n\n```\n## not a heading\n```\n\n## The `.verilex` directory\n\n" +
 		"## Words pin a version\n\n### [Linked](x.md) **bold**\n")

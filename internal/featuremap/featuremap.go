@@ -88,6 +88,27 @@ func (f *fence) step(line string) bool {
 	return true
 }
 
+// Heading reads a markdown heading line: its level and its text, or level 0 when line is not one.
+// The caller skips lines inside fenced blocks (see Fenced).
+func Heading(line string) (int, string) {
+	m := heading.FindStringSubmatch(line)
+	if m == nil {
+		return 0, ""
+	}
+	return len(m[1]), m[2]
+}
+
+// Fenced reports, for each line, whether it belongs to a fenced block, fence lines included.
+func Fenced(lines []string) []bool {
+	in := make([]bool, len(lines))
+	var f fence
+	for i, line := range lines {
+		open := f != ""
+		in[i] = f.step(line) || open
+	}
+	return in
+}
+
 // fenceEnd returns the index just past the fenced block that opens at lines[i].
 func fenceEnd(lines []string, i int) int {
 	var f fence

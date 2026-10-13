@@ -101,7 +101,7 @@ func loadPage(root, file string) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
-	text := string(data)
+	text := withoutComments(string(data))
 	return Page{Slug: strings.TrimSuffix(file, ".md"), File: "docs/" + file, Markdown: text, Headings: Headings(text)}, nil
 }
 
@@ -174,6 +174,22 @@ func mdLines(markdown string) []mdLine {
 		out = append(out, mdLine{line, false})
 	}
 	return out
+}
+
+// htmlComment is a line that is one HTML comment, such as a claim anchor (see docs/word-index.md).
+var htmlComment = regexp.MustCompile(`^\s*<!--.*-->\s*$`)
+
+// withoutComments drops the lines outside fenced blocks that are one HTML comment: GitHub renders
+// them as nothing, so the site, its search and Ask never show them either.
+func withoutComments(markdown string) string {
+	var out []string
+	for _, l := range mdLines(markdown) {
+		if !l.Fenced && htmlComment.MatchString(l.Text) {
+			continue
+		}
+		out = append(out, l.Text)
+	}
+	return strings.Join(out, "\n")
 }
 
 // outsideFences returns the lines that are not part of a fenced block.

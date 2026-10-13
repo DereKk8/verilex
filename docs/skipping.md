@@ -13,6 +13,7 @@ Every word result carries a proof stamp: a fingerprint of everything the result 
 - the stamp of the step before it, so a change anywhere upstream reaches every later word.
 
 ## When a chain is skipped
+<!-- claims: chain-skipped -->
 
 After a run that is not inconclusive, verilex records each green word as a pass in [the ledger](#the-shared-ledger), keyed by the chain prefix that ends in that word. A later `verilex run` skips the chain only when every word is admitted (see [the word lifecycle](word-lifecycle.md)) and a pass stands for every word's stamp: it proved the claim version the word pins, its evidence still exists and meets the evidence contract, and it was recorded less than 7 days ago. A skipped run launches nothing and names the run it relies on:
 

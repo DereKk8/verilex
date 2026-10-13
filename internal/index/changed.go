@@ -13,10 +13,16 @@ import (
 // Change is what the change lookup returns: the claims whose dependencies cover the touched
 // files, and for every known chain that holds one of their words, the decision `verilex plan`
 // makes for it.
+//
+// Passages are the doc passages whose anchors name one of the claims, so the change may have made
+// them false; Named are the passages of the touched docs, with the claims each names, so a doc
+// change can be checked against them. When a doc and the code disagree, the code wins.
 type Change struct {
-	Files  []string `json:"files"`
-	Claims []Claim  `json:"claims"`
-	Chains []Rerun  `json:"chains"`
+	Files    []string  `json:"files"`
+	Claims   []Claim   `json:"claims"`
+	Chains   []Rerun   `json:"chains"`
+	Passages []Passage `json:"passages"`
+	Named    []Passage `json:"named"`
 }
 
 // Rerun is one chain and its plan: run it (Run, with the first reason it runs live), skip it
@@ -34,15 +40,23 @@ type Rerun struct {
 // everything every word shares: config.yaml, the frame, the files beside the word directories
 // and the grouping file. The chains are those onboarding proved the covered words on and those
 // this product ran with them; each gets the skip decision `verilex plan` makes, from the same code.
+//
+// Anchors add no dependency: a doc change re-runs only what its path already covers, and names
+// the claims the doc's anchors tie it to.
 func (ix Index) Changed(p dictionary.Project, touched []string) (Change, error) {
 	hit := ix.touchOf(p, touched)
 	change := Change{Files: hit.files, Claims: []Claim{}, Chains: []Rerun{}}
+	passages, err := ix.passages(p)
+	if err != nil {
+		return change, err
+	}
 	covered := hit.covered
 	for _, c := range ix.Claims {
 		if hit.claims[c.Claim] {
 			change.Claims = append(change.Claims, c)
 		}
 	}
+	change.Passages, change.Named = ix.tied(passages, change.Claims), within(p, passages, touched)
 	// chains maps each chain, spaced one way, to how it was first written.
 	chains := map[string]string{}
 	add := func(chain string) {

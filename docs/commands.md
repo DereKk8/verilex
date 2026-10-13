@@ -19,7 +19,7 @@ Every command takes `--project <dir>` before the command name, the product check
 | `verilex onboard <word> --same-as <claim> \| --distinct` | Answers the decision request an undecided onboarding left: the word's claim says the same as that grouped claim, or stays a claim of its own |
 | `verilex index [<claim> [<word>]] [--json]` | Prints the word index for this product: active claims, a claim's words, or one word's details |
 | `verilex index --intent '<text>' [--json]` | Finds the claims an intent names |
-| `verilex index --changed <change>... [--json]` | Lists the claims a diff affects, and for each known chain whether `plan` would run it. A change is a file path, `config:<key>`, `image:<pin>` or `runbook:<ref>` |
+| `verilex index --changed <change>... [--json]` | Lists the claims a diff affects, for each known chain whether `plan` would run it, and the doc passages tied to those claims; for a changed doc, the claims its anchors name. A change is a file path, `config:<key>`, `image:<pin>` or `runbook:<ref>` |
 | `verilex propose <word>` | Builds a curator packet for a word without a claim, used in at least two runs |
 | `verilex admit <word> --verdict <file>` | Records an outside curator's `admit` or `reject` verdict on such a packet |
 | `verilex gap '<description>'` | Notes a product moment the feature map has no section for |

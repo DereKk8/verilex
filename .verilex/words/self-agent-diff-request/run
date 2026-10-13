@@ -25,9 +25,11 @@ def agent_diff_request():
              "--skill", skill, "--brain", brain, "--harness", "stub", "--model", "stub", "--claim", "store-opened", "--diff", "HEAD"]
     omitted_home = c.instance / "omitted-home"
     omitted = external("omitted-diff", [*flags, "--home", omitted_home], clean_git=True)
-    if "sandbox" in omitted.stderr and "was not asked about change" not in omitted.stderr:
+    if "sandbox" in omitted.stderr and "was not asked about" not in omitted.stderr:
         c.result("blocked", detail=c.said(omitted))
-    expect(omitted.returncode == 2 and omitted.stdout == "" and "was not asked about change bin/tally" in omitted.stderr,
+    # The refusal also names the claims the diff touches; the change itself must be among the gaps.
+    gaps = omitted.stderr.partition("was not asked about ")[2].strip().split(", ")
+    expect(omitted.returncode == 2 and omitted.stdout == "" and "change bin/tally" in gaps,
            "launcher returned a verdict for a green run that omitted bin/tally")
     runs = list((omitted_home / "tally/runs").glob("*/run.json"))
     expect(len(runs) == 1, "omitting brain left no single real run")

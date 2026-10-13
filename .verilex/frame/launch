@@ -26,7 +26,7 @@ if [ -n "${CANARY_DEFECT:-}" ]; then
     drift-ignore-defect) f=internal/lifecycle/lifecycle.go; from='if d.Defects[name] != w.Claim.Defects[name].Digest() {'; to='if false && d.Defects[name] != w.Claim.Defects[name].Digest() {' ;;
     drift-ignore-removed) f=internal/lifecycle/lifecycle.go; from='if _, ok := w.Claim.Defects[name]; !ok {'; to='if _, ok := w.Claim.Defects[name]; false && !ok {' ;;
     index-hide-drift) f=internal/cli/index.go; from='if w.Drift {'; to='if false && w.Drift {' ;;
-    plan-no-binding) f=internal/index/plan.go; from='ix.takeBindings(found, d.Chain)'; to='// planted: drop admitted bindings' ;;
+    plan-no-binding) f=internal/index/plan.go; from='if !ok || d.Chain == "" {'; to='if true || !ok || d.Chain == "" {' ;;
     agent-drop-diff) f=agent/internal/run/run.go; from='Changed: changed}, unfinished)'; to='Changed: nil}, unfinished)' ;;
     skill-unpinned-bin) f=.cursor/skills/verify-verilex/scripts/launch; from="cp \"\$bin\" \"\$S/bin/verilex\""; to="ln -s \"\$bin\" \"\$S/bin/verilex\"" ;;
     skill-doctor-no-hash) f=.cursor/skills/verify-verilex/scripts/doctor; from="[ \"\$sha\" = \"\$(get binary_sha256)\" ] || fail \"binary changed since launch\""; to='true' ;;

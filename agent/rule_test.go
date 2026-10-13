@@ -301,7 +301,12 @@ var verdictRule = []rule{
 			if len(doc.Uncovered) != 0 {
 				t.Fatalf("uncovered %+v, warning %q", doc.Uncovered, doc.Warning)
 			}
+			// The rename touches item-listed, which the intent does not name, so only the diff's
+			// touched claims put it on the floor.
 			prompt := got.home(t, "prompt")
+			if !strings.Contains(prompt, "floor: item-listed\nfloor: store-opened\n") {
+				t.Fatalf("the prompt does not list the touched claim on the floor:\n%s", prompt)
+			}
 			for _, path := range changed {
 				if !strings.Contains(prompt, "changed: "+path+"\n") {
 					t.Fatalf("the prompt lacks %s\n%s", path, prompt)

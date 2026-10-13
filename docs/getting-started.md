@@ -47,6 +47,7 @@ store-open
 `requires` and `provides` encode the product's order of reality: `item-stored` needs a `store`, which `store-open` provides. Each word proves a claim, pinned at a version. See [Core concepts](concepts.md) for the vocabulary.
 
 ## Plan, then run
+<!-- claims: chain-runs-live -->
 
 `verilex plan` makes the same skip decision `verilex run` would, and runs nothing. Nothing has run yet, so the whole chain must run live:
 
@@ -65,6 +66,7 @@ green: 3 green; run 1791503104-22eb1c4bc654
 The verdict comes first and green steps are only counted. Exit code `0`.
 
 ## See a red
+<!-- claims: chain-red -->
 
 tally takes planted defects through `TALLY_DEFECT`. Under `drop-adds`, `tally add` reports success without storing the item:
 
@@ -79,6 +81,7 @@ red: 1 green, 1 red, 1 not run; run 1791503105-d713d0012bbc
 Exit code `1`. Only the step that is not green is printed, with a one-line cause, the path to its evidence and the verify-skill entry behind it, so an agent can continue by hand. See [Verdicts](verdicts.md).
 
 ## See a refusal
+<!-- claims: chain-order-refused -->
 
 A chain that breaks the order of reality is refused before anything starts:
 
@@ -120,6 +123,7 @@ onboarded item-listed: claim item-listed@b8fa4e44bc73 joins the vocabulary; caug
 See [Onboarding](onboarding.md) for every check it runs.
 
 ## Skip what is already proven
+<!-- claims: chain-skipped -->
 
 The onboarding decision is part of each word's proof stamp, so the first run after onboarding runs live. After that, the plan cites the run each step relies on, and the run launches nothing:
 

@@ -162,7 +162,20 @@ func changes(text *strings.Builder, change index.Change) {
 			skipped++
 		}
 	}
-	fmt.Fprintf(text, "changed: %d claim(s); %d of %d known chain(s) must re-run\n", len(change.Claims), run, len(change.Chains))
+	fmt.Fprintf(text, "changed: %d claim(s); %d of %d known chain(s) must re-run", len(change.Claims), run, len(change.Chains))
+	if len(change.Passages) > 0 {
+		fmt.Fprintf(text, "; %d doc passage(s) may now be false", len(change.Passages))
+	}
+	named := map[string]bool{}
+	for _, passage := range change.Named {
+		for _, claim := range passage.Claims {
+			named[claim] = true
+		}
+	}
+	if len(named) > 0 {
+		fmt.Fprintf(text, "; the changed docs name %d claim(s)", len(named))
+	}
+	text.WriteString("\n")
 	for _, c := range change.Claims {
 		line(text, c)
 	}
@@ -176,6 +189,12 @@ func changes(text *strings.Builder, change index.Change) {
 	}
 	if skipped > 0 {
 		fmt.Fprintf(text, "  %d chain(s) still skip: `verilex plan '<chain>'` cites the run each relies on\n", skipped)
+	}
+	for _, passage := range change.Passages {
+		fmt.Fprintf(text, "  doc  %s: %s  (%s)\n", passage.File, passage.Heading, strings.Join(passage.Claims, ", "))
+	}
+	for _, passage := range change.Named {
+		fmt.Fprintf(text, "  names  %s: %s  (%s)\n", passage.File, passage.Heading, strings.Join(passage.Claims, ", "))
 	}
 }
 

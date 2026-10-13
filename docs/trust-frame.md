@@ -3,6 +3,7 @@
 Every run goes through the project's frame, and no word can opt out of it.
 
 ## The five steps
+<!-- claims: chain-runs-live -->
 
 1. **Launch** creates an instance owned by this run. verilex never attaches to an instance it did not launch; `--continue` only takes over one that an earlier `--keep` run launched.
 2. **Doctor** confirms the instance is this run's and worth driving, before the first word and again after any failure. A refusal stops the run as `inconclusive`.

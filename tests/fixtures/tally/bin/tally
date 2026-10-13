@@ -6,7 +6,8 @@ TALLY_DEFECT plants a defect:
   mute-adds    `add` stores the item but prints nothing;
   dirty-opens  `open` creates a store that already holds an item;
   hide-lists   `list` prints nothing;
-  hide-apple   `list` leaves out the item apple, a defect only some inputs reach.
+  hide-apple   `list` leaves out the item apple, a defect only some inputs reach;
+  drop-apple   `add` reports success but stores nothing for the item apple, a defect only some inputs reach.
 TALLY_SIMULATE_LOCK=1 makes the store look locked by another process (exit 75).
 """
 
@@ -47,7 +48,7 @@ def main() -> int:
         return 1
     items = json.loads(data.read_text())["items"]
     if args.command == "add":
-        if defect != "drop-adds":
+        if defect != "drop-adds" and not (defect == "drop-apple" and args.name == "apple"):
             items.append(args.name)
             data.write_text(json.dumps({"items": items}))
         if defect != "mute-adds":

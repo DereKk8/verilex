@@ -40,6 +40,25 @@ item-listed  A stored item shows up when a user lists the store.
   run  store-open | item-stored apple | item-listed apple: item-listed apple: word changed
 ```
 
+## Doc anchors
+
+A doc passage can say which claims it describes, so a diff names the passages it could have made false. An anchor is a line of its own in a markdown file under `docs/` (a regular file, not a symlink), outside fenced and indented code blocks, where it is an example:
+
+```markdown
+## When a chain is skipped
+<!-- claims: chain-skipped -->
+```
+
+It ties the passage it sits in (the file's section under the nearest heading above it, up to the next heading) to the claims it names, separated by spaces. It names claims, not line numbers, so it survives a refactor, and as an HTML comment it renders as nothing. `--changed` reads every anchor on each call: a code change also lists, as `doc`, the passages tied to the claims it reports, and a doc change lists, as `names`, each passage of that doc with the claims it names. Anchors add no dependency, so a doc change re-runs nothing it did not before. When a doc and the code disagree, the code wins: fix the passage, or prove the claim again.
+
+```
+$ verilex index --changed docs/skipping.md
+changed: 0 claim(s); 0 of 0 known chain(s) must re-run; the changed docs name 1 claim(s)
+  names  docs/skipping.md: When a chain is skipped  (chain-skipped)
+```
+
+An anchor that names a claim that does not exist, that sits above the file's first heading, or that names no claim is refused, with the file and line: `verilex: refused: docs/guide.md:5: the anchor names claim item-addded, which does not exist; ...`.
+
 ## What a word depends on
 
 A word depends on its own directory, its claim file, the feature files its claim's sources (or its `implements`) point at, its `inputs`, declared `depends` (paths, config keys, image pins, runbook refs), and what every word shares: `config.yaml`, the frame, the files beside the word directories and the grouping file. `--changed` accepts a path or `config:<key>`, `image:<pin>` or `runbook:<ref>`.

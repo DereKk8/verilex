@@ -382,6 +382,17 @@ func ParseChain(chain string, words []Word) ([]Step, error) {
 	return steps, nil
 }
 
+// OwnStep is w's first step in chain. It reads only the segments that name w, so a later change
+// to another word of chain does not hide it; ok is false when no segment is w with its arguments.
+func OwnStep(chain string, w Word) (Step, bool) {
+	for _, segment := range strings.Split(chain, "|") {
+		if steps, err := ParseChain(segment, []Word{w}); err == nil {
+			return steps[0], true
+		}
+	}
+	return Step{}, false
+}
+
 func CheckOrder(steps []Step) error {
 	available := map[string]bool{}
 	for _, step := range steps {

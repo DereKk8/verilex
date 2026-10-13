@@ -1,0 +1,7 @@
+{"version":1,"summary":"Shared-ledger prune now judges age on the storage clock, sweeps stranded .tmp- entries, and covers idle slots.",
+"files":[{"path":"internal/ledger/store.go","summary":"Owns prune and its storage-clock probe.",
+"annotations":[{"newRange":[315,339],"summary":"prune reads the storage clock from a probe file and drops only passes old by that clock, in every slot.",
+"rationale":"A writer whose clock runs ahead used to drop other instances' young passes because prune used the writer's time. The probe's file time comes from the storage itself, so the writer clock no longer matters. If the probe fails, nothing is pruned. Verified by internal/ledger/prune_test.go and scripts/ci; real NFS skew is not tested."},
+{"newRange":[357,387],"summary":"sweep removes .tmp- entries older than 24 hours; older() gates opening a pass on its file time.",
+"rationale":"A crashed writer leaves .tmp- entries, so they now age out after 24 hours, long enough for a live copy. The file-time gate keeps idle-slot pruning to one listing per slot. A pass in a git checkout has a fresh file time, so it is pruned up to seven days later; this only delays cleanup."}]},
+{"path":"tests/plan_test.go","summary":"age helper also ages pass file times.","annotations":[{"newRange":[61,66],"summary":"age sets the file time of each aged pass to match its record.","rationale":"Prune now requires an old file time before it opens a pass, so the helper models aged storage. TestExpiredResultRunsLive failed without it."}]}]}

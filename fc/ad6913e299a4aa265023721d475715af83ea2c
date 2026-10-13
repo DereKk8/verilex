@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "summary": "Add nine admitted behavioral self-check claims, each green on healthy code and red under its planted source defects.",
+  "files": [
+    {
+      "path": ".verilex/frame/launch",
+      "summary": "Build the CLI and launcher under test and plant literal defects only in run-owned scratch sources.",
+      "annotations": [
+        {
+          "newRange": [21, 35],
+          "summary": "Launch plants fifteen source mutations for the new onboarding correctness trials.",
+          "rationale": "Each mutation disables actual behavior, not a word assertion, so onboarding measures whether the word catches the defect. The pinned driver admitted all nine claims. A missing mutation target remains inconclusive.",
+          "author": "fm/verilex-own-claims-coverage"
+        }
+      ]
+    },
+    {
+      "path": ".verilex/words/self_word.py",
+      "summary": "Share scratch-product setup and evidence capture without sharing scenario state.",
+      "annotations": [
+        {
+          "newRange": [1, 69],
+          "summary": "Each scenario creates its own tally copy, state home and ledger under the outer run's owned instance.",
+          "rationale": "Scenarios remain independent because one word cannot inherit another word's product edits or green passes. Explicit git isolation also keeps canary-guards' Git environment out of scenario repositories. All five canary guards passed.",
+          "author": "fm/verilex-own-claims-coverage"
+        }
+      ]
+    },
+    {
+      "path": ".verilex/words/self-agent-diff-request/run",
+      "summary": "Drive a deterministic shell brain through the real launcher sandbox.",
+      "annotations": [
+        {
+          "newRange": [1, 49],
+          "summary": "The launcher refuses a green request that omits the changed path, then accepts a fully requested diff.",
+          "rationale": "The separate run record proves the refusal observed a genuine inner green. Onboarding catches a launcher mutation that drops the changed-path requirement. The broader touched-claim diff floor remains an open follow-up, not a claim this word proves.",
+          "author": "fm/verilex-own-claims-coverage"
+        }
+      ]
+    },
+    {
+      "path": ".verilex/words/self-skill-session/run",
+      "summary": "Verify binary pinning, tamper detection and worker-owned session cleanup.",
+      "annotations": [
+        {
+          "newRange": [1, 53],
+          "summary": "The session word tests a different worker identity only against the exact session this word launched.",
+          "rationale": "No other worker's session is touched. The refusal preserves every session file, and cleanup under the launching identity succeeds. Three literal helper mutations each produce red during onboarding. Cleanup preserves the first verdict when a mutation already removed the session.",
+          "author": "fm/verilex-own-claims-coverage"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/features/self.md",
+      "summary": "Anchor each self claim to a maintained behavioral requirement.",
+      "annotations": [
+        {
+          "newRange": [1, 38],
+          "summary": "The feature map names the evidence each self-check must produce and the behavior it does not yet claim.",
+          "rationale": "The claims map exact requirement sentences because onboarding must judge meaningful behavior, not broad path coverage. The PR reports every target path's index result. Argument precedence over recent history, touched-claim diff floors and storage-clock pruning remain separate follow-ups.",
+          "author": "fm/verilex-own-claims-coverage"
+        }
+      ]
+    }
+  ]
+}

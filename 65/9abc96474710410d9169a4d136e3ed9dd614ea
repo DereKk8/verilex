@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "summary": "Doc anchors tie a docs/ passage (file plus heading) to claim ids, so index --changed names the passages a code diff may make false and the claims a changed doc names.",
+  "files": [
+    {
+      "path": "internal/index/docs.go",
+      "summary": "Owns the anchor format: reading anchors under docs/, refusing a broken one, and matching passages to a change.",
+      "annotations": [
+        {
+          "newRange": [1, 132],
+          "summary": "passages reads every <!-- claims: ... --> line outside fenced blocks and ties it to the section under the nearest heading.",
+          "rationale": "Anchors name claim ids, not line numbers, so they survive refactors. A missing claim, an empty list, or an anchor above the first heading is refused with file:line, so a doc never points at a claim nobody proves. The docs directory is fixed to docs/ with no config key, because the first unit needs no other location. Verified by tests/docs_test.go and by the verify-verilex 'Changed, docs' recipe on a launched session.",
+          "author": "fm/verilex-docs-claim-index"
+        }
+      ]
+    },
+    {
+      "path": "internal/index/changed.go",
+      "summary": "Adds the two doc lists to the change lookup without touching the skip decision.",
+      "annotations": [
+        {
+          "newRange": [49, 52],
+          "summary": "Changed loads anchors before any chain decision, so a broken anchor refuses the lookup early.",
+          "rationale": "Anchors add no word dependency, so plan, run and the shared skip decision are unchanged. Only index --changed reads anchors, so a broken anchor never blocks a run. The canary (scripts/ci canary) stayed green with the diff applied.",
+          "author": "fm/verilex-docs-claim-index"
+        }
+      ]
+    },
+    {
+      "path": "internal/featuremap/featuremap.go",
+      "summary": "Exports the existing heading and fence rules so the docs reader reuses them instead of copying them.",
+      "annotations": [
+        {
+          "newRange": [91, 111],
+          "summary": "Heading and Fenced expose the one heading regex and fence tracker that the feature-map reader already owns.",
+          "rationale": "One owner per markdown rule, so a fix to fence handling reaches both the verify-skill reader and the doc anchors.",
+          "author": "fm/verilex-docs-claim-index"
+        }
+      ]
+    },
+    {
+      "path": "site/docs.go",
+      "summary": "Keeps anchors out of every site page, search entry and Ask grounding.",
+      "annotations": [
+        {
+          "newRange": [179, 194],
+          "summary": "withoutComments drops whole-line HTML comments outside fenced blocks when a page loads.",
+          "rationale": "The site's md.js escapes HTML, so without this an anchor would render as visible text, while GitHub hides it. Verified by TestPagesLeaveOutClaimAnchors (fails on main) and by rendering the served /docs-data.js with site/web/md.js under node: no anchor shows except the fenced format example in docs/word-index.md.",
+          "author": "fm/verilex-docs-claim-index"
+        }
+      ]
+    }
+  ]
+}

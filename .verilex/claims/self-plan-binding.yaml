@@ -1,0 +1,13 @@
+claim: self-plan-binding
+sentence: A fresh state home's claim plan binds arguments and provider order from admission.
+entry: [cli]
+evidence:
+  action: "Drive the `self-plan-binding` scenario against the checkout's built verilex or shipped scripts."
+  observation: "fresh-home claim plan binds store-open | item-stored apple | item-listed apple with provider order and writes no run; execution is green and its run record holds that chain."
+defects:
+  plan-no-binding: {CANARY_DEFECT: plan-no-binding}
+sources:
+  - ref: verify-verilex/features/self.md#self-plan-binding
+    prose: f7aeda03f447
+    requirements:
+      - "`self-plan-binding`: Expect fresh-home claim plan binds store-open | item-stored apple | item-listed apple with provider order and writes no run; execution is green and its run record holds that chain."

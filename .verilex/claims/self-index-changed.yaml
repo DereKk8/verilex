@@ -1,0 +1,13 @@
+claim: self-index-changed
+sentence: The changed-word lookup selects its claim and agrees with the chain plan.
+entry: [cli]
+evidence:
+  action: "Drive the `self-index-changed` scenario against the checkout's built verilex or shipped scripts."
+  observation: "index --changed selects only item-listed; every affected chain runs and its reason equals plan rerun after the word edit; unrelated.txt selects no claims."
+defects:
+  index-no-change: {CANARY_DEFECT: index-no-change}
+sources:
+  - ref: verify-verilex/features/self.md#self-index-changed
+    prose: 6cdfef857cda
+    requirements:
+      - "`self-index-changed`: Expect index --changed selects only item-listed; every affected chain runs and its reason equals plan rerun after the word edit; unrelated.txt selects no claims."

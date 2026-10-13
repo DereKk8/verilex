@@ -1,0 +1,14 @@
+claim: self-ci-main-ref
+sentence: The canary scripts refuse a tag in place of the origin/main branch ref.
+entry: [cli]
+evidence:
+  action: "Drive the `self-ci-main-ref` scenario against the checkout's built verilex or shipped scripts."
+  observation: "with only a tag named refs/remotes/origin/main, scripts/ci canary exits 1 and canary-guards exits 2 naming the absent branch ref; git show-ref independently confirms the branch is absent."
+defects:
+  ci-trust-tag: {CANARY_DEFECT: ci-trust-tag}
+  guards-trust-tag: {CANARY_DEFECT: guards-trust-tag}
+sources:
+  - ref: verify-verilex/features/self.md#self-ci-main-ref
+    prose: cf8cbf5ee4db
+    requirements:
+      - "`self-ci-main-ref`: Expect with only a tag named refs/remotes/origin/main, scripts/ci canary exits 1 and canary-guards exits 2 naming the absent branch ref; git show-ref independently confirms the branch is absent."

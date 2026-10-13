@@ -1,0 +1,13 @@
+claim: self-ledger-integrity
+sentence: Changed shared-ledger evidence forces a live chain until a fresh pass stands.
+entry: [cli]
+evidence:
+  action: "Drive the `self-ledger-integrity` scenario against the checkout's built verilex or shipped scripts."
+  observation: "changed mango evidence makes plan run all three steps with changed-after-recording reason; run has no relies_on; the fresh pass restores skip."
+defects:
+  ledger-trust-evidence: {CANARY_DEFECT: ledger-trust-evidence}
+sources:
+  - ref: verify-verilex/features/self.md#self-ledger-integrity
+    prose: 06db9175853b
+    requirements:
+      - "`self-ledger-integrity`: Expect changed mango evidence makes plan run all three steps with changed-after-recording reason; run has no relies_on; the fresh pass restores skip."

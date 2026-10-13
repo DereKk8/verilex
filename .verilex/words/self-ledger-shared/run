@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from self_word import (c, source, start, expect, doc, baseline, external, setup,
+                       json, shutil, subprocess)
+
+
+def ledger_shared():
+    baseline()
+    shared = str(c.instance / "shared")
+    writer_home = str(c.instance / "writer")
+    reader_home = str(c.instance / "reader")
+    live = doc("writer", "run", c.CHAIN, VERILEX_LEDGER=shared, VERILEX_HOME=writer_home)
+    expect(not live.get("skipped"), "writer unexpectedly skipped an empty ledger")
+    reused = doc("reader", "run", c.CHAIN, VERILEX_LEDGER=shared, VERILEX_HOME=reader_home)
+    expect(reused.get("skipped") is True and reused["instance"] is None, "stateless reader did not reuse shared passes")
+    records = doc("reader-runs", "runs", VERILEX_LEDGER=shared, VERILEX_HOME=reader_home)
+    expect(len(records) == 1 and records[0]["cleanup"] == "none" and not c.stores(),
+           "shared reuse launched or left a store")
+    alone = doc("alone", "plan", c.CHAIN, VERILEX_HOME=str(c.instance / "alone"))
+    expect(all(not x["skipped"] for x in alone["steps"]), "isolated home reused shared passes")
+    audit = setup("audit", [source / ".cursor/skills/verify-verilex/scripts/ledger-audit", shared + "/tally", writer_home, reader_home])
+    expect("proven: 3  passes: 3  intact: 3  matched: 3  lost: 0  forged: 0  damaged: 0  unowned: 0" in audit.stdout,
+           "shared ledger audit did not match three intact passes")
+    c.result("pass", observation="shared stateless reader skipped with instance null and cleanup none; ledger-audit shows three intact matched passes and zero lost, forged, damaged, unowned; an isolated home runs all steps")
+
+
+try:
+    start("self-ledger-shared")
+    ledger_shared()
+except (OSError, subprocess.TimeoutExpired) as error:
+    c.result("blocked", detail=str(error))

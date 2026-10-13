@@ -1,0 +1,13 @@
+claim: self-agent-diff-request
+sentence: The launcher refuses a green run whose request omits a changed path.
+entry: [cli]
+evidence:
+  action: "Drive the `self-agent-diff-request` scenario against the checkout's built verilex or shipped scripts."
+  observation: "launcher refuses omitted bin/tally with exit 2 and empty stdout although its run record is green; a run requested with bin/tally returns green and leaves no store."
+defects:
+  agent-drop-diff: {CANARY_DEFECT: agent-drop-diff}
+sources:
+  - ref: verify-verilex/features/self.md#self-agent-diff-request
+    prose: 2c535a2634ad
+    requirements:
+      - "`self-agent-diff-request`: Expect launcher refuses omitted bin/tally with exit 2 and empty stdout although its run record is green; a run requested with bin/tally returns green and leaves no store."

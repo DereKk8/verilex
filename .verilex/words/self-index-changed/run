@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from self_word import (c, source, start, expect, doc, baseline, external, setup,
+                       json, shutil, subprocess)
+
+
+def index_changed():
+    baseline()
+    before = doc("before", "index", "--changed", ".verilex/words/item-listed/run")
+    expect([x["claim"] for x in before["claims"]] == ["item-listed"], "change lookup lost item-listed")
+    expect(bool(before["chains"]) and all(not x["run"] for x in before["chains"]),
+           "unchanged admitted word did not skip")
+    word = c.instance / "tally/.verilex/words/item-listed/run"
+    word.write_text(word.read_text() + "\n")
+    changed = doc("changed", "index", "--changed", ".verilex/words/item-listed/run")
+    expect([x["claim"] for x in changed["claims"]] == ["item-listed"] and bool(changed["chains"]),
+           "changed word did not select item-listed and its chains")
+    for i, chain in enumerate(changed["chains"]):
+        plan = doc(f"plan-{i}", "plan", chain["chain"])
+        expect(chain["run"] is True and not chain.get("refused")
+               and chain["reason"] == plan.get("rerun") and all(not s["skipped"] for s in plan["steps"]),
+               "index --changed disagrees with plan after word drift")
+    expect(doc("unmapped", "index", "--changed", "unrelated.txt")["claims"] == [],
+           "unrelated path selected claims")
+    c.result("pass", observation="index --changed selects only item-listed; every affected chain runs and its reason equals plan rerun after the word edit; unrelated.txt selects no claims")
+
+
+try:
+    start("self-index-changed")
+    index_changed()
+except (OSError, subprocess.TimeoutExpired) as error:
+    c.result("blocked", detail=str(error))

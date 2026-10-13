@@ -10,13 +10,26 @@ echo "$VERILEX_RUN" > "$inst/owner"
 src="$VERILEX_PROJECT_ROOT"
 if [ -n "${CANARY_DEFECT:-}" ]; then
   mkdir "$inst/src"
-  cp -R "$src/cmd" "$src/internal" "$src/go.mod" "$src/go.sum" "$inst/src/"
+  cp -R "$src/cmd" "$src/internal" "$src/agent" "$src/scripts" "$src/.cursor" \
+    "$src/tests" "$src/go.mod" "$src/go.sum" "$src/go.work" "$src/go.work.sum" "$inst/src/"
   src="$inst/src"
   case "$CANARY_DEFECT" in
     skipped-cleanup) f=internal/runner/runner.go; from='[]string{project.Frame("cleanup")}'; to='[]string{"true"}' ;;
     no-order-check)  f=internal/dictionary/dictionary.go; from='if !available[state] {'; to='if false && !available[state] {' ;;
     never-skip)      f=internal/runner/plan.go; from='p.entries, p.Rerun = ledger.At(LedgerDir(project)).Reuse(labels, claims, p.stamps)'; to='p.entries, p.Rerun = nil, "canary defect never-skip"' ;;
     fail-is-green)   f=internal/verdict/verdict.go; from='"fail": {Red, 1}'; to='"fail": {Green, 1}' ;;
+    index-no-active) f=internal/index/index.go; from='return !c.Active'; to='return true' ;;
+    index-no-change) f=internal/index/changed.go; from='if hit.claims[c.Claim] {'; to='if false && hit.claims[c.Claim] {' ;;
+    ledger-not-shared) f=internal/runner/record.go; from='if shared := os.Getenv("VERILEX_LEDGER"); shared != "" {'; to='if shared := os.Getenv("VERILEX_LEDGER"); false && shared != "" {' ;;
+    ledger-trust-evidence) f=internal/ledger/store.go; from='if digest(stdout) != p.Result {'; to='if false && digest(stdout) != p.Result {' ;;
+    drift-ignore-word) f=internal/lifecycle/lifecycle.go; from='if digest != d.Digest {'; to='if false && digest != d.Digest {' ;;
+    drift-ignore-defect) f=internal/lifecycle/lifecycle.go; from='if d.Defects[name] != w.Claim.Defects[name].Digest() {'; to='if false && d.Defects[name] != w.Claim.Defects[name].Digest() {' ;;
+    plan-no-binding) f=internal/index/plan.go; from='ix.takeBindings(found, d.Chain)'; to='// planted: drop admitted bindings' ;;
+    agent-drop-diff) f=agent/internal/run/run.go; from='Changed: changed}, unfinished)'; to='Changed: nil}, unfinished)' ;;
+    skill-unpinned-bin) f=.cursor/skills/verify-verilex/scripts/launch; from="cp \"\$bin\" \"\$S/bin/verilex\""; to="ln -s \"\$bin\" \"\$S/bin/verilex\"" ;;
+    skill-doctor-no-hash) f=.cursor/skills/verify-verilex/scripts/doctor; from="[ \"\$sha\" = \"\$(get binary_sha256)\" ] || fail \"binary changed since launch\""; to='true' ;;
+    ci-trust-tag) f=scripts/ci; from='git show-ref --verify --hash refs/remotes/origin/main'; to='git rev-parse refs/remotes/origin/main' ;;
+    guards-trust-tag) f=scripts/canary-guards; from='git show-ref --verify --hash refs/remotes/origin/main'; to='git rev-parse refs/remotes/origin/main' ;;
     *) echo "launch: unknown CANARY_DEFECT $CANARY_DEFECT" >&2; exit 2 ;;
   esac
   # A literal edit: when a refactor moves the line, the trial is inconclusive, never silently healthy.
@@ -25,7 +38,10 @@ if [ -n "${CANARY_DEFECT:-}" ]; then
   printf '%s\n' "${code/"$from"/"$to"}" > "$src/$f"
   echo "planted $CANARY_DEFECT in $f" >&2
 fi
-(cd "$src" && go build -o "$inst/bin/verilex" ./cmd/verilex) >&2
+(cd "$src" && go build -o "$inst/bin/verilex" ./cmd/verilex &&
+  go build -o "$inst/bin/verilex-agent" ./agent/cmd/verilex-agent) >&2
+# A copied source tree is also a checkout for verify-verilex's launch helper.
+if [ "$src" != "$VERILEX_PROJECT_ROOT" ]; then git -C "$src" init -q; fi
 cp -R "$VERILEX_PROJECT_ROOT/tests/fixtures/tally" "$inst/tally"
 mkdir "$inst/home" "$inst/stores" "$inst/config"
-printf '{"instance": {"dir": "%s"}}\n' "$inst"
+printf '{"instance": {"dir": "%s", "source": "%s"}}\n' "$inst" "$src"

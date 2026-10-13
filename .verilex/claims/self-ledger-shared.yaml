@@ -1,0 +1,13 @@
+claim: self-ledger-shared
+sentence: A fresh stateless instance reuses intact shared passes without launching a store.
+entry: [cli]
+evidence:
+  action: "Drive the `self-ledger-shared` scenario against the checkout's built verilex or shipped scripts."
+  observation: "shared stateless reader skipped with instance null and cleanup none; ledger-audit shows three intact matched passes and zero lost, forged, damaged, unowned; an isolated home runs all steps."
+defects:
+  ledger-not-shared: {CANARY_DEFECT: ledger-not-shared}
+sources:
+  - ref: verify-verilex/features/self.md#self-ledger-shared
+    prose: 1b3f90a898d9
+    requirements:
+      - "`self-ledger-shared`: Expect shared stateless reader skipped with instance null and cleanup none; ledger-audit shows three intact matched passes and zero lost, forged, damaged, unowned; an isolated home runs all steps."

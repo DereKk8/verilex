@@ -1,0 +1,13 @@
+claim: self-index-tiers
+sentence: Index tiers list admitted words only for the product that used them.
+entry: [cli]
+evidence:
+  action: "Drive the `self-index-tiers` scenario against the checkout's built verilex or shipped scripts."
+  observation: "tier 1 lists item-added, item-listed, store-opened; tier 2 shows item-stored active; tier 3 shows admitted apple; tally-b lists no active claims and item-stored dormant."
+defects:
+  index-no-active: {CANARY_DEFECT: index-no-active}
+sources:
+  - ref: verify-verilex/features/self.md#self-index-tiers
+    prose: a3848c57c4ea
+    requirements:
+      - "`self-index-tiers`: Expect tier 1 lists item-added, item-listed, store-opened; tier 2 shows item-stored active; tier 3 shows admitted apple; tally-b lists no active claims and item-stored dormant."

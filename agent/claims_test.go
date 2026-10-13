@@ -43,9 +43,10 @@ func changedProduct(t *testing.T) (dir, product, ledger string) {
 	return dir, product, ledger
 }
 
-// A brain that derives one claim from its intent misses the other claims the diff touches. The
-// launcher returns verilex's own green with verilex's missed-claim warning, byte for byte.
-func TestMissedClaimWarningIsVerilexsOwn(t *testing.T) {
+// A brain that derives one claim from its intent skips the other claims the diff touches. Its
+// run is green with verilex's missed-claim warning, but the launcher's floor holds every touched
+// claim, so the launcher is inconclusive, prints no green, and names each claim that was missed.
+func TestSkippedTouchedClaimIsNeverGreen(t *testing.T) {
 	dir, product, ledger := changedProduct(t)
 	brain := writeBrain(t, dir, `#!/bin/sh
 printf '%s\n' 'BRAIN SAYS EVERYTHING IS COVERED'
@@ -55,51 +56,58 @@ verilex plan --claim store-opened "$@" > /dev/null
 verilex run --claim store-opened "$@" > "$HOME/printed"
 `)
 	home := filepath.Join(dir, "home")
-	run := launchKept(t, dir, coreBin, brain,
-		"--project", product, "--home", home, "--ledger", ledger,
-		"--intent", "prove the store opens", "--diff", "HEAD", "--harness", "stub", "--model", "stub")
-	stdout := run.stdout
-	if run.code != 0 {
-		t.Fatalf("exit %d\n%s\n%s", run.code, stdout, run.stderr)
+	for _, flags := range [][]string{{}, {"--text"}} {
+		run := launchKept(t, dir, coreBin, brain, append([]string{
+			"--project", product, "--home", home, "--ledger", ledger,
+			"--intent", "prove the store opens", "--diff", "HEAD", "--harness", "stub", "--model", "stub"}, flags...)...)
+		if run.code != 2 || run.stdout != "" {
+			t.Fatalf("exit %d, want 2 with no stdout\n%s\n%s", run.code, run.stdout, run.stderr)
+		}
+		if want := "inconclusive: run "; !strings.Contains(run.stderr, want) || !strings.Contains(run.stderr, "is green but was not asked about claim item-added, claim item-listed") {
+			t.Fatalf("stderr does not name the missed claims\n%s", run.stderr)
+		}
+		// The brain's own run was green, so the launcher overrode a green, not a failure.
+		var doc runDoc
+		if err := json.Unmarshal([]byte(run.home(t, "printed")), &doc); err != nil || doc.Verdict != "green" || doc.Warning != "2 touched claims not covered" {
+			t.Fatalf("the brain's run %+v: %v", doc, err)
+		}
+		home = filepath.Join(dir, "home2")
 	}
-	if want := run.home(t, "printed"); stdout != want {
-		t.Fatalf("stdout is not what verilex printed\nstdout: %s\nverilex: %s", stdout, want)
-	}
-	var doc runDoc
-	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+}
+
+// The launcher looks up the touched claims in the project with each path as the brain sends it,
+// relative, so a very wide diff needs no more argument space for the lookup than for the brain's run.
+func TestTouchedClaimLookupSendsRelativePathsFromTheProject(t *testing.T) {
+	dir, product, ledger := changedProduct(t)
+	log := filepath.Join(dir, "index-changed.log")
+	spy := filepath.Join(dir, "verilex-spy")
+	script := fmt.Sprintf(`#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in --changed=*) { pwd -P; echo "$arg"; } >> %q ;; esac
+done
+exec %q "$@"
+`, log, coreBin)
+	if err := os.WriteFile(spy, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if doc.Format != "verilex-claim-run-1" || doc.Verdict != "green" || doc.Warning != "2 touched claims not covered" {
-		t.Fatalf("doc %+v", doc)
+	brain := writeBrain(t, dir, "#!/bin/sh\nverilex run --changed bin/tally > /dev/null\n")
+	run := launchKept(t, dir, spy, brain,
+		"--project", product, "--home", filepath.Join(dir, "home"), "--ledger", ledger,
+		"--intent", "prove the store opens", "--diff", "HEAD", "--harness", "stub", "--model", "stub")
+	if run.code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", run.code, run.stdout, run.stderr)
 	}
-	var missed []string
-	for _, u := range doc.Uncovered {
-		missed = append(missed, u.Claim)
+	text, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Join(missed, ",") != "item-added,item-listed" {
-		t.Fatalf("uncovered %v", missed)
+	wd, err := filepath.EvalSymlinks(product)
+	if err != nil {
+		t.Fatal(err)
 	}
-	record := readRecord(t, home, doc.Run)
-	if record["warning"] != doc.Warning {
-		t.Fatalf("run record warning %v, stdout warning %q", record["warning"], doc.Warning)
+	if want := wd + "\n--changed=bin/tally\n"; string(text) != want {
+		t.Fatalf("index --changed ran as %q, want %q", text, want)
 	}
-	ticket, _ := record["ticket"].(map[string]any)
-	if ticket["harness"] != "stub" || ticket["model"] != "stub" {
-		t.Fatalf("run record does not carry the run spec's brain: %v", record["ticket"])
-	}
-
-	t.Run("text", func(t *testing.T) {
-		stdout, stderr, code := launch(t, dir, coreBin, brain,
-			"--project", product, "--ledger", ledger, "--text",
-			"--intent", "prove the store opens", "--diff", "HEAD", "--harness", "stub", "--model", "stub")
-		lines := strings.Split(strings.TrimSpace(stdout), "\n")
-		if code != 0 || len(lines) != 3 || !strings.HasPrefix(lines[0], "green; run ") || !strings.HasSuffix(lines[0], "; 2 touched claims not covered") {
-			t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
-		}
-		if !strings.HasPrefix(lines[1], "  uncovered  item-added  verilex run --claim 'item-added' --changed 'bin/tally'") || !strings.HasPrefix(lines[2], "  uncovered  item-listed  ") {
-			t.Fatalf("uncovered lines\n%s", stdout)
-		}
-	})
 }
 
 // The brain drives verilex only through the launcher, which refuses commands that change what

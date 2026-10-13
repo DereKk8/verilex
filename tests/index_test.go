@@ -129,6 +129,8 @@ func TestWeakIntentMatchFindsNoClaim(t *testing.T) {
 		"CI scripts resolve origin/main from the branch ref only",
 		"CI scripts resolve origin/main from the branch ref only, refusing when absent",
 		"verify-verilex cleanup refuses sessions launched by another worker",
+		"refused payment",
+		"chain email",
 	} {
 		equal(t, verilex(t, root, nil, "index", "--intent", intent).stdout, "intent: 0 claim(s) for '"+intent+"'\n")
 	}
@@ -139,6 +141,30 @@ func TestWeakIntentMatchFindsNoClaim(t *testing.T) {
 		"a chain runs live and cleans up":    "chain-runs-live",
 	} {
 		lines := strings.SplitAfter(verilex(t, root, nil, "index", "--intent", intent).stdout, "\n")
+		equal(t, lines[0], "intent: 1 claim(s) for '"+intent+"'\n")
+		equal(t, strings.SplitN(lines[1], "  ", 2)[0], claim)
+	}
+}
+
+// A short intent needs more than one shared term, but real two-term matches and the longer
+// intents the floor already accepts still return. This keeps the fix from widening recall loss.
+func TestShortIntentRejectsOneSharedTerm(t *testing.T) {
+	root := product(t)
+	for _, intent := range []string{"store refunds", "list refunds", "store store store refund"} {
+		done := verilex(t, root, nil, "index", "--intent", intent)
+		equal(t, done.code, 0)
+		equal(t, done.stdout, "intent: 0 claim(s) for '"+intent+"'\n")
+	}
+	for intent, claim := range map[string]string{
+		"tally list":                "item-listed",
+		"store opens":               "store-opened",
+		"item added":                "item-added",
+		"item added refund payment": "item-added",
+		"after tally add apple, tally list shows apple": "item-listed",
+	} {
+		done := verilex(t, root, nil, "index", "--intent", intent)
+		equal(t, done.code, 0)
+		lines := strings.SplitAfter(done.stdout, "\n")
 		equal(t, lines[0], "intent: 1 claim(s) for '"+intent+"'\n")
 		equal(t, strings.SplitN(lines[1], "  ", 2)[0], claim)
 	}

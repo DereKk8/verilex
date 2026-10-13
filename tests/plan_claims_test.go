@@ -363,6 +363,49 @@ func TestUncoveredDiffDoesNotReadTheVerifySkill(t *testing.T) {
 	equal(t, claimsOf(changed(t, root, ".cursor/skills/verify-tally/features/items.md")), []string{"item-added", "item-listed"})
 }
 
+// An uncovered runbook reference needs no feature text. A blocked feature file must not stop
+// index, plan or run from returning the same no-coverage answer as an ordinary file.
+func TestUncoveredRunbookDoesNotReadTheVerifySkill(t *testing.T) {
+	root := product(t)
+	const ref = "runbook:verify-tally/features/items.md#item-add"
+	equal(t, verilex(t, root, nil, "index", "--changed", ref).stdout,
+		"changed: 1 claim(s); 0 of 0 known chain(s) must re-run\nitem-added  A named item is in the store.  (dormant)\n")
+	feature := filepath.Join(root, ".cursor", "skills", "verify-tally", "features", "items.md")
+	if err := os.Remove(feature); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(feature, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []string{
+		"runbook:verify-tally/features/items.md#no-such",
+		"runbook:verify-tally/features/nothing.md#x",
+		"runbook:verify-tally/features/items.md#no-such@0123456789ab",
+	} {
+		for _, command := range []string{"index", "plan", "run"} {
+			t.Run(command+"/"+change, func(t *testing.T) {
+				p := start(t, root, nil, command, "--changed", change)
+				timer := time.AfterFunc(5*time.Second, func() { _ = p.cmd.Process.Kill() })
+				defer timer.Stop()
+				done := p.wait(t)
+				if command == "index" {
+					equal(t, done.code, 0)
+					equal(t, done.stdout, "changed: 0 claim(s); 0 of 0 known chain(s) must re-run\n")
+				} else {
+					equal(t, done.code, 2)
+					prefix := ""
+					if command == "plan" {
+						prefix = "plan: "
+					}
+					equal(t, done.stdout, prefix+"inconclusive: no claim covers this change; fall back to the product verify skill\n")
+				}
+				equal(t, done.stderr, "")
+			})
+		}
+	}
+	equal(t, verilex(t, root, nil, "runs").stdout, "")
+}
+
 // Rule: every selected claim has a verdict, a red claim is not also uncovered, and the record names what was asked.
 func TestClaimReportAndRunContract(t *testing.T) {
 	root := curated(t)

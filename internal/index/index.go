@@ -188,7 +188,7 @@ func (ix Index) Details(claim, word string) (dictionary.Word, Word, error) {
 // Intent finds the claims an intent names, best first and at most limit. A claim is found by its
 // name, sentence, evidence, aliases, sources and words; a term counts double in its name or
 // sentence, and a rarer term counts more. A claim must also cover at least half of what the
-// intent says (see covers), so an intent about something no claim describes finds none.
+// intent says, and more than one weighted term for a multi-term intent (see covers).
 func (ix Index) Intent(text string, limit int) []Claim {
 	want := terms.Of(text)
 	primary, secondary := make([][]string, len(ix.Claims)), make([][]string, len(ix.Claims))
@@ -246,8 +246,8 @@ func (ix Index) Intent(text string, limit int) []Claim {
 
 // covers is the relevance floor: a claim covers an intent when it matches at least half of the
 // intent's terms. A term in the claim's name or sentence counts whole, one only in the rest of
-// the claim counts half. A term the claim lacks counts nothing, so an intent mostly about
-// things no claim mentions finds none, however rare the one term it shares.
+// the claim counts half. Multi-term intents must match more than one weighted term, so a short
+// intent cannot pass on a single shared term. Longer intents keep the same relevance floor.
 func covers(want, primary, secondary []string) bool {
 	matched := 0.0
 	for _, term := range want {
@@ -258,7 +258,7 @@ func covers(want, primary, secondary []string) bool {
 			matched += 0.5
 		}
 	}
-	return 2*matched >= float64(len(want))
+	return 2*matched >= float64(len(want)) && (len(want) == 1 || matched > 1)
 }
 
 // doc gathers the terms a claim is found by: its name and sentence first, then the rest.

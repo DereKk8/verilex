@@ -73,13 +73,16 @@ func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
 	claimDeps := map[string][]string{}
 	runbook := map[string][]string{}
 	hashes := map[string][]string{}
-	// Only a runbook entry is matched against section fingerprints, so the verify skill is read
-	// and parsed only for a diff that names one; a path needs only where the feature file is.
-	sectioned := slices.ContainsFunc(typed, func(change diffKind) bool { return change.kind == "runbook" })
+	// Named runbook references match declared sources without reading feature text. Only a bare
+	// section digest needs current fingerprints; even an unknown digest must be checked live.
+	sectioned := slices.ContainsFunc(typed, func(change diffKind) bool {
+		return change.kind == "runbook" && hexOnly(change.value)
+	})
 	for name, c := range ix.claims {
 		deps := []string{c.Path}
+		runbook[name] = c.Refs()
 		if sectioned {
-			runbook[name], hashes[name] = ix.sections(p, c)
+			_, hashes[name] = ix.sections(p, c)
 		}
 		for _, source := range c.Sources {
 			root, dirs := lifecycle.SourceRoot(p, source)
@@ -118,8 +121,8 @@ func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
 			}
 		} else {
 			for _, ref := range w.Implements {
-				if section, err := featuremap.Resolve(p.Root, p.SkillDirs, ref); err == nil {
-					deps = append(deps, filepath.Join(p.Root, section.File))
+				if file := featuremap.Locate(p.Root, p.SkillDirs, ref); file != "" {
+					deps = append(deps, filepath.Join(p.Root, file))
 				}
 			}
 		}

@@ -6,6 +6,16 @@ verilex lets verifier and QA agents run product verification as a chain of words
 verilex run 'store-open | item-stored apple | item-listed apple'
 ```
 
+## Principles
+
+These five principles say what verilex is and how to use it.
+
+1. **A complementary reviewer.** verilex reviews code and documentation as well as the product. It runs next to other review, not in place of it, and it is not only a product verifier.
+2. **No harness ties.** No verilex capability depends on any agent harness. A host, such as an agent harness or a script, drives verilex through its commands.
+3. **Green CI is not trust.** A green CI run means only that nothing is obviously broken. Trust comes from fresh claim proofs. A merge should need both.
+4. **Code wins.** When code and documentation disagree, the code is right.
+5. **CI is out of scope for now.** CI is expected to change completely, and waiting time is its worst cost. Green CI is used as a trust gate for agents, and it does not prove product behavior.
+
 ## Words
 
 A **word** is a reusable, executable piece that drives the product through a surface its users have and promises one product state. Someone who knows the product, but not how it is built, would recognize each word as a real moment in the product's life.

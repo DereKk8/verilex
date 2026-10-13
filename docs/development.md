@@ -21,6 +21,14 @@ on a red or inconclusive run and on drift. Onboard a changed canary word with th
 Its `canary-guards` step (`scripts/canary-guards`) replays known attacks on the canary step, each on a scratch
 copy of the checkout, and each must fail it.
 
+## How verilex is tested
+
+Verilex has two kinds of security evidence. Each has its own test method.
+
+**Security by construction** covers everything outside what a model decides: sandbox limits, verdict rules and proof stamps. Only deterministic scripts and scenarios test it, and they run in CI: the Go behavior tests, the canary and `canary-guards`. No model is involved, so a result repeats exactly. Add a scenario for every such rule you change.
+
+**Security by empirical evidence** covers how verilex behaves with real agents. Synthetic model test runs do not measure it. It is measured by evals built from our own real use of verilex. A ledger of those runs holds the data; it is being built separately.
+
 ## The docs site
 
 `site/` serves `docs/` as a web app: instant search (`⌘K` or `/`), and Ask (`⌘I`), which answers questions from these pages and links to the sections it used. `docs/README.md` is its navigation: each `##` heading is a section and each list item a page, so a new page joins the site by joining the index.

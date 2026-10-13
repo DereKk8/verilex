@@ -233,7 +233,7 @@ func TestRepinnedWordIsNotActiveUnderItsNewClaim(t *testing.T) {
 	tier1 := verilex(t, root, nil, "index").stdout
 	edit(t, filepath.Join(root, ".verilex", "words", "item-stored", "word.md"), "claim: "+pinOf(t, root, "item-added"), "claim: "+noted)
 	equal(t, verilex(t, root, nil, "index").stdout, strings.NewReplacer("3 active", "2 active", "item-added  A named item is in the store.\n", "").Replace(tier1))
-	equal(t, verilex(t, root, nil, "index", "item-noted").stdout, noted+"  A named item is noted in the store.\n  entry: cli  requires: store  provides: item:{name}\n  item-stored <name>  (provisional)\n")
+	equal(t, verilex(t, root, nil, "index", "item-noted").stdout, noted+"  A named item is noted in the store.\n  entry: cli  requires: store  provides: item:{name}\n  item-stored <name>  (provisional, drift-suspect)\n")
 }
 
 // Once a claim moves to a new version, no word was onboarded for it yet: tier 1 drops it, and its
@@ -247,8 +247,8 @@ func TestClaimWithANewVersionIsNotActive(t *testing.T) {
 	edit(t, claimFile(root, "item-added"), "sentence: A named item is in the store.", "sentence: A named item is removed from the store.")
 	removed := pinOf(t, root, "item-added")
 	equal(t, verilex(t, root, nil, "index").stdout, strings.NewReplacer("3 active", "2 active", "item-added  A named item is in the store.\n", "").Replace(tier1))
-	equal(t, verilex(t, root, nil, "index", "item-added").stdout, removed+"  A named item is removed from the store.\n  entry: cli  requires: store  provides: item:{name}\n  item-stored <name>  (provisional)\n")
-	contains(t, verilex(t, root, nil, "index", "item-put-done").stdout, "\n  item-put <name>  (provisional)\n")
+	equal(t, verilex(t, root, nil, "index", "item-added").stdout, removed+"  A named item is removed from the store.\n  entry: cli  requires: store  provides: item:{name}\n  item-stored <name>  (provisional, drift-suspect)\n")
+	contains(t, verilex(t, root, nil, "index", "item-put-done").stdout, "\n  item-put <name>  (provisional, drift-suspect)\n")
 }
 
 func copyTree(t *testing.T, from, dir string) {
@@ -316,4 +316,15 @@ func TestIndexRegenerationIsDeterministic(t *testing.T) {
 	elsewhere := filepath.Join(t.TempDir(), "tally")
 	copyTree(t, root, elsewhere)
 	equal(t, generate(elsewhere), before)
+}
+
+// Tier 2 marks a word drift-suspect when its files changed since onboarding, as tier 3 does.
+func TestSecondTierMarksDriftSuspectWords(t *testing.T) {
+	root := baseline(t)
+	before := verilex(t, root, nil, "index", "item-listed").stdout
+	appendTo(t, filepath.Join(root, ".verilex", "words", "item-listed", "run"), "\n")
+	after := verilex(t, root, nil, "index", "item-listed").stdout
+	equal(t, after, strings.Replace(before, "  item-listed <name>\n", "  item-listed <name>  (drift-suspect)\n", 1))
+	contains(t, verilex(t, root, nil, "index", "item-listed", "item-listed").stdout, "drift-suspect")
+	contains(t, verilex(t, root, nil, "index", "--json", "item-listed").stdout, `"drift_suspect": true`)
 }

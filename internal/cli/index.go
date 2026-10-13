@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
@@ -76,6 +77,12 @@ func lookup(project dictionary.Project, args options, out io.Writer, refuse func
 		if err != nil {
 			return refuse(err)
 		}
+		c.Words = slices.Clone(c.Words)
+		for i, w := range c.Words {
+			if c.Words[i].Drift, err = drifted(project, ix, w.Word); err != nil {
+				return refuse(err)
+			}
+		}
 		value = c
 		fmt.Fprintf(&text, "%s@%s  %s\n  entry: %s  requires: %s  provides: %s\n", c.Claim, c.Version, c.Sentence, strings.Join(c.Entry, ", "), states(c.Requires), states(c.Provides))
 		for _, w := range c.Words {
@@ -88,6 +95,9 @@ func lookup(project dictionary.Project, args options, out io.Writer, refuse func
 			}
 			if w.State != index.Active {
 				notes = append(notes, w.State)
+			}
+			if w.Drift {
+				notes = append(notes, string(lifecycle.DriftSuspect))
 			}
 			fmt.Fprintf(&text, "  %s", signature(w.Word, w.Args))
 			if len(notes) > 0 {
@@ -124,6 +134,13 @@ func lookup(project dictionary.Project, args options, out io.Writer, refuse func
 	}
 	fmt.Fprint(out, text.String())
 	return 0
+}
+
+// drifted reports whether a word is drift-suspect, the status tier 3 shows.
+func drifted(project dictionary.Project, ix index.Index, word string) (bool, error) {
+	i := slices.IndexFunc(ix.Words(), func(w dictionary.Word) bool { return w.Name == word })
+	status, err := lifecycle.StatusOf(project, ix.Words()[i])
+	return status.State == lifecycle.DriftSuspect, err
 }
 
 // line prints a claim as tier 1 does: its name and sentence, and whether the product leaves it dormant.

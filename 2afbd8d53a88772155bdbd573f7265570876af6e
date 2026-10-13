@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "summary": "Intent lookup returns no claim for a weak match, and a diff no claim covers is answered without parsing the verify skill.",
+  "files": [
+    {
+      "path": "internal/index/index.go",
+      "summary": "Adds the relevance floor to the intent lookup.",
+      "annotations": [
+        {
+          "newRange": [245, 261],
+          "summary": "covers keeps a claim only when it matches at least half of the intent's terms, name or sentence whole, elsewhere half.",
+          "rationale": "One rare shared term such as 'refus' or 'launch' used to be enough, so unrelated chain-* claims came back for the two Oct 13 intents. Terms the vocabulary never saw count against every claim, because the intent is about them. Verified by TestWeakIntentMatchFindsNoClaim (fails on main) and every existing intent expectation, including the agent floor test for 'prove a stored apple is listed' (item-listed and item-added both still return). Known recall gap: an intent phrased in words no claim uses still finds nothing, and --changed remains the safety net.",
+          "author": "fm/verilex-intent-weak-match"
+        }
+      ]
+    },
+    {
+      "path": "internal/index/touch.go",
+      "summary": "Makes the change lookup skip parsing feature files unless the diff names a runbook section.",
+      "annotations": [
+        {
+          "newRange": [76, 88],
+          "summary": "touchOf computes section fingerprints only for a runbook entry and finds feature files with featuremap.Locate.",
+          "rationale": "featuremap.Pin ran twice per claim source and was about 4 ms of the 9 ms uncovered-diff path, because it parses the whole verify skill. A path needs only the file location, so the inconclusive answer now takes about 4.5 ms, mostly process start. Runbook diffs still read sections, covered by the existing runbook tests in plan_claims_test.go. TestUncoveredDiffDoesNotReadTheVerifySkill uses a FIFO feature file that hangs any read, so it fails on main.",
+          "author": "fm/verilex-intent-weak-match"
+        }
+      ]
+    },
+    {
+      "path": "internal/featuremap/anchor.go",
+      "summary": "Gives the feature-file location one owner shared by Pin and the change lookup.",
+      "annotations": [
+        {
+          "newRange": [103, 119],
+          "summary": "Locate finds the first skill directory holding a source's feature file with os.Stat, without reading it.",
+          "rationale": "Pin now calls Locate, so both agree on which file a source points at. One difference: a feature file that exists but cannot be read now still counts as a dependency of its claim, where before the read error dropped it. That is the safer side, because a touched file then hits its claim instead of reading as uncovered.",
+          "author": "fm/verilex-intent-weak-match"
+        }
+      ]
+    }
+  ]
+}

@@ -72,6 +72,8 @@ type Word struct {
 	State string `json:"state"`
 	// Chain is the chain onboarding proved the word on.
 	Chain string `json:"chain,omitempty"`
+	// Drift is set when the word's files or claim changed since onboarding: it always runs.
+	Drift bool `json:"drift_suspect,omitempty"`
 }
 
 // Build generates a product's index from its records.

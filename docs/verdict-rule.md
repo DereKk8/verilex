@@ -1,11 +1,11 @@
 # Verdict rule
 
-The launcher keeps the JSON of every `verilex run` the brain makes, in the order the runs finish. The table below turns those runs into one result, and the first row that matches decides. The launcher checks rows 1-8 before it judges any run (`run.Run` in `agent/internal/run`). `verdict.Decide` in `agent/internal/verdict` owns rows 9-33, and `prompt.Rule` states the same rule to the brain. Row NN is the subtest `NN ...` of `TestVerdictRule` in `agent/rule_test.go`, so change a row and its subtest together.
+The launcher keeps the JSON of every `verilex run` the brain makes, in the order the runs finish. The table below turns those runs into one result, and the first row that matches decides. The launcher checks rows 1-8 before it judges any run (`run.Run` in `agent/internal/run`). `verdict.Decide` in `agent/internal/verdict` owns rows 9-34, and `prompt.Rule` states the same rule to the brain. Row NN is the subtest `NN ...` of `TestVerdictRule` in `agent/rule_test.go`, so change a row and its subtest together.
 
 The brain runs only claim plans. The launcher adds `--no-chain` to each `verilex run` and `verilex plan` that the brain asks for, so verilex itself refuses any chain argument, an empty one too, before it runs anything or writes a run record. The launcher keeps no chain parser of its own. A chain must not run inside the launcher, for two reasons:
 
 - A chain's inputs are the brain's choice. A chain can be red on correct code (`store-open | store-open` opens one store twice), and green on inputs that miss a defect.
-- A chain's run record would set the word arguments of every later claim plan in the home. For example, after `store-open | item-stored pear | item-listed pear`, `verilex run --claim item-listed` lists `pear`, not `apple`.
+- A chain's run record would set the arguments of every later claim plan in the home for each word that no onboarded chain binds. For example, after `store-open | item-stored pear | item-listed pear`, `verilex run --claim item-listed` would list `pear`, not `apple`, for an `item-listed` without one.
 
 ## Terms
 
@@ -13,9 +13,9 @@ The rule uses these terms:
 
 - A **planned run** is a `verilex run` whose chain verilex planned from `--claim`, `--named` or `--changed`. verilex says so in its JSON: the format is `verilex-claim-run-1` and `requested.chain` is `null`. Each run that the launcher judges must be a planned run. A run that verilex did not plan means that verilex ignored `--no-chain`, so the result is inconclusive. A claim run without `requested.chain` comes from a verilex that is older than the launcher, and it is inconclusive too (`TestClaimRunWithoutRequestedChainIsInconclusive`).
 - A red is a failure that verilex found in the code under test. The project is read-only for the brain, so no later run can undo that red.
-- The **floor** is every `--claim` given to the launcher, plus each claim that `verilex index --intent <intent> --json` finds for the intent. The launcher runs this lookup itself before the brain starts, and the prompt lists the floor. A spec without an intent has only the `--claim` floor.
-- A run **proves** a claim when the run is green and its `requested` names the claim (`claims` or `named`), or its `claims` or `words` show the claim green.
-- An inconclusive run leaves **open** every claim that it selected: its `requested` claims, its `claims` and the claim of each of its words. A last green must prove these claims.
+- The **floor** is every `--claim` given to the launcher, plus each claim that `verilex index --intent <intent> --json` finds for the intent, plus, on a diff, each claim that `verilex index --changed <path>... --json` finds for the diff's paths (the touched claims). The launcher runs these lookups itself before the brain starts, and the prompt lists the floor. A spec without an intent or a diff has only the `--claim` floor.
+- A run **proves** a claim when the run is green and its `requested` names the claim (`claims` or `named`), or its `claims` show the claim green. Its `words` do not count: a word that ran on other arguments than those onboarding admitted it on only provided a state, and verilex leaves its claim out of `claims`.
+- An inconclusive run leaves **open** every claim that it selected: its `requested` claims and its `claims`. A last green must prove these claims.
 - A green **covers the spec** when it proves every floor claim and its `requested.changed` holds every path that the diff changes. The diff's paths are `git diff --name-only -z --no-renames --relative <diff>` in the project, so both sides of a rename count.
 
 ## The rule
@@ -54,14 +54,15 @@ The table uses the tally fixture (`tests/fixtures/tally`) and these short forms:
 | 23 | `store` | `claim store-opened` green, `chain store-open \| store-open` refused | green, run 1 | 0 | Row 22 in the other order. |
 | 24 | `apple`, the store locked for run 1 | `claim item-listed` inconclusive, `claim item-listed` green | green, run 2 | 0 | The green proves every claim that the inconclusive run selected, and covers the spec. |
 | 25 | `store`, a fake verilex | run 1 inconclusive, asked for `item-listed` and selecting `store-opened`, `item-added` and `item-listed`, run 2 green on `store-opened` | inconclusive, no JSON | 2 | The green does not prove `item-listed` or `item-added`, which the inconclusive run selected. |
-| 26 | `apple` | `claim item-listed` green | green, run 1 | 0 | The green covers the spec. Its words prove both floor claims. |
+| 26 | `apple` | `claim item-listed` green | green, run 1 | 0 | The green covers the spec. Its `claims` prove both floor claims. |
 | 27 | `apple` | `claim item-listed` green, `claim store-opened` green | inconclusive, no JSON | 2 | The last green proves neither floor claim. An earlier green does not count, because the last run is the result. |
 | 28 | `store`, `--claim item-listed` | `claim store-opened` green | inconclusive, no JSON | 2 | The green does not prove `item-listed`, a floor claim from `--claim`. |
 | 29 | `nothing`, `--claim store-opened` | `claim store-opened` green | green, run 1 | 0 | `--claim` stands for an intent that names no claim. |
 | 30 | `diff` | `claim store-opened` green | inconclusive, no JSON | 2 | The green was not asked about `bin/tally`. |
 | 31 | `diff` | `verilex run --changed bin/tally` green | green, run 1 | 0 | The green covers the spec. It proves every claim that the diff touches, so verilex prints no warning. |
-| 32 | `diff` | `claim store-opened + changed` green | green, run 1 | 0 | The green covers the spec. verilex's own warning, `2 touched claims not covered`, stays in the JSON. |
-| 33 | `store`, `--diff HEAD` with a rename and a non-ASCII file name | `claim store-opened`, with `--changed` for each changed path in the prompt | green, run 1 | 0 | Both sides of the rename and the non-ASCII name reach the prompt and `requested.changed`. |
+| 32 | `diff` | `claim store-opened + changed` green | inconclusive, no JSON | 2 | The green leaves `item-added` and `item-listed`, which the diff touches, unproven. verilex's own warning, `2 touched claims not covered`, is in that run's JSON. |
+| 33 | `store`, `--diff HEAD` with a rename and a non-ASCII file name | `verilex run` with `--changed` for each changed path in the prompt | green, run 1 | 0 | Both sides of the rename and the non-ASCII name reach the prompt and `requested.changed`. |
+| 34 | `store`, a fake verilex | run 1 green, asked for `item-listed`, whose `claims` lack `store-opened` although a word that proves it ran green | inconclusive, no JSON | 2 | Only `claims` show what a run proved. A word that ran only to provide a state proves no claim. |
 
 Each row also checks that every run record in the launcher's home is a planned run, and counts the chains that verilex refused.
 
@@ -80,4 +81,4 @@ The rule has these limits:
 - The floor is only as good as the index's intent lookup. `verilex index --intent` returns up to five claims, best first, weak matches included, and the floor holds all of them. So on a large product, a brain that proves only the claims that it judged relevant can get inconclusive and must run more claims. This costs time, but it never gives a false green or a false red.
 - The last run is the run that finished last. When the brain runs verilex in parallel, timing decides which run is last, so the same runs can give green or inconclusive. They cannot give a false green, because the last run must cover the spec alone.
 - The brain cannot run a chain, so it cannot reach a defect that no admitted word's inputs reach. verilex proves a claim through its admitted words, so such a defect is outside the claim. Explore with chains in plain verilex, outside the launcher.
-- On a diff, row 32 is green although two touched claims stay unproven, and verilex's warning in the JSON says so. A floor of the claims that the diff touches would close this gap. The launcher does not set that floor.
+- On a diff, the floor holds every touched claim, so a brain must prove them all, or the result is inconclusive. This costs time on a wide diff, but it never gives a false green. A failed `verilex index --changed` is inconclusive, because the touched claims are unknown.

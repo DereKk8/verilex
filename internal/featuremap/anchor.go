@@ -56,21 +56,15 @@ func Pin(root string, skillDirs []string, s Source) (Anchor, error) {
 	slices.Sort(sorted)
 	sum := sha256.Sum256([]byte(id + "\n" + s.Prose + "\n" + strings.Join(sorted, "\n")))
 	a := Anchor{Ref: s.Ref, Requirements: pinned, Hash: hex.EncodeToString(sum[:])}
-	clean, ok := relative(path)
-	if !ok || id == "" {
+	if _, ok := relative(path); !ok || id == "" {
 		a.Review = append(a.Review, "not a <skill>/<file>#<sub-feature> reference")
 		return a, nil
 	}
-	for _, dir := range skillDirs {
-		file := filepath.Join(root, dir, clean)
-		data, err := os.ReadFile(file)
-		if os.IsNotExist(err) {
-			continue
-		}
+	if a.File = Locate(root, skillDirs, s.Ref); a.File != "" {
+		data, err := os.ReadFile(filepath.Join(root, a.File))
 		if err != nil {
 			return a, err
 		}
-		a.File = filepath.Join(dir, clean)
 		text := strings.ReplaceAll(string(data), "\r\n", "\n")
 		scope, found := subFeature(text, id)
 		if !found {
@@ -104,6 +98,24 @@ func Pin(root string, skillDirs []string, s Source) (Anchor, error) {
 	}
 	a.Review = append(a.Review, fmt.Sprintf("no feature file %s under %s", path, strings.Join(skillDirs, ", ")))
 	return a, nil
+}
+
+// Locate names the feature file a reference points at, relative to root, without reading it:
+// the first skill directory that holds it. The #<sub-feature> part may be missing, as a word's
+// implements reference to a whole file has none. "" when the reference is not a <skill>/<file>
+// reference or no skill directory holds the file.
+func Locate(root string, skillDirs []string, ref string) string {
+	path, _, _ := strings.Cut(ref, "#")
+	clean, ok := relative(path)
+	if !ok {
+		return ""
+	}
+	for _, dir := range skillDirs {
+		if _, err := os.Stat(filepath.Join(root, dir, clean)); !os.IsNotExist(err) {
+			return filepath.Join(dir, clean)
+		}
+	}
+	return ""
 }
 
 // prose fingerprints a sub-feature's prose: every heading and every sentence that is not a

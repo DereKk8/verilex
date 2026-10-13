@@ -73,15 +73,25 @@ func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
 	claimDeps := map[string][]string{}
 	runbook := map[string][]string{}
 	hashes := map[string][]string{}
+	// Named runbook references match declared sources without reading feature text. Only a bare
+	// section digest needs current fingerprints; even an unknown digest must be checked live.
+	sectioned := slices.ContainsFunc(typed, func(change diffKind) bool {
+		return change.kind == "runbook" && hexOnly(change.value)
+	})
 	for name, c := range ix.claims {
 		deps := []string{c.Path}
-		refs, digests := ix.sections(p, c)
-		runbook[name] = refs
-		hashes[name] = digests
+		runbook[name] = c.Refs()
+		if sectioned {
+			_, hashes[name] = ix.sections(p, c)
+		}
 		for _, source := range c.Sources {
+			// A claim's source must name its sub-feature; one that does not pins no file.
+			if _, id, _ := strings.Cut(source.Ref, "#"); id == "" {
+				continue
+			}
 			root, dirs := lifecycle.SourceRoot(p, source)
-			if anchor, err := featuremap.Pin(root, dirs, featuremap.Source{Ref: source.Ref, Requirements: source.Requirements, Prose: source.Prose, Covered: source.Covered}); err == nil && anchor.File != "" {
-				deps = append(deps, filepath.Join(root, anchor.File))
+			if file := featuremap.Locate(root, dirs, source.Ref); file != "" {
+				deps = append(deps, filepath.Join(root, file))
 			}
 		}
 		claimDeps[name] = deps
@@ -115,8 +125,8 @@ func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
 			}
 		} else {
 			for _, ref := range w.Implements {
-				if section, err := featuremap.Resolve(p.Root, p.SkillDirs, ref); err == nil {
-					deps = append(deps, filepath.Join(p.Root, section.File))
+				if file := featuremap.Locate(p.Root, p.SkillDirs, ref); file != "" {
+					deps = append(deps, filepath.Join(p.Root, file))
 				}
 			}
 		}

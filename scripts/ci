@@ -70,8 +70,11 @@ canary() (
   # verilex proves its own claims (.verilex/) on this checkout: live, in throwaway state, so no ledger
   # written by earlier code can skip a step, and red when a canary word drifted or is not admitted.
   # The driver must be a commit main already holds: a commit only this branch holds could grade itself green.
-  # The full ref name, because a tag named origin/main would win over the remote branch.
-  git merge-base --is-ancestor "$canary_driver" refs/remotes/origin/main ||
+  # Resolved with show-ref --verify, which takes the branch ref only: rev-parse and merge-base fall back
+  # to a tag named refs/remotes/origin/main when the branch is absent.
+  main="$(git show-ref --verify --hash refs/remotes/origin/main)" ||
+    { echo "canary: refs/remotes/origin/main is absent (run: git fetch origin main)"; return 1; }
+  git merge-base --is-ancestor "$canary_driver" "$main" ||
     { echo "canary: driver $canary_driver is not on origin/main"; return 1; }
   state="$(mktemp -d)"
   mkdir "$state/driver"
@@ -84,7 +87,7 @@ canary() (
   for word in .verilex/words/*/word.md; do word="${word%/word.md}"; chain="${chain:+$chain | }${word##*/}"; words=$((words + 1)); done
   # The diff only adds warnings to a live run of every word, so without a merge base the verdict is the same.
   changed=()
-  if base="$(git merge-base refs/remotes/origin/main HEAD)"; then
+  if base="$(git merge-base "$main" HEAD)"; then
     while IFS= read -r path; do changed+=(--changed "$path"); done < <(git diff --name-only "$base")
   else
     echo "canary: no merge base with origin/main; the run names no changed files"

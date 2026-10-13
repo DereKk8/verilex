@@ -8,7 +8,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 work="$(mktemp -d)"
 trap 'chmod -R u+w "$work"; rm -rf "$work"' EXIT
-head="$(git rev-parse HEAD)" main="$(git rev-parse refs/remotes/origin/main)"
+head="$(git rev-parse HEAD)" main="$(git show-ref --verify --hash refs/remotes/origin/main)" ||
+  { echo "canary-guards: refs/remotes/origin/main is absent (run: git fetch origin main)" >&2; exit 2; }
 objects="$(cd "$(git rev-parse --git-common-dir)" && pwd)/objects"
 driver="$(sed -n 's/^canary_driver=//p' scripts/ci)"
 cleanup_frame='[]string{project.Frame("cleanup")}'

@@ -117,7 +117,8 @@ func TestIntentLookupReturnsTheRightClaim(t *testing.T) {
 // An intent that shares one or two terms with a claim but is about something no claim describes
 // finds no claim, so an agent falls back to the product verify skill instead of proving an
 // unrelated claim. The two intents are real misses against verilex's own claims; real matches
-// against the same claims still return.
+// against the same claims still return, the claim that describes them first, and a claim that
+// shares only one term with them never.
 func TestWeakIntentMatchFindsNoClaim(t *testing.T) {
 	own, err := filepath.Abs(filepath.Join("..", ".verilex"))
 	if err != nil {
@@ -126,24 +127,28 @@ func TestWeakIntentMatchFindsNoClaim(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "verilex")
 	copyTree(t, own, filepath.Join(root, ".verilex"))
 	for _, intent := range []string{
-		"CI scripts resolve origin/main from the branch ref only",
-		"CI scripts resolve origin/main from the branch ref only, refusing when absent",
-		"verify-verilex cleanup refuses sessions launched by another worker",
 		"refused payment",
 		"chain email",
 	} {
 		equal(t, verilex(t, root, nil, "index", "--intent", intent).stdout, "intent: 0 claim(s) for '"+intent+"'\n")
 	}
-	for intent, claim := range map[string]string{
-		"a chain out of order is refused":    "chain-order-refused",
-		"a red verdict for a broken product": "chain-red",
-		"skip a proven chain":                "chain-skipped",
-		"a chain runs live and cleans up":    "chain-runs-live",
-		"skip works":                         "chain-skipped",
+	for intent, claims := range map[string][]string{
+		"a chain out of order is refused":    {"chain-order-refused"},
+		"a red verdict for a broken product": {"chain-red"},
+		"skip a proven chain":                {"chain-skipped", "self-ledger-integrity", "self-drift"},
+		"a chain runs live and cleans up":    {"chain-runs-live", "self-ledger-integrity"},
+		// Once missed by every claim; the self-check claims now describe them.
+		"CI scripts resolve origin/main from the branch ref only":                       {"self-ci-main-ref"},
+		"CI scripts resolve origin/main from the branch ref only, refusing when absent": {"self-ci-main-ref"},
+		"verify-verilex cleanup refuses sessions launched by another worker":            {"self-skill-session"},
 	} {
-		lines := strings.SplitAfter(verilex(t, root, nil, "index", "--intent", intent).stdout, "\n")
-		equal(t, lines[0], "intent: 1 claim(s) for '"+intent+"'\n")
-		equal(t, strings.SplitN(lines[1], "  ", 2)[0], claim)
+		lines := strings.Split(strings.TrimSuffix(verilex(t, root, nil, "index", "--intent", intent).stdout, "\n"), "\n")
+		equal(t, lines[0], fmt.Sprintf("intent: %d claim(s) for '%s'", len(claims), intent))
+		got := []string{}
+		for _, line := range lines[1:] {
+			got = append(got, strings.SplitN(line, "  ", 2)[0])
+		}
+		equal(t, got, claims)
 	}
 }
 

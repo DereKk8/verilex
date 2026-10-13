@@ -1,0 +1,3 @@
+{"version":1,"summary":"Core concepts now states the five Verilex principles.","files":[
+{"path":"docs/concepts.md","summary":"Adds a Principles section before Words.","annotations":[{"newRange":[9,18],"summary":"The Principles section states the five settled principles in plain words.","rationale":"The page is where a reader learns what Verilex is, so the principles live there and add no new rules. scripts/docs check passed. Wording fidelity was checked by hand only.","author":"fm/verilex-principles-record"}]},
+{"path":"docs/README.md","summary":"Docs map blurb for Core concepts mentions the principles.","annotations":[]}]}

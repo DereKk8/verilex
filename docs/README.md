@@ -7,7 +7,7 @@ This index is also the navigation of the docs site: each `##` heading is a secti
 ## Start here
 
 - [Getting started](getting-started.md): install verilex and run a first session on the sample product, from a green run to a skipped one.
-- [Core concepts](concepts.md): words, chains, claims, verdicts and stamps on one page, with a glossary.
+- [Core concepts](concepts.md): the five principles, then words, chains, claims, verdicts and stamps on one page, with a glossary.
 - [Commands](commands.md): every command, its flags and the exit codes.
 
 ## Running chains

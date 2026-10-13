@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "summary": "Ties doc passages to claims in index --changed and strips standalone comment anchors on the docs site while preserving visible text and code blocks.",
+  "files": [
+    {
+      "path": "internal/index/docs.go",
+      "summary": "Reads doc claim anchors and computes tied passages for changed code and named claims for changed docs.",
+      "annotations": [
+        {
+          "newRange": [1, 132],
+          "summary": "Index.passages discovers doc anchors and binds them to headings, validating that referenced claims exist.",
+          "rationale": "Doc anchors tie passages to claims so reviewers see which documentation may be invalidated by code diffs. Tested by tests/docs_test.go and verilex index --changed; Windows path separators remain unverified.",
+          "author": "fm/verilex-docs-claim-index"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/index.go",
+      "summary": "Formats tied doc passages and doc-named claims in index --changed output.",
+      "annotations": [
+        {
+          "newRange": [165, 178],
+          "summary": "changes reports doc passage counts and named claim counts in the header summary.",
+          "rationale": "The summary alerts agents to tied doc passages that code diffs may invalidate, and names claims asserted by changed docs. Tested by TestChangeLookupReportsTiedDocPassages in tests/docs_test.go.",
+          "author": "fm/verilex-docs-claim-index"
+        },
+        {
+          "newRange": [193, 198],
+          "summary": "changes prints individual doc and names lines for tied passages and named claims.",
+          "rationale": "Explicit doc and names lines identify exact passages by file and heading with their claim ids. Tested by tests/docs_test.go and verify-verilex index recipe.",
+          "author": "fm/verilex-docs-claim-index"
+        }
+      ]
+    },
+    {
+      "path": "site/docs.go",
+      "summary": "Strips comment-only anchor lines from site markdown while leaving visible text and code blocks untouched.",
+      "annotations": [
+        {
+          "newRange": [179, 199],
+          "summary": "withoutComments drops comment-only lines outside fenced and indented code blocks without deleting visible text.",
+          "rationale": "htmlComment matches each comment non-greedily up to --> so visible text between comments and examples in indented code blocks stay intact. Tested by TestPagesLeaveOutClaimAnchors and attack-site.sh; live browser rendering is unverified.",
+          "author": "fm/verilex-docs-claim-index"
+        }
+      ]
+    }
+  ]
+}

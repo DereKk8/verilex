@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "summary": "Record durable usage data separately from proof stamps, with caller tokens and later review misses.",
+  "files": [
+    {
+      "path": "internal/usage/store.go",
+      "summary": "Store run snapshots and caller annotations outside run cleanup.",
+      "annotations": [
+        {
+          "newRange": [1, 251],
+          "summary": "Store keeps one snapshot per run and separate annotation files so concurrent writes do not erase caller data.",
+          "rationale": "The proof-stamp ledger expires passes, so evaluation data needs separate storage. Public CLI tests cover concurrent runs, annotations during execution, token totals, and cleanup survival. Network storage durability is unverified.",
+          "author": "fm/verilex-run-ledger"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/usage.go",
+      "summary": "Capture elapsed time and change references without adding harness code to the core.",
+      "annotations": [
+        {
+          "newRange": [1, 106],
+          "summary": "usageCapture accepts caller tokens and preserves product verdicts when recording fails.",
+          "rationale": "The core cannot observe agent tokens, so missing costs remain unknown and caller estimates stay labelled. CLI tests prove storage errors preserve green and red exit codes. Git hashes omit untracked file contents.",
+          "author": "fm/verilex-run-ledger"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/surface.go",
+      "summary": "Record requests with no covering claim without launching an instance.",
+      "annotations": [
+        {
+          "newRange": [198, 202],
+          "summary": "nothingCovered creates an inconclusive usage entry and prints its run ID for later caller annotations.",
+          "rationale": "Unmapped changes still consume verification effort, so usage must record them without inventing proof. The live tally session produced one inconclusive entry and no store. A crash before publication remains unrecorded.",
+          "author": "fm/verilex-run-ledger"
+        }
+      ]
+    }
+  ]
+}

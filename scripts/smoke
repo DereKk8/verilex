@@ -3,6 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 skill=.cursor/skills/verify-verilex/scripts
+export VERIFY_VERILEX_WORKER="${VERIFY_VERILEX_WORKER:-smoke-$$}"
 chain='store-open | item-stored apple | item-listed apple'
 S=""
 trap '[ -z "$S" ] || "$skill/cleanup" "$S" >/dev/null || true' EXIT

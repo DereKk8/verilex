@@ -42,7 +42,7 @@ item-listed  A stored item shows up when a user lists the store.
 
 ## Doc anchors
 
-A doc passage can say which claims it describes, so a diff names the passages it could have made false. An anchor is a line of its own in a markdown file under `docs/`, outside fenced blocks:
+A doc passage can say which claims it describes, so a diff names the passages it could have made false. An anchor is a line of its own in a markdown file under `docs/` (a regular file, not a symlink), outside fenced and indented code blocks, where it is an example:
 
 ```markdown
 ## When a chain is skipped

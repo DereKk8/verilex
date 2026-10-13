@@ -3,7 +3,9 @@ package tests
 import (
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/DereKk8/verilex/internal/index"
 )
@@ -71,6 +73,51 @@ func TestChangeLookupRefusesABrokenDocAnchor(t *testing.T) {
 	done = verilex(t, root, nil, "index", "--changed", "bin/tally")
 	equal(t, done.code, 2)
 	equal(t, done.stderr, "verilex: refused: docs/guide.md:2: write an anchor as `<!-- claims: <claim> ... -->`, naming at least one claim\n")
+}
+
+// An anchor shown as an example in an indented code block (four spaces or a tab) ties nothing, as
+// on the site, which shows it; and a UTF-8 byte order mark does not hide the first heading.
+func TestChangeLookupReadsOnlyTheAnchorsTheSiteHides(t *testing.T) {
+	root := product(t)
+	writeDoc(t, filepath.Join(root, "docs", "guide.md"), "\ufeff# Guide\n<!-- claims: item-added -->\n")
+	done := verilex(t, root, nil, "index", "--changed", "docs")
+	equal(t, done.stderr, "")
+	equal(t, done.stdout, "changed: 0 claim(s); 0 of 0 known chain(s) must re-run; the changed docs name 1 claim(s)\n"+
+		"  names  docs/guide.md: Guide  (item-added)\n")
+
+	writeDoc(t, filepath.Join(root, "docs", "guide.md"), "# Guide\n\nWrite an anchor like this:\n\n    <!-- claims: no-such-claim -->\n\n"+
+		"or under a tab:\n\n\t<!-- claims: item-listed -->\n\n## Adding items\n<!-- claims: item-added -->\n")
+	done = verilex(t, root, nil, "index", "--changed", "docs")
+	equal(t, done.stderr, "")
+	equal(t, done.stdout, "changed: 0 claim(s); 0 of 0 known chain(s) must re-run; the changed docs name 1 claim(s)\n"+
+		"  names  docs/guide.md: Adding items  (item-added)\n")
+	equal(t, changed(t, root, "bin/tally").Passages, []index.Passage{{File: "docs/guide.md", Heading: "Adding items", Claims: []string{"item-added"}}})
+}
+
+// Only regular files under docs/ are read: a dangling symlink cannot refuse the lookup, a symlink
+// to a file outside the product is not read, and a FIFO cannot block it.
+func TestChangeLookupReadsOnlyRegularDocs(t *testing.T) {
+	root := product(t)
+	docs := filepath.Join(root, "docs")
+	writeDoc(t, filepath.Join(docs, "guide.md"), "# Guide\n<!-- claims: item-added -->\n")
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	writeDoc(t, outside, "# Outside\n<!-- claims: no-such-claim -->\n")
+	for link, target := range map[string]string{"gone.md": filepath.Join(docs, "missing.md"), "linked.md": outside} {
+		if err := os.Symlink(target, filepath.Join(docs, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := syscall.Mkfifo(filepath.Join(docs, "pipe.md"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	p := start(t, root, nil, "index", "--changed", "docs")
+	timer := time.AfterFunc(10*time.Second, func() { _ = p.cmd.Process.Kill() })
+	defer timer.Stop()
+	done := p.wait(t)
+	equal(t, done.code, 0)
+	equal(t, done.stderr, "")
+	equal(t, done.stdout, "changed: 0 claim(s); 0 of 0 known chain(s) must re-run; the changed docs name 1 claim(s)\n"+
+		"  names  docs/guide.md: Guide  (item-added)\n")
 }
 
 func writeDoc(t *testing.T, path, text string) {

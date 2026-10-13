@@ -14,10 +14,10 @@ import (
 	"github.com/DereKk8/verilex/internal/featuremap"
 )
 
-// docsDir is where a project's docs live: every markdown file under it is read for anchors.
+// docsDir is where a project's docs live: every regular markdown file under it is read for anchors.
 const docsDir = "docs"
 
-// An anchor is a line of its own, outside fenced blocks, that ties the passage it sits in to
+// An anchor is a line of its own, outside code blocks, that ties the passage it sits in to
 // claim ids: <!-- claims: chain-skipped chain-runs-live -->. The passage is the file's section
 // under the nearest heading above the anchor, up to the next heading. An HTML comment renders as
 // nothing, and a claim id survives a refactor where a line number would not.
@@ -43,11 +43,8 @@ func (ix Index) passages(p dictionary.Project) ([]Passage, error) {
 		return found, nil
 	}
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || filepath.Ext(path) != ".md" {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
+		// Only regular files: a symlink may dangle or lead outside the product, and a FIFO blocks.
+		if err != nil || !d.Type().IsRegular() || filepath.Ext(path) != ".md" {
 			return err
 		}
 		rel, err := filepath.Rel(p.Root, path)
@@ -55,11 +52,16 @@ func (ix Index) passages(p dictionary.Project) ([]Passage, error) {
 			return err
 		}
 		file := filepath.ToSlash(rel)
-		lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("cannot read %s, so its anchors are unknown: %w", file, err)
+		}
+		text := strings.TrimPrefix(strings.ReplaceAll(string(data), "\r\n", "\n"), "\ufeff")
+		lines := strings.Split(text, "\n")
 		fenced := featuremap.Fenced(lines)
 		heading, at := "", -1
 		for i, line := range lines {
-			if fenced[i] {
+			if fenced[i] || indented(line) {
 				continue
 			}
 			if level, text := featuremap.Heading(line); level > 0 {
@@ -92,6 +94,13 @@ func (ix Index) passages(p dictionary.Project) ([]Passage, error) {
 		return nil
 	})
 	return found, err
+}
+
+// indented reports a line of an indented code block, where an anchor is an example: the same rule
+// as the site's isIndented (site/docs.go, a separate module), so the index reads exactly the
+// anchors the site hides.
+func indented(line string) bool {
+	return strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t")
 }
 
 // tied lists the passages whose anchors name one of claims (or a claim grouped under one), each

@@ -394,7 +394,12 @@ for arg in "$@"; do
 done
 case "$cmd" in
   ticket) cat "$FAKE_TICKET"; exit 0 ;;
-  index) cat "$FAKE_INDEX"; exit 0 ;;
+  index)
+    case "$*" in
+      *--changed*) echo '{"files":[],"claims":[]}' ;;
+      *) cat "$FAKE_INDEX" ;;
+    esac
+    exit 0 ;;
   plan) cat "$FAKE_PLAN"; exit 0 ;;
   run)
     if [ -n "$FAKE_RUNS" ]; then

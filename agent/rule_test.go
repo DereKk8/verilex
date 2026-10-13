@@ -270,7 +270,7 @@ var verdictRule = []rule{
 	{
 		name: "30 a green not asked about the diff", spec: diff(),
 		brain: "verilex run --claim store-opened > \"$HOME/1\"\n",
-		exit:  2, stderr: []string{"is green but was not asked about change bin/tally"},
+		exit:  2, stderr: []string{"is green but was not asked about claim item-added, claim item-listed, change bin/tally"},
 	},
 	{
 		name: "31 a green on the diff that proves every touched claim", spec: diff(),
@@ -278,16 +278,16 @@ var verdictRule = []rule{
 		exit:  0, stdout: "1", check: warning(""),
 	},
 	{
-		name: "32 a green on the diff, with verilex's warning", spec: diff(),
+		name: "32 a green on the diff that skips touched claims", spec: diff(),
 		brain: "verilex run --claim store-opened --changed bin/tally > \"$HOME/1\"\n",
-		exit:  0, stdout: "1", check: warning("2 touched claims not covered"),
+		exit:  2, stderr: []string{"is green but was not asked about claim item-added, claim item-listed"},
 	},
 	{
 		name: "33 a green on a diff with a rename and a non-ASCII name (F3)", spec: append(intent(store), "--diff", "HEAD"),
 		setup: renamedProduct,
 		brain: "cp \"$VERILEX_AGENT_PROMPT\" \"$HOME/prompt\"\nset --\n" +
 			"for path in $(sed -n 's/^changed: //p' \"$VERILEX_AGENT_PROMPT\"); do set -- \"$@\" --changed \"$path\"; done\n" +
-			"verilex run --claim store-opened \"$@\" > \"$HOME/1\"\n",
+			"verilex run \"$@\" > \"$HOME/1\"\n",
 		exit: 0, stdout: "1",
 		check: func(t *testing.T, r *ruleRun, got kept) {
 			changed := []string{".verilex/words/item-listed/café.txt", ".verilex/words/item-listed/notes.txt", "notes-moved.txt"}
@@ -298,7 +298,7 @@ var verdictRule = []rule{
 			if got := slices.Sorted(slices.Values(doc.Requested.Changed)); !slices.Equal(got, changed) {
 				t.Fatalf("requested.changed %q, want %q", got, changed)
 			}
-			if len(doc.Uncovered) != 1 || doc.Uncovered[0].Claim != "item-listed" {
+			if len(doc.Uncovered) != 0 {
 				t.Fatalf("uncovered %+v, warning %q", doc.Uncovered, doc.Warning)
 			}
 			prompt := got.home(t, "prompt")

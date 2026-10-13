@@ -166,7 +166,7 @@ func Run(opts Options, timer Timer) (result Result, err error) {
 	// One deadline covers the intent lookup and both brain phases, so none can stretch the budget.
 	ctx, cancel := timer(budget)
 	defer cancel()
-	named, err := floor(ctx, verilex, project, spec.Intent, opts.Claims)
+	named, err := floor(ctx, verilex, project, spec.Intent, opts.Claims, changed)
 	if err != nil {
 		return Result{}, err
 	}
@@ -552,11 +552,23 @@ func resolve(verilex, project, work string, opts Options) (ticket, string, error
 	return spec, path, nil
 }
 
-// floor is the claims a green must prove: each --claim, and each claim verilex index finds for
-// the intent, found by verilex, not by the brain. An intent that names no claim has no floor, so
-// only --claim can stand for it. The lookup runs within ctx, the run's time budget.
-func floor(ctx context.Context, verilex, project, intent string, claims []string) ([]string, error) {
+// floor is the claims a green must prove: each --claim, each claim verilex index finds for the
+// intent, and each claim the diff touches (verilex index --changed), found by verilex, not by the
+// brain. An intent that names no claim has no intent floor, so only --claim can stand for it. The
+// lookups run within ctx, the run's time budget.
+func floor(ctx context.Context, verilex, project, intent string, claims, changed []string) ([]string, error) {
 	named := slices.Clone(claims)
+	if len(changed) > 0 {
+		touched, err := touchedClaims(ctx, verilex, project, changed)
+		if err != nil {
+			return nil, err
+		}
+		for _, claim := range touched {
+			if !slices.Contains(named, claim) {
+				named = append(named, claim)
+			}
+		}
+	}
 	if intent == "" {
 		return named, nil
 	}
@@ -586,6 +598,37 @@ func floor(ctx context.Context, verilex, project, intent string, claims []string
 		return nil, inconclusive("intent %q names no claim (verilex index --intent found none), so no verilex run can prove it; name the claims with --claim", intent)
 	}
 	return named, nil
+}
+
+// touchedClaims is the claims verilex says the changed paths touch. A failed lookup leaves the
+// touched claims unknown, so it is the environment's failure, never a verdict.
+func touchedClaims(ctx context.Context, verilex, project string, changed []string) ([]string, error) {
+	args := []string{"index", "--json"}
+	for _, path := range changed {
+		// verilex reads a relative path from its working directory, not from --project.
+		args = append(args, "--changed="+filepath.Join(project, path))
+	}
+	var found struct {
+		Claims []struct {
+			Claim string `json:"claim"`
+		} `json:"claims"`
+	}
+	err := verilexJSON(ctx, verilex, project, &found, args...)
+	switch {
+	case ctx.Err() != nil:
+		return nil, inconclusive("the time budget ended before verilex index --changed answered")
+	case errors.Is(err, context.DeadlineExceeded):
+		return nil, inconclusive("verilex index --changed did not answer within %s", lookupTimeout)
+	case err != nil:
+		return nil, inconclusive("verilex index --changed failed, so the claims the diff touches are unknown: %v", err)
+	}
+	var out []string
+	for _, row := range found.Claims {
+		if row.Claim != "" {
+			out = append(out, row.Claim)
+		}
+	}
+	return out, nil
 }
 
 // lookupTimeout bounds each verilex command the launcher runs for itself, the ticket and the

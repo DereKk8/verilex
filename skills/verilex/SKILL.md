@@ -9,7 +9,7 @@ You are the brain. verilex is the hands. It does not pick claims and it does not
 
 Reach for verilex when the product has `.verilex/` and the change should be proved by recorded claims. Fall back to the product's verify skill when a lookup returns no claim, a word is missing, or you must drive the product by hand.
 
-No intent means prove nothing this change touched broke. If verilex says no claim covers the change, that is inconclusive: fall back to the product verify skill.
+No intent means prove nothing this change touched broke. If verilex says no claim covers the change, that is inconclusive: fall back to the product verify skill. When both lookups in step 1 find no claim, skip the plan: one `verilex run --changed <change>` gives that inconclusive verdict, exit `2`.
 
 1. `verilex index --intent '<intent>'` and `verilex index --changed <change>`. A change is a path, `config:<key>`, `image:<pin>` or `runbook:<ref>`.
 2. Derive claims from both lookups. Named claims are a floor, never a ceiling. Pass them with `--named`. Do not treat a named list as the whole job.

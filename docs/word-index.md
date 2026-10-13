@@ -31,7 +31,7 @@ item-stored <name>  proves item-added@18e2db0cee8f through cli; admitted
 
 ## Intent and diff lookups
 
-`--intent '<text>'` finds up to five claims an intent names, best first. It compares the intent's terms with each claim's name, sentence, evidence, aliases, sources and words; a term counts double in the name or sentence, and a rarer term counts more. `--changed <file>` (repeatable) lists the claims whose dependencies cover the touched files, and every known chain that holds one of their words: the chains onboarding proved them on and those this product ran. For each chain it gives the decision `verilex plan` makes, through the same code: run (with the first reason), skip, or refused.
+`--intent '<text>'` finds up to five claims an intent names, best first. It compares the intent's terms with each claim's name, sentence, evidence, aliases, sources and words; a term counts double in the name or sentence, and a rarer term counts more. A claim is returned only when it covers at least half of the intent's terms, a term in its name or sentence counting whole and one elsewhere in the claim half, so an intent about something no claim describes finds none rather than a claim that shares one word with it. `--changed <file>` (repeatable) lists the claims whose dependencies cover the touched files, and every known chain that holds one of their words: the chains onboarding proved them on and those this product ran. For each chain it gives the decision `verilex plan` makes, through the same code: run (with the first reason), skip, or refused.
 
 ```
 $ verilex index --changed .verilex/words/item-listed/run

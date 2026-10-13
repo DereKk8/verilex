@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -332,6 +333,34 @@ func TestUnmappedDiffIsInconclusive(t *testing.T) {
 	equal(t, mixed.Unclaimed, []string{"probe-word"})
 	contains(t, verilex(t, root, nil, "plan", "--changed", ".verilex/words/probe-word/run", "--changed", ".verilex/words/item-listed/run").stdout,
 		"  unclaimed  probe-word: proves no claim; verify it with the product verify skill\n")
+}
+
+// A diff no claim covers is answered without reading the verify skill: only where its feature
+// files are matters to a path. A feature file that blocks every read stands in for one too slow
+// to parse.
+func TestUncoveredDiffDoesNotReadTheVerifySkill(t *testing.T) {
+	root := product(t)
+	feature := filepath.Join(root, ".cursor", "skills", "verify-tally", "features", "items.md")
+	if err := os.Remove(feature); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(feature, 0600); err != nil {
+		t.Fatal(err)
+	}
+	within := func(args ...string) output {
+		t.Helper()
+		p := start(t, root, nil, args...)
+		timer := time.AfterFunc(20*time.Second, func() { _ = p.cmd.Process.Kill() })
+		defer timer.Stop()
+		return p.wait(t)
+	}
+	for _, command := range []string{"run", "plan"} {
+		done := within(command, "--changed", "README.md")
+		equal(t, done.code, 2)
+		contains(t, done.stdout, "inconclusive: no claim covers this change; fall back to the product verify skill\n")
+	}
+	equal(t, within("index", "--changed", "README.md").stdout, "changed: 0 claim(s); 0 of 0 known chain(s) must re-run\n")
+	equal(t, claimsOf(changed(t, root, ".cursor/skills/verify-tally/features/items.md")), []string{"item-added", "item-listed"})
 }
 
 // Rule: every selected claim has a verdict, a red claim is not also uncovered, and the record names what was asked.

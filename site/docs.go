@@ -176,20 +176,25 @@ func mdLines(markdown string) []mdLine {
 	return out
 }
 
-// htmlComment is a line that is one HTML comment, such as a claim anchor (see docs/word-index.md).
-var htmlComment = regexp.MustCompile(`^\s*<!--.*-->\s*$`)
+// htmlComment is a line consisting only of HTML comments (such as a claim anchor) and whitespace.
+// Each comment is matched only up to its first -->, so a line with visible text is kept.
+var htmlComment = regexp.MustCompile(`^\s*(?:<!--(?:[^-]|-[^-]|--[^>])*-->\s*)+$`)
 
-// withoutComments drops the lines outside fenced blocks that are one HTML comment: GitHub renders
-// them as nothing, so the site, its search and Ask never show them either.
+// withoutComments drops the lines outside code blocks (fenced or indented) that are only HTML comments:
+// GitHub renders them as nothing, so the site, its search and Ask never show them either.
 func withoutComments(markdown string) string {
 	var out []string
 	for _, l := range mdLines(markdown) {
-		if !l.Fenced && htmlComment.MatchString(l.Text) {
+		if !l.Fenced && !isIndented(l.Text) && htmlComment.MatchString(l.Text) {
 			continue
 		}
 		out = append(out, l.Text)
 	}
 	return strings.Join(out, "\n")
+}
+
+func isIndented(line string) bool {
+	return strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t")
 }
 
 // outsideFences returns the lines that are not part of a fenced block.

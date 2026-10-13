@@ -90,12 +90,23 @@ func TestPagesLeaveOutClaimAnchors(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "docs/README.md", "# Docs\n\n## Start\n\n- [Alpha](a.md): the first page.\n")
 	write(t, root, "docs/a.md", "# Alpha\n\n## Skipping\n<!-- claims: chain-skipped -->\n\nA proven chain is skipped.\n\n"+
-		"```markdown\n<!-- claims: chain-red -->\n```\n")
+		"```markdown\n<!-- claims: chain-red -->\n```\n\n"+
+		"    <!-- claims: chain-red -->\n\n"+
+		"\t<!-- claims: chain-blue -->\n\n"+
+		"<!-- note -->Visible text<!-- note -->\n"+
+		"<!-- one --> Visible between <!-- two -->\n"+
+		"<!-- a --><!-- b -->\n"+
+		"<!-- c -->   <!-- d -->\n"+
+		"<!---->\n")
 	b, err := Load(root, defaultRepo, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "# Alpha\n\n## Skipping\n\nA proven chain is skipped.\n\n```markdown\n<!-- claims: chain-red -->\n```\n"
+	want := "# Alpha\n\n## Skipping\n\nA proven chain is skipped.\n\n```markdown\n<!-- claims: chain-red -->\n```\n\n" +
+		"    <!-- claims: chain-red -->\n\n" +
+		"\t<!-- claims: chain-blue -->\n\n" +
+		"<!-- note -->Visible text<!-- note -->\n" +
+		"<!-- one --> Visible between <!-- two -->\n"
 	if got := b.Pages[0].Markdown; got != want {
 		t.Errorf("markdown:\n%q\nwant:\n%q", got, want)
 	}

@@ -101,7 +101,7 @@ func loadPage(root, file string) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
-	text := string(data)
+	text := withoutComments(string(data))
 	return Page{Slug: strings.TrimSuffix(file, ".md"), File: "docs/" + file, Markdown: text, Headings: Headings(text)}, nil
 }
 
@@ -174,6 +174,27 @@ func mdLines(markdown string) []mdLine {
 		out = append(out, mdLine{line, false})
 	}
 	return out
+}
+
+// htmlComment is a line consisting only of HTML comments (such as a claim anchor) and whitespace.
+// Each comment is matched only up to its first -->, so a line with visible text is kept.
+var htmlComment = regexp.MustCompile(`^\s*(?:<!--(?:[^-]|-[^-]|--[^>])*-->\s*)+$`)
+
+// withoutComments drops the lines outside code blocks (fenced or indented) that are only HTML comments:
+// GitHub renders them as nothing, so the site, its search and Ask never show them either.
+func withoutComments(markdown string) string {
+	var out []string
+	for _, l := range mdLines(markdown) {
+		if !l.Fenced && !isIndented(l.Text) && htmlComment.MatchString(l.Text) {
+			continue
+		}
+		out = append(out, l.Text)
+	}
+	return strings.Join(out, "\n")
+}
+
+func isIndented(line string) bool {
+	return strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t")
 }
 
 // outsideFences returns the lines that are not part of a fenced block.

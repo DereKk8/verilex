@@ -1,4 +1,5 @@
 # Verdicts
+<!-- claims: chain-red -->
 
 | Verdict | Means |
 |---|---|
@@ -9,6 +10,7 @@
 A word reports `pass`, `fail` or `blocked` (see the word contract); verilex judges that report and turns it into a verdict. A run is red only when a word is red and the doctor still vouches for the instance afterwards; anything that undermines the run makes it inconclusive. `verilex runs` reads runs recorded with the older labels (`pass`, `fail`, `blocked`, `unverified`) as the three verdicts.
 
 ## Output
+<!-- claims: chain-red -->
 
 `verilex run` prints the verdict first, then only the steps that are not green, each with a one-line cause and a path to its evidence; green steps are only counted:
 

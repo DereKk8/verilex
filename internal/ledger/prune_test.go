@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -72,9 +73,10 @@ func TestPruneJudgesAgeOnTheStorageClock(t *testing.T) {
 func TestPruneRemovesStrandedTempEntriesOnly(t *testing.T) {
 	s := At(t.TempDir())
 	seed(t, s, pruneSlot, time.Now(), time.Now())
-	stale, fresh := filepath.Join(s.dir, "passes", pruneSlot, ".tmp-stale"), filepath.Join(s.dir, "evidence", ".tmp-fresh")
-	staleDir := filepath.Join(s.dir, "evidence", ".tmp-staledir")
-	for _, d := range []string{staleDir, fresh} {
+	stale, fresh := filepath.Join(s.dir, "passes", pruneSlot, ".tmp-1234"), filepath.Join(s.dir, "evidence", ".tmp-5678")
+	staleDir := filepath.Join(s.dir, "evidence", ".tmp-9012")
+	foreign := filepath.Join(s.dir, "evidence", ".tmp-cache")
+	for _, d := range []string{staleDir, fresh, foreign} {
 		if err := os.MkdirAll(d, 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -83,7 +85,7 @@ func TestPruneRemovesStrandedTempEntriesOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := time.Now().Add(-strandedAge - time.Hour)
-	for _, p := range []string{stale, staleDir} {
+	for _, p := range []string{stale, staleDir, foreign} {
 		if err := os.Chtimes(p, old, old); err != nil {
 			t.Fatal(err)
 		}
@@ -94,6 +96,9 @@ func TestPruneRemovesStrandedTempEntriesOnly(t *testing.T) {
 	}
 	if !exists(fresh) {
 		t.Errorf("prune removed a temporary entry a live writer may own")
+	}
+	if !exists(foreign) {
+		t.Errorf("prune removed a .tmp- entry verilex did not name")
 	}
 }
 
@@ -138,7 +143,7 @@ func TestPruneLeavesTheTargetOfASlotSymlinkAlone(t *testing.T) {
 	s := At(t.TempDir())
 	seed(t, s, pruneSlot, time.Now(), time.Now())
 	outside := t.TempDir()
-	victim := filepath.Join(outside, ".tmp-cache")
+	victim := filepath.Join(outside, ".tmp-1234")
 	if err := os.MkdirAll(filepath.Join(victim, "keep"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -161,11 +166,16 @@ func TestPruneRemovesAStrandedClockProbe(t *testing.T) {
 	seed(t, s, pruneSlot, time.Now(), time.Now())
 	var probe string
 	s.probed = func(path string) { probe = path }
-	s.storageNow()
-	if probe == "" {
-		t.Fatal("no probe file was created")
+	root, err := os.OpenRoot(s.dir)
+	if err != nil {
+		t.Fatal(err)
 	}
-	stranded := filepath.Join(s.dir, filepath.Base(probe)+"-stranded")
+	s.storageNow(root)
+	root.Close()
+	if probe == "" || exists(probe) {
+		t.Fatal("no probe file was created and removed")
+	}
+	stranded := filepath.Join(s.dir, filepath.Base(probe)+"0")
 	if err := os.WriteFile(stranded, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -176,5 +186,32 @@ func TestPruneRemovesAStrandedClockProbe(t *testing.T) {
 	s.prune()
 	if exists(stranded) {
 		t.Errorf("a stranded clock probe survived prune")
+	}
+}
+
+// Rule: prune reads no pass file larger than maxPass, so a damaged or planted huge file under a
+// pass name costs no recording run. Such a file is left in place, even when it holds an expired pass.
+func TestPruneLeavesAnOversizedPassFileUnread(t *testing.T) {
+	s := At(t.TempDir())
+	ev := t.TempDir()
+	for name, text := range map[string]string{"stdout": `{"verdict": "pass", "observation": "o"}` + "\n", "exit": "0\n"} {
+		if err := os.WriteFile(filepath.Join(ev, name), []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e := Entry{
+		Label: "w", Verdict: "green", Stamp: pruneStamp, Components: map[string]string{"claim": pruneClaim},
+		Claim: "c@18e2db0cee8f", Run: "1-r", Owner: "1-r", Observation: strings.Repeat("o", maxPass), Evidence: ev,
+	}
+	if err := s.add(pruneSlot, e, time.Now().Add(-MaxAge-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	big, _ := filepath.Glob(filepath.Join(s.dir, "passes", pruneSlot, "*.json"))
+	if len(big) != 1 {
+		t.Fatalf("passes: %v", big)
+	}
+	s.prune()
+	if !exists(big[0]) {
+		t.Errorf("prune read a pass file larger than %d bytes", maxPass)
 	}
 }

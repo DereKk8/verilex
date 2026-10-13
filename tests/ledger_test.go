@@ -236,10 +236,17 @@ func TestUnreadableLedgerRunsLive(t *testing.T) {
 	ranLive(t, record)
 }
 
-// stranded plants a temporary entry, holding a file, that is old enough for prune to sweep.
+// stranded plants a temporary entry of the shape verilex names its own, holding a file, that is
+// old enough for prune to sweep.
 func stranded(t *testing.T, dir string) string {
 	t.Helper()
-	path := filepath.Join(dir, ".tmp-cache")
+	return strandedAs(t, dir, ".tmp-4242")
+}
+
+// strandedAs plants an old temporary entry named name, holding a file, and returns that file.
+func strandedAs(t *testing.T, dir, name string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
 	if err := os.MkdirAll(filepath.Join(path, "keep"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -290,6 +297,36 @@ func TestPruneNeverFollowsALinkOutOfTheLedger(t *testing.T) {
 			}
 			equal(t, green(t, root, env, chain).Skipped, true)
 		})
+	}
+}
+
+// Rule: prune sweeps only the temporary names verilex itself creates. Old .tmp- entries another
+// tool keeps in the ledger's directories survive every recording run.
+func TestPruneKeepsTemporaryEntriesVerilexDidNotName(t *testing.T) {
+	root := curated(t)
+	shared := filepath.Join(t.TempDir(), "ledger")
+	env := map[string]string{"VERILEX_LEDGER": shared}
+	green(t, root, env, chain)
+	ledger := filepath.Join(shared, "tally")
+	slots, err := filepath.Glob(filepath.Join(ledger, "passes", "*"))
+	if err != nil || len(slots) == 0 {
+		t.Fatalf("no slot: %v", err)
+	}
+	kept, swept := []string{}, []string{}
+	for _, dir := range []string{ledger, filepath.Join(ledger, "evidence"), slots[0]} {
+		for _, name := range []string{".tmp-cache", ".tmp-", ".tmp-12x", ".tmp-clock-", ".tmp-clock-a1"} {
+			kept = append(kept, strandedAs(t, dir, name))
+		}
+		swept = append(swept, stranded(t, dir), strandedAs(t, dir, ".tmp-clock-77"))
+	}
+	green(t, root, env, "store-open | item-stored pear | item-listed pear")
+	for _, path := range kept {
+		equal(t, read(t, path), "not verilex's\n")
+	}
+	for _, path := range swept {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("prune kept %s: %v", path, err)
+		}
 	}
 }
 

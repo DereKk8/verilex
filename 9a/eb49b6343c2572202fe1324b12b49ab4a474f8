@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "summary": "On a diff, the launcher floor holds every claim that verilex index --changed says the diff touches, looked up with relative paths from the project, and the verify skill describes that behavior.",
+  "files": [
+    {
+      "path": "agent/internal/run/run.go",
+      "summary": "Owns the floor and the launcher's own verilex lookups.",
+      "annotations": [
+        {
+          "newRange": [603, 634],
+          "summary": "touchedClaims sends each changed path as a relative --changed argument, as the brain's own run does.",
+          "rationale": "An absolute path per argument made a very wide diff pass the kernel argument limit and give a false inconclusive that the merge base did not give. A relative path needs no more argument space than the brain's run. The new test checks the arguments and the working directory. A 30,001-file diff was not re-run.",
+          "author": "fm/verilex-launcher-diff-floor-fix"
+        },
+        {
+          "newRange": [647, 647],
+          "summary": "verilexJSON runs every launcher lookup with the project as its working directory.",
+          "rationale": "verilex reads a relative path from its working directory, not from --project, so the relative --changed paths resolve only here. The project is already absolute. The ticket and intent lookups use an absolute path or no path, so they do not change. The agent suite passes with -count=1.",
+          "author": "fm/verilex-launcher-diff-floor-fix"
+        }
+      ]
+    },
+    {
+      "path": "agent/claims_test.go",
+      "summary": "Tests the launcher through the real verilex binary on a tally copy.",
+      "annotations": [
+        {
+          "newRange": [76, 90],
+          "summary": "TestTouchedClaimLookupSendsRelativePathsFromTheProject logs the working directory and --changed arguments of the touched-claims lookup through a wrapper around the real verilex.",
+          "rationale": "The test expects the project as the working directory and --changed=bin/tally. It fails on the previous run.go, which sent an absolute path from another directory, and passes on this one.",
+          "author": "fm/verilex-launcher-diff-floor-fix"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/features/agent.md",
+      "summary": "Updates the launcher recipes to the diff floor.",
+      "annotations": [
+        {
+          "newRange": [86, 92],
+          "summary": "The Lookup failures recipe gains index --changed cases for a failed lookup and a hung lookup.",
+          "rationale": "The recipes for Missed claim, f6chain-diff and the intro sentence now expect exit 2. I ran each changed recipe on a fresh vx session of this branch and each printed the stated exit and stderr. The pgrep check printed nothing and exited 1.",
+          "author": "fm/verilex-launcher-diff-floor-fix"
+        }
+      ]
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -332,6 +333,95 @@ func TestUnmappedDiffIsInconclusive(t *testing.T) {
 	equal(t, mixed.Unclaimed, []string{"probe-word"})
 	contains(t, verilex(t, root, nil, "plan", "--changed", ".verilex/words/probe-word/run", "--changed", ".verilex/words/item-listed/run").stdout,
 		"  unclaimed  probe-word: proves no claim; verify it with the product verify skill\n")
+}
+
+// A claimless word may implement a whole feature file, with no #<sub-feature>; an edit to that
+// file touches the word, alone or beside a change a claim covers.
+func TestWholeFileImplementsDependsOnTheFile(t *testing.T) {
+	root := product(t)
+	write(t, feature(root, "backup.md"), "# Backup\n\nA user backs the store up.\n", 0644)
+	equal(t, verilex(t, root, nil, "new", "probe-backup", "--implements", "verify-tally/features/backup.md").code, 0)
+	const file = ".cursor/skills/verify-tally/features/backup.md"
+	alone := verilex(t, root, nil, "run", "--changed", file)
+	equal(t, alone.code, 2)
+	contains(t, alone.stdout, "probe-backup proves no claim and the diff touched it")
+	green(t, root, nil, chain)
+	mixed := verilex(t, root, nil, "plan", "--changed", file, "--changed", ".verilex/words/item-listed/run").stdout
+	contains(t, mixed, "  unclaimed  probe-backup: proves no claim; verify it with the product verify skill\n")
+	if strings.Contains(mixed, "unmapped") {
+		t.Fatalf("a word depends on %s:\n%s", file, mixed)
+	}
+}
+
+// A diff no claim covers is answered without reading the verify skill: only where its feature
+// files are matters to a path. A feature file that blocks every read stands in for one too slow
+// to parse.
+func TestUncoveredDiffDoesNotReadTheVerifySkill(t *testing.T) {
+	root := product(t)
+	feature := filepath.Join(root, ".cursor", "skills", "verify-tally", "features", "items.md")
+	if err := os.Remove(feature); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(feature, 0600); err != nil {
+		t.Fatal(err)
+	}
+	within := func(args ...string) output {
+		t.Helper()
+		p := start(t, root, nil, args...)
+		timer := time.AfterFunc(20*time.Second, func() { _ = p.cmd.Process.Kill() })
+		defer timer.Stop()
+		return p.wait(t)
+	}
+	for _, command := range []string{"run", "plan"} {
+		done := within(command, "--changed", "README.md")
+		equal(t, done.code, 2)
+		contains(t, done.stdout, "inconclusive: no claim covers this change; fall back to the product verify skill\n")
+	}
+	equal(t, within("index", "--changed", "README.md").stdout, "changed: 0 claim(s); 0 of 0 known chain(s) must re-run\n")
+	equal(t, claimsOf(changed(t, root, ".cursor/skills/verify-tally/features/items.md")), []string{"item-added", "item-listed"})
+}
+
+// An uncovered runbook reference needs no feature text. A blocked feature file must not stop
+// index, plan or run from returning the same no-coverage answer as an ordinary file.
+func TestUncoveredRunbookDoesNotReadTheVerifySkill(t *testing.T) {
+	root := product(t)
+	const ref = "runbook:verify-tally/features/items.md#item-add"
+	equal(t, verilex(t, root, nil, "index", "--changed", ref).stdout,
+		"changed: 1 claim(s); 0 of 0 known chain(s) must re-run\nitem-added  A named item is in the store.  (dormant)\n")
+	feature := filepath.Join(root, ".cursor", "skills", "verify-tally", "features", "items.md")
+	if err := os.Remove(feature); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(feature, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []string{
+		"runbook:verify-tally/features/items.md#no-such",
+		"runbook:verify-tally/features/nothing.md#x",
+		"runbook:verify-tally/features/items.md#no-such@0123456789ab",
+	} {
+		for _, command := range []string{"index", "plan", "run"} {
+			t.Run(command+"/"+change, func(t *testing.T) {
+				p := start(t, root, nil, command, "--changed", change)
+				timer := time.AfterFunc(5*time.Second, func() { _ = p.cmd.Process.Kill() })
+				defer timer.Stop()
+				done := p.wait(t)
+				if command == "index" {
+					equal(t, done.code, 0)
+					equal(t, done.stdout, "changed: 0 claim(s); 0 of 0 known chain(s) must re-run\n")
+				} else {
+					equal(t, done.code, 2)
+					prefix := ""
+					if command == "plan" {
+						prefix = "plan: "
+					}
+					equal(t, done.stdout, prefix+"inconclusive: no claim covers this change; fall back to the product verify skill\n")
+				}
+				equal(t, done.stderr, "")
+			})
+		}
+	}
+	equal(t, verilex(t, root, nil, "runs").stdout, "")
 }
 
 // Rule: every selected claim has a verdict, a red claim is not also uncovered, and the record names what was asked.

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -49,7 +50,11 @@ func usageCommand(args options, out io.Writer, refuse func(error) int) int {
 		}
 	} else {
 		t := result.Totals
-		fmt.Fprintf(out, "usage: %d runs; green %d, red %d, inconclusive %d, unfinished %d; misses %d; %.3fs; tokens %d (%d unknown, %d estimated)\n", t.Runs, t.Green, t.Red, t.Inconclusive, t.Unfinished, t.Misses, t.Seconds, t.Tokens, t.TokensUnknown, t.TokensEstimated)
+		tokens := fmt.Sprintf("%d", t.Tokens)
+		if t.TokensSaturated {
+			tokens = ">=" + tokens
+		}
+		fmt.Fprintf(out, "usage: %d runs; green %d, red %d, inconclusive %d, unfinished %d; misses %d; %.3fs; tokens %s (%d runs unknown, %d runs estimated)\n", t.Runs, t.Green, t.Red, t.Inconclusive, t.Unfinished, t.Misses, t.Seconds, tokens, t.TokensUnknown, t.TokensEstimated)
 		fmt.Fprintf(out, "ledger: %s\n", store.Dir)
 	}
 	return 0
@@ -57,13 +62,25 @@ func usageCommand(args options, out io.Writer, refuse func(error) int) int {
 
 func newUsage(project dictionary.Project, args options) *usageCapture {
 	c := &usageCapture{store: usageStore(), started: time.Now(), entry: usage.Entry{Change: args.change, Tokens: args.tokens}}
-	revision := exec.Command("git", "-C", project.Root, "rev-parse", "HEAD")
+	// Change identity is optional. Bound both Git's work and the bytes hashed,
+	// including when a skipped run sits next to a huge tracked binary change.
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	revision := exec.CommandContext(ctx, "git", "-C", project.Root, "rev-parse", "HEAD")
 	if data, err := revision.Output(); err == nil {
 		c.entry.Revision = strings.TrimSpace(string(data))
-		diff := exec.Command("git", "-C", project.Root, "diff", "HEAD", "--no-ext-diff", "--no-textconv", "--binary")
+		diff := exec.CommandContext(ctx, "git", "-C", project.Root, "diff", "HEAD", "--no-ext-diff", "--no-textconv", "--binary", "--", ".")
+		pipe, err := diff.StdoutPipe()
+		if err != nil || diff.Start() != nil {
+			return c
+		}
 		digest := sha256.New()
-		diff.Stdout = digest
-		if err := diff.Run(); err == nil {
+		const maxDiff = 1 << 20
+		n, copyErr := io.Copy(digest, io.LimitReader(pipe, maxDiff+1))
+		if n > maxDiff || copyErr != nil {
+			_ = diff.Process.Kill()
+		}
+		if err := diff.Wait(); err == nil && copyErr == nil && n <= maxDiff && ctx.Err() == nil {
 			c.entry.DiffSHA256 = fmt.Sprintf("%x", digest.Sum(nil))
 		}
 	}
@@ -84,6 +101,9 @@ func (c *usageCapture) begin(record runner.Record, stderr io.Writer) {
 
 func (c *usageCapture) finish(record runner.Record, stderr io.Writer) {
 	if record.Run == "" {
+		if err := c.store.Remove(c.entry.Record.Run); err != nil {
+			fmt.Fprintf(stderr, "verilex: usage ledger removal failed: %v\n", err)
+		}
 		return
 	}
 	c.entry.Record = record

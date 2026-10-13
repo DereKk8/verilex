@@ -48,6 +48,7 @@ type Totals struct {
 	Misses          int     `json:"misses"`
 	Seconds         float64 `json:"seconds"`
 	Tokens          int64   `json:"tokens"`
+	TokensSaturated bool    `json:"tokens_saturated"`
 	TokensUnknown   int     `json:"tokens_unknown"`
 	TokensEstimated int     `json:"tokens_estimated"`
 }
@@ -81,6 +82,14 @@ func (s Store) Save(entry Entry) error {
 		return err
 	}
 	return publish(filepath.Join(s.Dir, entry.Record.Run, "run.json"), entry)
+}
+
+// Remove drops a start snapshot when execution refuses the run before anything runs.
+func (s Store) Remove(id string) error {
+	if err := validID(id); err != nil {
+		return err
+	}
+	return os.RemoveAll(filepath.Join(s.Dir, id))
 }
 
 func (s Store) read(id string) (Entry, error) {
@@ -191,10 +200,14 @@ func (s Store) Read() (Report, error) {
 		if entry.Tokens == nil {
 			totals.TokensUnknown++
 		} else {
-			if entry.Tokens.Count < 0 || entry.Tokens.Count > math.MaxInt64-totals.Tokens {
-				return result, errors.New("invalid or overflowing token total")
+			if entry.Tokens.Count < 0 {
+				return result, fmt.Errorf("invalid token count for usage run %s", dir.Name())
 			}
-			totals.Tokens += entry.Tokens.Count
+			if entry.Tokens.Count > math.MaxInt64-totals.Tokens {
+				totals.Tokens, totals.TokensSaturated = math.MaxInt64, true
+			} else {
+				totals.Tokens += entry.Tokens.Count
+			}
 			if entry.Tokens.Estimated {
 				totals.TokensEstimated++
 			}

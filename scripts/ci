@@ -93,7 +93,8 @@ canary() (
     echo "canary: no merge base with origin/main; the run names no changed files"
   fi
   ok=true
-  "$state/verilex" run --fresh "${changed[@]}" "$chain" || ok=false
+  # bash 3.2 (macOS) treats an empty array as unbound under set -u, as on main where the diff is empty.
+  "$state/verilex" run --fresh ${changed[@]+"${changed[@]}"} "$chain" || ok=false
   drift="$("$state/verilex" check)" || ok=false
   echo "$drift"
   # Every canary word must be admitted: a word turned provisional is not drift, so the count is the check.

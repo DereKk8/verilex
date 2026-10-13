@@ -221,11 +221,21 @@ func onboarded(p dictionary.Project, w dictionary.Word) (Status, error) {
 					s.Drift = append(s.Drift, "grouped claim "+group.Name+" declares planted defect "+name+", which "+w.Name+" was never compared under")
 				}
 			}
+			for _, name := range slices.Sorted(maps.Keys(d.GroupDefects)) {
+				if _, ok := group.Defects[name]; !ok {
+					s.Drift = append(s.Drift, "grouped claim "+group.Name+" no longer declares planted defect "+name+", which "+w.Name+" was compared under; onboard it again")
+				}
+			}
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(w.Claim.Defects)) {
 		if d.Defects[name] != w.Claim.Defects[name].Digest() {
 			s.Drift = append(s.Drift, "claim "+w.Claim.Name+" declares planted defect "+name+", which "+w.Name+" was never gated against")
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(d.Defects)) {
+		if _, ok := w.Claim.Defects[name]; !ok {
+			s.Drift = append(s.Drift, "claim "+w.Claim.Name+" no longer declares planted defect "+name+", which "+w.Name+" was gated against; onboard it again")
 		}
 	}
 	_, review, err := Review(p, *w.Claim)

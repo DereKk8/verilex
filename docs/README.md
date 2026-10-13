@@ -36,7 +36,7 @@ This index is also the navigation of the docs site: each `##` heading is a secti
 ## Your project
 
 - [Adding verilex to a project](adding-verilex.md): the `.verilex` directory, the frame and the word contract.
-- [Development](development.md): building and testing verilex, CI, the canary and the docs site.
+- [Development](development.md): building and testing verilex, the two kinds of security evidence, CI, the canary and the docs site.
 
 ## Design
 

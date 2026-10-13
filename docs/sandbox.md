@@ -13,6 +13,20 @@ The brain runs untrusted, in a sandbox: bubblewrap (`bwrap`) on Linux, `sandbox-
 - on macOS, can signal only processes in its own sandbox. When the brain exits or the time budget ends, the sandbox's first process ends every process in the sandbox, so a process that the brain moved to a session of its own also ends with the run;
 - has no terminal. It runs in a session of its own with no controlling terminal, so it cannot type into the user's shell. On macOS the profile also denies every terminal device (`/dev/tty*`, `/dev/pty*` and `/dev/ptmx`), so the brain cannot read or write a terminal by its path. On Linux, `/dev` is the sandbox's own, with its own pseudo-terminals.
 
+## Deterministic CI brain
+
+Linux CI runs `TestScriptedStandinBrain` in `agent/standin_linux_test.go` through the existing `scripts/ci test` step. To repeat just that test:
+
+```
+go test ./agent -run '^TestScriptedStandinBrain$' -count=1 -v
+```
+
+The script in `agent/testdata/standin-brain.py` uses no model. It attempts every permitted verilex subcommand, trust-changing commands, instance and chain flags, project and credential reads and writes, executable aliases, hidden state, child processes, private sockets, host sockets and network-policy edges. The host test checks each attempt against fixed expectations, checks protected host files and run records, and repeats the script on healthy tally, a planted product defect and a locked store. It requires green, red and inconclusive respectively, including the core's exact verdict bytes. A missing report, an escape or a wrong verdict fails the test.
+
+The script needs no public service or DNS. Public-address probes use an invalid port, so they prove that the proxy admits the address before dialing, not that a public tunnel succeeds. `/tmp` is private scratch space on Linux: writes to host-looking paths there must stay in the brain's temporary directory and leave the host paths unchanged. Run ids, timestamps and evidence paths vary, but the attempted actions and expected results do not.
+
+The existing `agent/brain_test.go`, `agent/stop_test.go` and `agent/rule_test.go` tests also cover terminal devices, time budgets, leftover processes, suggestion phases and verdict ordering. This new capability sweep is Linux-only. macOS keeps those existing tests and the limits documented below. Boundary fuzzing and model-driven tests are separate work.
+
 ## Preflight checks
 
 Before the brain starts, a helper inside the sandbox checks that the project refuses a new file, that each hidden path shows nothing, that a port on the host's loopback is out of reach, and, on macOS, that a signal to the launcher is refused. When the sandbox tool is missing or fails, or a check fails, the brain does not run, and the launcher prints `verilex-agent: inconclusive: the brain runs only in a sandbox, and the sandbox is not available here: <reason>`. The launcher never runs a brain without the sandbox.

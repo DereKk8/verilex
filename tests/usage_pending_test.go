@@ -2,6 +2,7 @@ package tests
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,12 +35,12 @@ func TestUsageWriteFailureDoesNotChangeProductVerdict(t *testing.T) {
 	got := verilex(t, root, env, "run", chain)
 	equal(t, got.code, 0)
 	contains(t, got.stdout, "green:")
-	contains(t, got.stderr, "usage ledger write failed:")
+	equal(t, strings.Count(got.stderr, "usage ledger write failed:"), 1)
 	env["TALLY_DEFECT"] = "drop-adds"
 	got = verilex(t, root, env, "run", chain)
 	equal(t, got.code, 1)
 	contains(t, got.stdout, "red:")
-	contains(t, got.stderr, "usage ledger write failed:")
+	equal(t, strings.Count(got.stderr, "usage ledger write failed:"), 1)
 }
 
 func TestUsageStoresClaimCoverageAndSkip(t *testing.T) {

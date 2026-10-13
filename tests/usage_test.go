@@ -88,3 +88,17 @@ func TestUsageNeverMarksRedOrInconclusiveAsMiss(t *testing.T) {
 	contains(t, got.stderr, "only a green run")
 	equal[any](t, usageJSON(t, root, nil)["totals"].(map[string]any)["misses"], float64(0))
 }
+
+func TestUsageAnnotationHonorsJSON(t *testing.T) {
+	root := product(t)
+	equal(t, verilex(t, root, nil, "run", chain).code, 0)
+	id := lastRun(t, root).Run
+	got := verilex(t, root, nil, "usage", id, "--tokens", "3", "--json")
+	equal(t, got.code, 0)
+	var result map[string]any
+	if err := json.Unmarshal([]byte(got.stdout), &result); err != nil {
+		t.Fatalf("not JSON: %q: %v", got.stdout, err)
+	}
+	equal[any](t, result, map[string]any{"run": id})
+	equal[any](t, usageJSON(t, root, nil)["totals"].(map[string]any)["tokens"], float64(3))
+}

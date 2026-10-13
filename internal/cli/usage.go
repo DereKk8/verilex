@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
@@ -21,6 +22,7 @@ type usageCapture struct {
 	store   usage.Store
 	entry   usage.Entry
 	started time.Time
+	warned  bool
 }
 
 func usageStore() usage.Store {
@@ -37,7 +39,13 @@ func usageCommand(args options, out io.Writer, refuse func(error) int) int {
 		if err := store.Annotate(args.operands[0], args.tokens, args.miss); err != nil {
 			return refuse(err)
 		}
-		fmt.Fprintf(out, "usage: recorded caller data for %s\n", args.operands[0])
+		if args.json {
+			if err := encode(out, map[string]string{"run": args.operands[0]}); err != nil {
+				return refuse(err)
+			}
+		} else {
+			fmt.Fprintf(out, "usage: recorded caller data for %s\n", args.operands[0])
+		}
 		return 0
 	}
 	result, err := store.Read()
@@ -60,16 +68,27 @@ func usageCommand(args options, out io.Writer, refuse func(error) int) int {
 	return 0
 }
 
+// readGit runs a Git command that only reads the product's repository. On timeout it asks Git to
+// stop, so Git's own handlers remove any lock it holds, and kills it only if it does not exit.
+func readGit(ctx context.Context, root string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 100 * time.Millisecond
+	return cmd
+}
+
 func newUsage(project dictionary.Project, args options) *usageCapture {
 	c := &usageCapture{store: usageStore(), started: time.Now(), entry: usage.Entry{Change: args.change, Tokens: args.tokens}}
 	// Change identity is optional. Bound both Git's work and the bytes hashed,
 	// including when a skipped run sits next to a huge tracked binary change.
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
-	revision := exec.CommandContext(ctx, "git", "-C", project.Root, "rev-parse", "HEAD")
-	if data, err := revision.Output(); err == nil {
+	if data, err := readGit(ctx, project.Root, "rev-parse", "HEAD").Output(); err == nil {
 		c.entry.Revision = strings.TrimSpace(string(data))
-		diff := exec.CommandContext(ctx, "git", "-C", project.Root, "diff", "HEAD", "--no-ext-diff", "--no-textconv", "--binary", "--", ".")
+		// Plumbing, unlike `git diff`, never refreshes or writes the index, so the user's
+		// repository never gets an index.lock from verilex.
+		diff := readGit(ctx, project.Root, "diff-index", "-p", "--binary", "--no-ext-diff", "--no-textconv", "HEAD", "--", ".")
 		pipe, err := diff.StdoutPipe()
 		if err != nil || diff.Start() != nil {
 			return c
@@ -78,7 +97,7 @@ func newUsage(project dictionary.Project, args options) *usageCapture {
 		const maxDiff = 1 << 20
 		n, copyErr := io.Copy(digest, io.LimitReader(pipe, maxDiff+1))
 		if n > maxDiff || copyErr != nil {
-			_ = diff.Process.Kill()
+			cancel()
 		}
 		if err := diff.Wait(); err == nil && copyErr == nil && n <= maxDiff && ctx.Err() == nil {
 			c.entry.DiffSHA256 = fmt.Sprintf("%x", digest.Sum(nil))
@@ -88,8 +107,10 @@ func newUsage(project dictionary.Project, args options) *usageCapture {
 }
 
 func (c *usageCapture) save(stderr io.Writer) {
-	if err := c.store.Save(c.entry); err != nil {
-		// Recording trouble is not a different product verdict. Never hide the lost data.
+	if err := c.store.Save(c.entry); err != nil && !c.warned {
+		// Recording trouble is not a different product verdict. Never hide the lost data,
+		// and say so once per run.
+		c.warned = true
 		fmt.Fprintf(stderr, "verilex: usage ledger write failed: %v\n", err)
 	}
 }

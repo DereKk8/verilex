@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# verify-verilex worker identity: prints who is running this script. launch records it; cleanup compares it.
+# usage: worker-id   (VERIFY_VERILEX_WORKER, else CLAUDE_CODE_SESSION_ID; with neither it exits 2: an OS session id can be shared by workers)
+set -euo pipefail
+if [ -n "${VERIFY_VERILEX_WORKER:-}" ]; then echo "env:$VERIFY_VERILEX_WORKER"
+elif [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then echo "claude:$CLAUDE_CODE_SESSION_ID"
+else echo "worker-id: no worker identity; set VERIFY_VERILEX_WORKER to a name unique to this worker" >&2; exit 2; fi

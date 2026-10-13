@@ -30,7 +30,7 @@ With `--bin`, a path that is not an executable file exits `2` and creates no ses
 | `$S/stores/` | tally stores (instances); `TALLY_STORES` points here |
 | `$S/config/` | `XDG_CONFIG_HOME` for the session: user profiles live in `$S/config/verilex/profiles.yaml` |
 | `$S/vx` | the session's capture helper (see Drive) |
-| `$S/session`, `$S/owner` | session identity, binary source and sha256 |
+| `$S/session`, `$S/owner`, `$S/worker` | session identity, binary source and sha256, launching worker |
 
 Launch builds no server: verilex is a short-lived CLI, so each command is its own process. The scratch product needs `python3`; building needs `go`. Teardown is [Cleanup](#cleanup).
 
@@ -70,7 +70,7 @@ Proof standards:
 .cursor/skills/verify-verilex/scripts/cleanup "$S"
 ```
 
-It tears down every run that `verilex runs` shows as `cleanup=kept` with `verilex cleanup <run>` (captured as evidence), then removes `$S` only when `$S/owner` matches the session. It kills no process: verilex leaves none running. It keeps the evidence directory and fails if that directory is gone. Delete `${TMPDIR:-/tmp}/verify-verilex-evidence/<session id>` yourself once the proof is reported.
+It tears down every run that `verilex runs` shows as `cleanup=kept` with `verilex cleanup <run>` (captured as evidence), then removes `$S`. It refuses with exit `2` and removes nothing when `$S/worker` (written by `launch` from `scripts/worker-id`) differs from the caller, so only the worker that launched a session cleans it up. `launch` and `cleanup` also exit `2` when there is no worker identity (`VERIFY_VERILEX_WORKER` or `CLAUDE_CODE_SESSION_ID`), because an OS session id can be shared by workers. Set `VERIFY_VERILEX_WORKER` to a name unique to this worker. Name each session by its exact path; never loop over `${TMPDIR:-/tmp}/verify-verilex.*`. It kills no process: verilex leaves none running. It keeps the evidence directory and fails if that directory is gone. Delete `${TMPDIR:-/tmp}/verify-verilex-evidence/<session id>` yourself once the proof is reported.
 
 ## Traps
 

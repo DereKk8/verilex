@@ -15,6 +15,7 @@ done
 if [ -n "$bin" ] && { [ ! -f "$bin" ] || [ ! -x "$bin" ]; }; then
   echo "launch: $bin is not an executable file" >&2; exit 2
 fi
+worker="$("$skill/scripts/worker-id")" || exit 2
 tmp="${TMPDIR:-/tmp}"
 S="$(mktemp -d "$tmp/verify-verilex.XXXXXX")"
 id="$(basename "$S")"
@@ -38,7 +39,7 @@ product=$S/tally
 evidence=$evidence
 SESSION
 echo "$id" > "$S/owner"
-"$skill/scripts/worker-id" > "$S/worker"
+echo "$worker" > "$S/worker"
 cat > "$S/vx" <<VX
 #!/usr/bin/env bash
 exec "$skill/scripts/capture" "$S" "\$@"

@@ -70,7 +70,7 @@ Proof standards:
 .cursor/skills/verify-verilex/scripts/cleanup "$S"
 ```
 
-It tears down every run that `verilex runs` shows as `cleanup=kept` with `verilex cleanup <run>` (captured as evidence), then removes `$S`. It refuses with exit `2` and removes nothing when `$S/worker` (written by `launch` from `scripts/worker-id`) differs from the caller, so only the worker that launched a session cleans it up. Set `VERIFY_VERILEX_WORKER` to a stable name when your harness gives no session id. Name each session by its exact path; never loop over `${TMPDIR:-/tmp}/verify-verilex.*`. It kills no process: verilex leaves none running. It keeps the evidence directory and fails if that directory is gone. Delete `${TMPDIR:-/tmp}/verify-verilex-evidence/<session id>` yourself once the proof is reported.
+It tears down every run that `verilex runs` shows as `cleanup=kept` with `verilex cleanup <run>` (captured as evidence), then removes `$S`. It refuses with exit `2` and removes nothing when `$S/worker` (written by `launch` from `scripts/worker-id`) differs from the caller, so only the worker that launched a session cleans it up. `launch` and `cleanup` also exit `2` when there is no worker identity (`VERIFY_VERILEX_WORKER` or `CLAUDE_CODE_SESSION_ID`), because an OS session id can be shared by workers. Set `VERIFY_VERILEX_WORKER` to a name unique to this worker. Name each session by its exact path; never loop over `${TMPDIR:-/tmp}/verify-verilex.*`. It kills no process: verilex leaves none running. It keeps the evidence directory and fails if that directory is gone. Delete `${TMPDIR:-/tmp}/verify-verilex-evidence/<session id>` yourself once the proof is reported.
 
 ## Traps
 

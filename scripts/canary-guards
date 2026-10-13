@@ -17,10 +17,12 @@ store_line='    store = Path(os.environ.get("TALLY_STORES") or tempfile.gettempd
 
 # plant <file> <from> <to>: replace one literal, or stop when the attack no longer applies.
 plant() {
-  local code
+  local code before after
   code="$(<"$1")"
   [[ "$code" == *"$2"* ]] || { echo "canary-guards: $1 no longer holds the line an attack edits" >&2; exit 2; }
-  printf '%s\n' "${code/"$2"/"$3"}" > "$1"
+  # Not ${code/"$2"/"$3"}: macOS bash 3.2 keeps the quotes around the replacement as text.
+  before=${code%%"$2"*} after=${code#*"$2"}
+  printf '%s\n' "$before$3$after" > "$1"
 }
 
 # copy <case>: a scratch checkout of the tracked files as they are now, at HEAD, with origin/main where it is.

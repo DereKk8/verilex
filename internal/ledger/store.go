@@ -33,10 +33,15 @@ import (
 // one: concurrent instances lose no pass and never mix two into one. Readers trust no file: a
 // pass stands only when it matches its digest, proved the step's claim version on an instance its
 // run launched, and its evidence still meets the evidence contract.
-type Store struct{ dir string }
+type Store struct {
+	dir string
+	// probed, when set, runs on the clock probe file before its time is read; tests move the
+	// storage clock away from the writer's with it.
+	probed func(path string)
+}
 
 // At opens the ledger kept in dir.
-func At(dir string) Store { return Store{dir} }
+func At(dir string) Store { return Store{dir: dir} }
 
 // passFormat changes whenever the meaning of a pass file changes, so older passes stop standing.
 const passFormat = "verilex-pass-1"
@@ -321,16 +326,22 @@ const strandedAge = 24 * time.Hour
 //
 // Age is judged on the storage's own clock, read from a file just created there, not on the
 // writer's: a writer whose clock runs ahead must not drop passes other instances wrote that are
-// still young. A pass also needs a file time that old before prune opens it, so a call costs a
-// directory listing per slot. When the storage clock cannot be read, nothing is pruned.
+// still young. The age comes from each pass's record, never its file time, which a git checkout
+// or a copy resets. A call costs a directory listing per slot and a read of every pass. Only real
+// directories are slots: a symlink under passes/ is never followed. When the storage clock cannot
+// be read, nothing is pruned.
 func (s Store) prune() {
 	now, ok := s.storageNow()
 	if !ok {
 		return
 	}
+	s.sweep(s.dir, now)
 	s.sweep(filepath.Join(s.dir, "evidence"), now)
 	slots, _ := os.ReadDir(filepath.Join(s.dir, "passes"))
 	for _, slot := range slots {
+		if !slot.IsDir() {
+			continue
+		}
 		s.pruneSlot(filepath.Join(s.dir, "passes", slot.Name()), now)
 	}
 }
@@ -340,7 +351,7 @@ func (s Store) pruneSlot(dir string, now time.Time) {
 	files, _ := os.ReadDir(dir)
 	for _, file := range files {
 		m := passName.FindStringSubmatch(file.Name())
-		if m == nil || !older(file, now, MaxAge) {
+		if m == nil {
 			continue
 		}
 		p, damage := s.open(dir, m)
@@ -370,14 +381,17 @@ func older(file fs.DirEntry, now time.Time, age time.Duration) bool {
 }
 
 // storageNow reads the clock of the storage that holds the ledger, from the time of a file it
-// creates there.
+// creates there. The probe is named .tmp- so a later sweep removes one a killed run stranded.
 func (s Store) storageNow() (time.Time, bool) {
-	f, err := os.CreateTemp(s.dir, ".clock-")
+	f, err := os.CreateTemp(s.dir, ".tmp-clock-")
 	if err != nil {
 		return time.Time{}, false
 	}
 	defer os.Remove(f.Name())
 	defer f.Close()
+	if s.probed != nil {
+		s.probed(f.Name())
+	}
 	info, err := f.Stat()
 	if err != nil {
 		return time.Time{}, false

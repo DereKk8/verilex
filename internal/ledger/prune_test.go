@@ -104,3 +104,77 @@ func TestPruneWithoutReadableStorageClockPrunesNothing(t *testing.T) {
 		t.Errorf("prune created the ledger directory")
 	}
 }
+
+// Rule: age is judged on the storage's clock. A writer 8 days ahead of storage must not drop a
+// pass that is young by the storage clock.
+func TestPruneKeepsAPassYoungByTheStorageClockWhenTheWriterRunsAhead(t *testing.T) {
+	s := At(t.TempDir())
+	behind := time.Now().Add(-8 * 24 * time.Hour)
+	s.probed = func(path string) {
+		if err := os.Chtimes(path, behind, behind); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// recorded 1h ago on the storage clock, so 8 days and 1h ago on the writer's
+	pass := seed(t, s, pruneSlot, time.Now().Add(-8*24*time.Hour-time.Hour), time.Now())
+	s.prune()
+	if !exists(pass) {
+		t.Errorf("a writer clock ahead of storage dropped a young pass")
+	}
+}
+
+// Rule: a pass ages out by its record, not its file time, which a git checkout or a copy resets.
+func TestPruneDropsAnOldPassWithAFreshFileTime(t *testing.T) {
+	s := At(t.TempDir())
+	pass := seed(t, s, pruneSlot, time.Now().Add(-MaxAge-time.Hour), time.Now())
+	s.prune()
+	if exists(pass) {
+		t.Errorf("an expired pass with a fresh file time survived prune")
+	}
+}
+
+// Rule: prune never follows a symlink out of the ledger.
+func TestPruneLeavesTheTargetOfASlotSymlinkAlone(t *testing.T) {
+	s := At(t.TempDir())
+	seed(t, s, pruneSlot, time.Now(), time.Now())
+	outside := t.TempDir()
+	victim := filepath.Join(outside, ".tmp-cache")
+	if err := os.MkdirAll(filepath.Join(victim, "keep"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-strandedAge - time.Hour)
+	if err := os.Chtimes(victim, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(s.dir, "passes", "linked")); err != nil {
+		t.Fatal(err)
+	}
+	s.prune()
+	if !exists(filepath.Join(victim, "keep")) {
+		t.Errorf("prune followed a symlink and deleted outside the ledger")
+	}
+}
+
+// Rule: a clock probe a killed run stranded is swept like any other temporary entry.
+func TestPruneRemovesAStrandedClockProbe(t *testing.T) {
+	s := At(t.TempDir())
+	seed(t, s, pruneSlot, time.Now(), time.Now())
+	var probe string
+	s.probed = func(path string) { probe = path }
+	s.storageNow()
+	if probe == "" {
+		t.Fatal("no probe file was created")
+	}
+	stranded := filepath.Join(s.dir, filepath.Base(probe)+"-stranded")
+	if err := os.WriteFile(stranded, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-strandedAge - time.Hour)
+	if err := os.Chtimes(stranded, old, old); err != nil {
+		t.Fatal(err)
+	}
+	s.prune()
+	if exists(stranded) {
+		t.Errorf("a stranded clock probe survived prune")
+	}
+}

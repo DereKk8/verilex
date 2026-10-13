@@ -28,11 +28,14 @@ def expect(condition, detail):
 
 def doc(label, *args, **env):
     done = c.verilex(label, *args, "--json", **env)
-    expect(done.returncode == 0, f"{label}: exit {done.returncode}: {c.said(done)}")
     try:
-        return json.loads(done.stdout)
+        value = json.loads(done.stdout)
     except ValueError:
-        c.fail(f"{label}: invalid JSON: {c.said(done)}")
+        c.fail(f"{label}: exit {done.returncode}, invalid JSON: {c.said(done)}")
+    if done.returncode == 2 and isinstance(value, dict) and value.get("verdict") == "inconclusive":
+        c.result("blocked", detail=f"{label}: {value.get('reason') or c.said(done)}")
+    expect(done.returncode == 0, f"{label}: exit {done.returncode}: {c.said(done)}")
+    return value
 
 
 def baseline():

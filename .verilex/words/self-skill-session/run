@@ -15,11 +15,13 @@ def skill_session():
     candidate = c.instance / "candidate"
     shutil.copyfile(c.instance / "bin/verilex", candidate)
     candidate.chmod(0o755)
-    launched = setup("launch-session", [scripts / "launch", "--bin", candidate], TMPDIR=str(temp))
+    worker = "canary-" + c.instance.parent.name
+    launched = setup("launch-session", [scripts / "launch", "--bin", candidate], TMPDIR=str(temp),
+                     VERIFY_VERILEX_WORKER=worker)
     session = Path(next(s[9:] for s in launched.stdout.splitlines() if s.startswith("session: ")))
     expect(session.parent == temp, "launch created a session outside its requested temporary directory")
     try:
-        healthy = external("doctor-healthy", [scripts / "doctor", session])
+        healthy = setup("doctor-healthy", [scripts / "doctor", session])
         expect(healthy.returncode == 0 and "doctor: ok" in healthy.stdout, "doctor refused a healthy session")
         pinned = (session / "bin/verilex").read_bytes()
         candidate.write_bytes(candidate.read_bytes() + b"\nexternal rebuild\n")
@@ -30,11 +32,18 @@ def skill_session():
         bad = external("doctor-tampered", [scripts / "doctor", session])
         expect(bad.returncode == 1 and "doctor: FAIL binary changed since launch" in bad.stdout, "doctor accepted a tampered session binary")
         (session / "bin/verilex").write_bytes(pinned)
+        snapshot = {str(p.relative_to(session)): p.read_bytes() for p in session.rglob("*") if p.is_file()}
+        refused = external("cleanup-foreign", [scripts / "cleanup", session], VERIFY_VERILEX_WORKER=worker + "-other")
+        expect(refused.returncode == 2 and "belongs to another worker; left alone" in refused.stderr,
+               "cleanup accepted a session launched under a different worker identity")
+        after = {str(p.relative_to(session)): p.read_bytes() for p in session.rglob("*") if p.is_file()}
+        expect(snapshot == after, "refused cleanup changed our launched session")
     finally:
         # Only this exact session, created above. No glob can name another worker's session.
-        cleaned = external("cleanup-session", [scripts / "cleanup", session])
-        expect(cleaned.returncode == 0 and not session.exists(), "cleanup did not remove our exact session")
-    c.result("pass", observation="launch freezes --bin across a source rebuild; doctor accepts the frozen session and refuses tampering with exit 1; cleanup removes only the exact session launched by this word")
+        if session.exists():
+            cleaned = external("cleanup-session", [scripts / "cleanup", session], VERIFY_VERILEX_WORKER=worker)
+    expect(cleaned.returncode == 0 and not session.exists(), "cleanup did not remove our exact session")
+    c.result("pass", observation="launch freezes --bin across a source rebuild; doctor accepts the frozen session and refuses tampering with exit 1; cleanup refuses a different worker with exit 2 and unchanged session files, then removes the exact session under its launching identity")
 
 
 try:

@@ -30,6 +30,7 @@ if [ -n "${CANARY_DEFECT:-}" ]; then
     agent-drop-diff) f=agent/internal/run/run.go; from='Changed: changed}, unfinished)'; to='Changed: nil}, unfinished)' ;;
     skill-unpinned-bin) f=.cursor/skills/verify-verilex/scripts/launch; from="cp \"\$bin\" \"\$S/bin/verilex\""; to="ln -s \"\$bin\" \"\$S/bin/verilex\"" ;;
     skill-doctor-no-hash) f=.cursor/skills/verify-verilex/scripts/doctor; from="[ \"\$sha\" = \"\$(get binary_sha256)\" ] || fail \"binary changed since launch\""; to='true' ;;
+    skill-cleanup-foreign) f=.cursor/skills/verify-verilex/scripts/cleanup; from="[ \"\$(cat \"\$S/worker\")\" = \"\$me\" ] ||"; to='true ||' ;;
     ci-trust-tag) f=scripts/ci; from='git show-ref --verify --hash refs/remotes/origin/main'; to='git rev-parse refs/remotes/origin/main' ;;
     guards-trust-tag) f=scripts/canary-guards; from='git show-ref --verify --hash refs/remotes/origin/main'; to='git rev-parse refs/remotes/origin/main' ;;
     *) echo "launch: unknown CANARY_DEFECT $CANARY_DEFECT" >&2; exit 2 ;;

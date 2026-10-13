@@ -23,6 +23,7 @@ A **word** is a reusable, executable piece that drives the product through a sur
 A word lives in `.verilex/words/<word>/`: a contract in `word.md` and an executable `run`, in any language. It reports `pass`, `fail` or `blocked`, and verilex judges that report. See [Adding verilex to a project](adding-verilex.md#the-word-contract).
 
 ## Chains
+<!-- claims: chain-order-refused -->
 
 A chain is words joined by `|`, with arguments after the word. Each word declares the states it `requires` and `provides`, and verilex refuses a chain in which a word requires a state that no earlier word provides, before it starts anything. Agents are creative by composing existing words into new chains within those rules. See [The chain grammar](chains.md).
 
@@ -31,6 +32,7 @@ A chain is words joined by `|`, with arguments after the word. Each word declare
 verilex holds execution only. The project's verification skill keeps the meaning: what a feature is, how a user reaches it, what proves it and its traps. A **claim** pins one piece of that meaning for verilex: what is true once a word passes, and the evidence that proves it. Several words can prove one claim, and each pins the claim version it proves. When a word is not green, verilex prints the verify-skill entries behind it so the agent can continue by hand. See [Claims](claims.md).
 
 ## Three verdicts
+<!-- claims: chain-red -->
 
 | Verdict | Means | Exit |
 |---|---|---|
@@ -41,10 +43,12 @@ verilex holds execution only. The project's verification skill keeps the meaning
 A refused command also exits `2`. See [Verdicts](verdicts.md).
 
 ## The trust frame
+<!-- claims: chain-runs-live -->
 
 Every run goes through the project's frame, and no word can opt out of it: **launch** creates an instance owned by this run, the **doctor** vouches for it, every step writes **evidence** outside the product, **honesty rules** turn an unbacked report into `inconclusive`, and **cleanup** tears down only what the run started. See [The trust frame](trust-frame.md).
 
 ## Stamps, the ledger and skipping
+<!-- claims: chain-skipped -->
 
 Every word result carries a **proof stamp**: a fingerprint of everything the result depended on. Green steps become passes in the **ledger**. A later run skips the chain only when every word is admitted and a pass younger than 7 days stands for every word's stamp; anything missing or unclear runs the chain live. `verilex plan` makes the same decision through the same code and runs nothing. See [Proof stamps and skipping](skipping.md) and [Plan](plan.md).
 

@@ -40,6 +40,7 @@ verilex: refused: item-stored pins claim item-added@18e2db0cee8f, which is now i
 Re-pinning changes the word, so it runs live (`item-stored apple: claim changed`) and is onboarded again; only uses that proved the new version count.
 
 ## Pinned rules
+<!-- claims: chain-order-refused -->
 
 The claim's `requires` and `provides` join every word's own, so a variant cannot drop the order of reality, and a chain that breaks it is refused before it starts:
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/grouping"
+	"github.com/DereKk8/verilex/internal/runner"
 )
 
 // claimPlan is the verilex-claim-plan-1 JSON a launcher binds to.
@@ -684,6 +685,80 @@ func TestRunClaimBindsEachWordFromItsOwnAdmittedChain(t *testing.T) {
 		t.Fatalf("run --claim item-added with apple broken: exit %d\n%s", done.code, done.stdout)
 	}
 	contains(t, done.stdout, "red  item-added: tally said 'added apple' but store.json lacks apple")
+}
+
+// Rule: a plan whose claims were admitted on different inputs runs each claim's word on its own
+// input. item-stored is admitted on apple and item-listed on pear, so the chain stores both: apple
+// to prove item-added, pear only to provide the item item-listed lists.
+func TestPlanRunsEachClaimOnItsOwnAdmittedInput(t *testing.T) {
+	root := curated(t)
+	proveOn(t, root, "store-open | item-stored apple", "store-open", "item-stored")
+	proveOn(t, root, "store-open | item-stored pear | item-listed pear", "item-listed")
+	both := "store-open | item-stored apple | item-stored pear | item-listed pear"
+	plan := planClaims(t, root, "--claim", "item-added", "--claim", "item-listed")
+	equal(t, plan.Chain, both)
+	equal(t, plan.Order, []string{"store-opened", "item-added", "item-listed"})
+	equal(t, planClaims(t, root, "--changed", "bin/tally").Chain, both)
+	done := verilex(t, root, map[string]string{"TALLY_DEFECT": "drop-apple"}, "run", "--changed", "bin/tally")
+	if done.code != 1 {
+		t.Fatalf("run --changed bin/tally with apple broken: exit %d\n%s%s", done.code, done.stdout, done.stderr)
+	}
+	contains(t, done.stdout, "red  item-added: tally said 'added apple' but store.json lacks apple")
+	if done = verilex(t, root, nil, "run", "--changed", "bin/tally"); done.code != 0 {
+		t.Fatalf("healthy run --changed bin/tally: exit %d\n%s%s", done.code, done.stdout, done.stderr)
+	}
+}
+
+// Rule: a word that runs on other arguments than its admitted ones only provides a state; it proves
+// no claim. item-listed's plan stores pear, so neither it nor its run reports item-added, which
+// only apple proves.
+func TestProviderOnOtherInputProvesNoClaim(t *testing.T) {
+	root := curated(t)
+	pear := "store-open | item-stored pear | item-listed pear"
+	proveOn(t, root, "store-open | item-stored apple", "store-open", "item-stored")
+	proveOn(t, root, pear, "item-listed")
+	plan := planClaims(t, root, "--claim", "item-listed")
+	equal(t, plan.Chain, pear)
+	equal(t, plan.Order, []string{"store-opened", "item-listed"})
+	done := verilex(t, root, map[string]string{"TALLY_DEFECT": "drop-apple"}, "run", "--json", "--claim", "item-listed")
+	var record runner.Record
+	if err := json.Unmarshal([]byte(done.stdout), &record); err != nil || done.code != 0 {
+		t.Fatalf("run --claim item-listed: exit %d %v\n%s", done.code, err, done.stdout)
+	}
+	var claims []string
+	for _, c := range record.Claims {
+		claims = append(claims, c.Claim+" "+c.Step+" "+string(c.Verdict))
+	}
+	equal(t, claims, []string{"store-opened store-open green", "item-listed item-listed pear green"})
+}
+
+// Rule: an admitted word binds its own step of its onboarded chain, even after another word of that
+// chain is gone. A newer run on pear never rebinds it, so apple's defect is still found.
+func TestAdmittedWordKeepsItsInputWhenItsChainLosesAWord(t *testing.T) {
+	root := curated(t)
+	proveOn(t, root, "store-open | item-stored apple | item-peek | item-listed apple", "store-open", "item-stored", "item-listed")
+	green(t, root, nil, "store-open | item-stored pear | item-listed pear")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
+	equal(t, planClaims(t, root, "--claim", "item-listed").Chain, chain)
+	done := verilex(t, root, map[string]string{"TALLY_DEFECT": "hide-apple"}, "run", "--claim", "item-listed")
+	if done.code != 1 {
+		t.Fatalf("run --claim item-listed with apple hidden: exit %d\n%s%s", done.code, done.stdout, done.stderr)
+	}
+	contains(t, done.stdout, "red  item-listed")
+}
+
+// Rule: an admitted word whose onboarded chain no longer binds its arguments is drift-suspect, and a
+// plan that selects it is refused: no other chain or run record may bind it instead.
+func TestAdmittedWordWhoseChainNoLongerBindsItIsNeverRebound(t *testing.T) {
+	root := curated(t)
+	proveOn(t, root, "store-open | item-stored | item-listed apple", "item-stored")
+	green(t, root, nil, "store-open | item-stored pear | item-listed pear")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 3 admitted drift-suspect; they always run\n"+
+		"  item-stored: its onboarded chain no longer binds its arguments; onboard it again\n")
+	done := verilex(t, root, nil, "plan", "--claim", "item-added")
+	equal(t, done.code, 2)
+	equal(t, done.stderr, "verilex: refused: item-stored: its onboarded chain no longer binds its arguments; onboard it again\n")
+	equal(t, planClaims(t, root, "--claim", "item-listed").Order, []string{"store-opened", "item-listed"})
 }
 
 // proveOn records the chain onboarding proved each named admitted word on.

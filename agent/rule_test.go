@@ -309,6 +309,15 @@ var verdictRule = []rule{
 			}
 		},
 	},
+	{
+		name: "34 a green whose word on other inputs proves no floor claim", spec: intent(store),
+		fake: []fakeRun{{[]byte(`{"format":"verilex-claim-run-1","verdict":"green","run":"r1",` +
+			`"requested":{"claims":["item-listed"],"named":[],"changed":[],"chain":null},` +
+			`"claims":[{"claim":"item-listed","verdict":"green"}],` +
+			`"words":[{"word":"store-open","proves":"store-opened@1","verdict":"green"},{"word":"item-listed","proves":"item-listed@1","verdict":"green"}]}` + "\n"), 0}},
+		brain: "verilex run --claim item-listed > \"$HOME/1\"\n",
+		exit:  2, stderr: []string{"inconclusive: run r1 is green but was not asked about claim store-opened"},
+	},
 }
 
 // rule is one row of docs/verdict-rule.md.

@@ -208,6 +208,13 @@ func onboarded(p dictionary.Project, w dictionary.Word) (Status, error) {
 		// sources: nothing yet says the word exercises what the claim now maps.
 		s.Drift = append(s.Drift, "onboarded before claim "+w.Claim.Name+"'s sources changed; onboard it again")
 	}
+	// A claim plan binds the word's arguments from that chain only, so a chain that no longer
+	// binds them leaves the word nothing it was admitted on.
+	if d.Chain != "" && w.Stale == "" {
+		if _, ok := dictionary.OwnStep(d.Chain, w); !ok {
+			s.Drift = append(s.Drift, "its onboarded chain no longer binds its arguments; onboard it again")
+		}
+	}
 	if d.Proves != "" {
 		group, err := dictionary.ReadClaim(filepath.Join(p.ClaimsDir(), grouping.Name(d.Claim)+".yaml"))
 		switch {

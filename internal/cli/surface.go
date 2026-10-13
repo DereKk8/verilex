@@ -68,7 +68,7 @@ func claimSurface(project dictionary.Project, words []dictionary.Word, args opti
 	record.Requested = requested(args)
 	record.Touched = plan.Touched
 	record.Gaps = plan.Gaps
-	if err = attachCoverage(&record, ix, plan.Selected, plan.Unpicked, args.changed); err != nil {
+	if err = attachCoverage(&record, ix, plan.Proves, plan.Selected, plan.Unpicked, args.changed); err != nil {
 		return refuse(err)
 	}
 	if record.Dir != "" {
@@ -92,7 +92,7 @@ func coverChain(project dictionary.Project, chain string, steps []dictionary.Ste
 	record.Requested = &runner.Request{Claims: []string{}, Named: []string{}, Changed: listed(changed), Chain: &chain}
 	record.Touched = ix.TouchedClaims(project, changed)
 	record.Gaps = ix.Gaps(project, changed, steps)
-	if err = attachCoverage(record, ix, nil, record.Touched, changed); err != nil {
+	if err = attachCoverage(record, ix, nil, nil, record.Touched, changed); err != nil {
 		return err
 	}
 	if record.Dir != "" {
@@ -101,7 +101,9 @@ func coverChain(project dictionary.Project, chain string, steps []dictionary.Ste
 	return nil
 }
 
-func attachCoverage(record *runner.Record, ix index.Index, selected, missed []string, changed []string) error {
+// attachCoverage reports one verdict per claim the run proved or failed. proves, when set, says
+// which steps prove their claim; a claim plan's step that only provides a state proves none.
+func attachCoverage(record *runner.Record, ix index.Index, proves func(word string, argv []string) bool, selected, missed []string, changed []string) error {
 	words := map[string]dictionary.Word{}
 	for _, word := range ix.Words() {
 		words[word.Name] = word
@@ -110,7 +112,7 @@ func attachCoverage(record *runner.Record, ix index.Index, selected, missed []st
 	seen := map[string]bool{}
 	for _, step := range record.Words {
 		word, ok := words[step.Word]
-		if !ok || word.Claim == nil {
+		if !ok || word.Claim == nil || (proves != nil && !proves(step.Word, step.Args)) {
 			continue
 		}
 		name := ix.GroupOf(word.Claim.Name)

@@ -62,6 +62,12 @@ func Human(record runner.Record, out io.Writer) {
 	frame("doctor")
 	claimed := false
 	if len(record.Claims) > 0 {
+		// A step that only provided a state is no claim's verdict, but its failure is a failure.
+		for _, word := range record.Words {
+			if word.ProvidesOnly && word.Verdict != verdict.Green {
+				step(word.Verdict, strings.Join(append([]string{word.Word}, word.Args...), " ")+" (only provides a state)", Got(word), word.Evidence)
+			}
+		}
 		for _, claim := range record.Claims {
 			if claim.Verdict == verdict.Green {
 				continue
@@ -186,6 +192,20 @@ func frameCause(f runner.Frame) string {
 		return exit + "; the instance may outlive the run"
 	}
 	return exit
+}
+
+// Got is what a word reported, on one line: its detail, else its reason, else its observation.
+func Got(step runner.WordRecord) string {
+	switch {
+	case dictionary.Truthy(step.Detail):
+		return OneLine(fmt.Sprint(step.Detail))
+	case dictionary.Truthy(step.Reason):
+		return OneLine(fmt.Sprint(step.Reason))
+	case dictionary.Truthy(step.Observation):
+		return OneLine(fmt.Sprint(step.Observation))
+	default:
+		return step.Reported
+	}
 }
 
 // explained reports whether a run's reason only repeats a step line already printed.

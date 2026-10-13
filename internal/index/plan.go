@@ -1,6 +1,7 @@
 package index
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -20,8 +21,8 @@ const NoIntent = "prove nothing this change touched broke"
 // ClaimPlan is the model-free plan for claims and a diff. Execute Chain through `verilex run`
 // with the same claim and diff flags; do not run only the Run list. Skip means a standing pass
 // proves that claim at this chain's stamps. Run means it does not, or a dependency the stamp
-// does not fingerprint changed. Chain may start with words that only provide states the
-// selected claims require. Order is every claim that chain proves, dependency order.
+// does not fingerprint changed. Chain may hold steps that only provide states the selected
+// claims require (see Proves). Order is every claim that chain proves, dependency order.
 type ClaimPlan struct {
 	Format   string         `json:"format"`
 	Intent   string         `json:"intent"`
@@ -45,6 +46,8 @@ type ClaimPlan struct {
 	// force is why the chain must run live even when every stamp matches. It is not part of
 	// the JSON contract; `verilex run` reads it so a matching stamp cannot hide the diff.
 	force string
+	// binding is where the plan took each word's arguments from; Proves reads it.
+	binding binding
 }
 
 // SkippedClaim is a claim a standing pass still proves, with the fingerprints of that pass.
@@ -140,7 +143,8 @@ func (ix Index) PlanClaims(p dictionary.Project, derived, named, changes []strin
 		}
 		return plan, nil
 	}
-	chain, order, err := ix.order(p, plan.Selected)
+	plan.binding = ix.bindings(p)
+	chain, order, err := ix.order(plan.binding, plan.Selected)
 	if err != nil {
 		return plan, err
 	}
@@ -164,7 +168,7 @@ func (ix Index) PlanClaims(p dictionary.Project, derived, named, changes []strin
 	seen := map[string]bool{}
 	for i, step := range steps {
 		name := ix.claimName(step.Word)
-		if name == "" || !selected[name] || seen[name] {
+		if name == "" || !selected[name] || seen[name] || !plan.Proves(step.Word.Name, step.Argv) {
 			continue
 		}
 		seen[name] = true
@@ -202,6 +206,10 @@ func (ix Index) PlanClaims(p dictionary.Project, derived, named, changes []strin
 // ForceLive is why a claim-mode run must not skip, or "" when the stamps already decide.
 func (p ClaimPlan) ForceLive() string { return p.force }
 
+// Proves reports whether a step of Chain proves its word's claim. An admitted word proves it only
+// on the arguments onboarding admitted it on; a step of it on other arguments only provides a state.
+func (p ClaimPlan) Proves(word string, argv []string) bool { return p.binding.proves(word, argv) }
+
 func (ix Index) resolveClaim(name string) (string, error) {
 	pin := name
 	if i := strings.LastIndex(name, "@"); i > 0 {
@@ -224,63 +232,63 @@ func (ix Index) resolveClaim(name string) (string, error) {
 }
 
 // order builds a runnable chain for the selected claims and returns the claims that chain
-// proves, in dependency order.
-func (ix Index) order(p dictionary.Project, selected []string) (string, []string, error) {
-	bindings := ix.bindings(p)
-	chosen := map[string]dictionary.Word{}
+// proves, in dependency order. A word may run twice: once on the arguments it proves its claim
+// on, and once on other arguments only to provide a state another word requires. A provider is
+// never added below a step of its own word, so the chain is finite: such a word could only
+// provide its requirement by running again, without end.
+func (ix Index) order(b binding, selected []string) (string, []string, error) {
+	var queue []planned
+	// parent is the step whose requirement added each step of queue; -1 for a selected claim's.
+	var parent []int
 	for _, name := range selected {
 		word, err := ix.wordFor(name)
 		if err != nil {
 			return "", nil, err
 		}
-		chosen[name] = word
-	}
-	bound := map[string][]string{}
-	for _, word := range chosen {
-		argv, ok := bindings[word.Name]
-		if len(word.Args) > 0 && !ok {
-			return "", nil, fmt.Errorf("%s needs arguments %s; run a chain that binds them, then plan again", word.Name, strings.Join(word.Args, ", "))
+		argv, err := b.argsOf(word)
+		if err != nil {
+			return "", nil, err
 		}
-		bound[word.Name] = argv
+		queue = append(queue, planned{word, argv})
+		parent = append(parent, -1)
 	}
 	included := map[string]bool{}
-	var words []dictionary.Word
-	var queue []dictionary.Word
-	for _, name := range slices.Sorted(slices.Values(selectedKeys(chosen))) {
-		queue = append(queue, chosen[name])
-	}
-	for len(queue) > 0 {
-		word := queue[0]
-		queue = queue[1:]
-		if included[word.Name] {
+	var steps []planned
+	for i := 0; i < len(queue); i++ {
+		step := queue[i]
+		if included[step.label()] {
 			continue
 		}
-		included[word.Name] = true
-		words = append(words, word)
-		for _, state := range realRequires(word, bound[word.Name]) {
-			if stateProvided(words, bound, state) {
+		included[step.label()] = true
+		steps = append(steps, step)
+		for _, state := range realRequires(step.word, step.argv) {
+			if stateProvided(queue, state) {
 				continue
 			}
-			provider, argv, ok := ix.provider(state, bound, bindings)
+			provider, argv, ok := ix.provider(state, b)
 			if !ok {
-				return "", nil, fmt.Errorf("%s requires %s; no word provides it", word.Name, state)
+				return "", nil, fmt.Errorf("%s requires %s; no word provides it", step.word.Name, state)
 			}
-			if _, seen := bound[provider.Name]; !seen {
-				bound[provider.Name] = argv
+			for at := i; at >= 0; at = parent[at] {
+				if queue[at].word.Name == provider.Name {
+					return "", nil, fmt.Errorf("word dependencies cycle: %s requires %s, which %s would provide again on other arguments; no chain order is safe",
+						step.label(), state, provider.Name)
+				}
 			}
-			queue = append(queue, provider)
+			queue = append(queue, planned{provider, argv})
+			parent = append(parent, i)
 		}
 	}
-	ordered, err := topo(words, bound)
+	ordered, err := topo(steps)
 	if err != nil {
 		return "", nil, err
 	}
 	parts := make([]string, 0, len(ordered))
 	claims := []string{}
 	seen := map[string]bool{}
-	for _, word := range ordered {
-		parts = append(parts, strings.Join(append([]string{word.Name}, bound[word.Name]...), " "))
-		if name := ix.claimName(word); name != "" && !seen[name] {
+	for _, step := range ordered {
+		parts = append(parts, step.label())
+		if name := ix.claimName(step.word); name != "" && !seen[name] && b.proves(step.word.Name, step.argv) {
 			seen[name] = true
 			claims = append(claims, name)
 		}
@@ -288,13 +296,13 @@ func (ix Index) order(p dictionary.Project, selected []string) (string, []string
 	return strings.Join(parts, " | "), claims, nil
 }
 
-func selectedKeys(words map[string]dictionary.Word) []string {
-	names := make([]string, 0, len(words))
-	for name := range words {
-		names = append(names, name)
-	}
-	return names
+// planned is one step of a claim plan's chain.
+type planned struct {
+	word dictionary.Word
+	argv []string
 }
+
+func (s planned) label() string { return strings.Join(append([]string{s.word.Name}, s.argv...), " ") }
 
 func (ix Index) wordFor(claim string) (dictionary.Word, error) {
 	var found *dictionary.Word
@@ -320,44 +328,95 @@ func (ix Index) wordFor(claim string) (dictionary.Word, error) {
 	return *found, nil
 }
 
-func (ix Index) bindings(p dictionary.Project) map[string][]string {
-	found := map[string][]string{}
+// binding is where a claim plan takes each word's arguments from.
+type binding struct {
+	// own is each admitted word's arguments on the chain onboarding admitted it on.
+	own map[string][]string
+	// lost names admitted words whose onboarded chain no longer binds them; no other chain may.
+	lost map[string]bool
+	// other binds a word with no onboarded chain: from an admitted chain, else the newest run record.
+	other map[string][]string
+}
+
+func (ix Index) bindings(p dictionary.Project) binding {
+	b := binding{own: map[string][]string{}, lost: map[string]bool{}, other: map[string][]string{}}
+	var admitted []string
+	for _, word := range ix.words {
+		d, ok := ix.g.Sound(word.Name)
+		if !ok || d.Chain == "" {
+			continue
+		}
+		admitted = append(admitted, d.Chain)
+		if step, ok := dictionary.OwnStep(d.Chain, word); ok {
+			b.own[word.Name] = step.Argv
+		} else {
+			b.lost[word.Name] = true
+		}
+	}
+	for _, chain := range admitted {
+		ix.takeBindings(b, chain)
+	}
 	records, err := runner.LoadRuns(p)
 	if err == nil {
 		slices.SortFunc(records, func(a, b runner.Record) int { return strings.Compare(b.Started, a.Started) })
 		for _, record := range records {
-			ix.takeBindings(found, record.Chain)
+			ix.takeBindings(b, record.Chain)
 		}
 	}
-	for _, word := range ix.words {
-		if _, ok := found[word.Name]; ok {
-			continue
-		}
-		if d, ok := ix.g.Sound(word.Name); ok && d.Chain != "" {
-			ix.takeBindings(found, d.Chain)
-		}
-	}
-	return found
+	return b
 }
 
-func (ix Index) takeBindings(found map[string][]string, chain string) {
+// takeBindings binds each word of chain that has no onboarded chain and is not yet bound.
+func (ix Index) takeBindings(b binding, chain string) {
 	steps, err := dictionary.ParseChain(chain, ix.words)
 	if err != nil {
 		return
 	}
 	for _, step := range steps {
-		if _, ok := found[step.Word.Name]; !ok {
-			found[step.Word.Name] = step.Argv
+		name := step.Word.Name
+		if _, own := b.own[name]; own || b.lost[name] {
+			continue
+		}
+		if _, ok := b.other[name]; !ok {
+			b.other[name] = step.Argv
 		}
 	}
 }
 
-func (ix Index) provider(state string, bound, recorded map[string][]string) (dictionary.Word, []string, bool) {
+// argsOf is the arguments a selected word proves its claim on.
+func (b binding) argsOf(word dictionary.Word) ([]string, error) {
+	// A stale pin is why no chain binds the word, and why onboarding refuses it.
+	if word.Stale != "" {
+		return nil, errors.New(word.Stale)
+	}
+	if argv, ok := b.own[word.Name]; ok {
+		return argv, nil
+	}
+	if b.lost[word.Name] {
+		return nil, fmt.Errorf("%s: its onboarded chain no longer binds its arguments; onboard it again", word.Name)
+	}
+	argv, ok := b.other[word.Name]
+	if len(word.Args) > 0 && !ok {
+		return nil, fmt.Errorf("%s needs arguments %s; run a chain that binds them, then plan again", word.Name, strings.Join(word.Args, ", "))
+	}
+	return argv, nil
+}
+
+// proves reports whether a step proves its word's claim. An admitted word proves it only on the
+// arguments onboarding admitted it on: on others it only provides a state.
+func (b binding) proves(word string, argv []string) bool {
+	if own, ok := b.own[word]; ok {
+		return slices.Equal(own, argv)
+	}
+	return !b.lost[word]
+}
+
+func (ix Index) provider(state string, b binding) (dictionary.Word, []string, bool) {
 	var found *dictionary.Word
 	var argv []string
 	for i := range ix.words {
 		w := &ix.words[i]
-		args, ok := matchProvide(*w, state, bound[w.Name], recorded[w.Name])
+		args, ok := matchProvide(*w, state, b.own[w.Name], b.other[w.Name])
 		if !ok {
 			continue
 		}
@@ -431,54 +490,54 @@ func matchPattern(pattern, state string, args []string) ([]string, bool) {
 	return argv, true
 }
 
-func stateProvided(words []dictionary.Word, bound map[string][]string, state string) bool {
-	for _, word := range words {
-		if slices.Contains(realProvides(word, bound[word.Name]), state) {
+func stateProvided(steps []planned, state string) bool {
+	for _, step := range steps {
+		if slices.Contains(realProvides(step.word, step.argv), state) {
 			return true
 		}
 	}
 	return false
 }
 
-func topo(words []dictionary.Word, bound map[string][]string) ([]dictionary.Word, error) {
-	names := map[string]dictionary.Word{}
+func topo(steps []planned) ([]planned, error) {
+	byLabel := map[string]planned{}
 	indegree := map[string]int{}
 	after := map[string][]string{}
-	for _, word := range words {
-		names[word.Name] = word
-		indegree[word.Name] = 0
+	for _, step := range steps {
+		byLabel[step.label()] = step
+		indegree[step.label()] = 0
 	}
 	provides := map[string][]string{}
-	for _, word := range words {
-		for _, state := range realProvides(word, bound[word.Name]) {
-			provides[state] = append(provides[state], word.Name)
+	for _, step := range steps {
+		for _, state := range realProvides(step.word, step.argv) {
+			provides[state] = append(provides[state], step.label())
 		}
 	}
-	for _, word := range words {
-		for _, state := range realRequires(word, bound[word.Name]) {
+	for _, step := range steps {
+		for _, state := range realRequires(step.word, step.argv) {
 			for _, provider := range provides[state] {
-				if provider == word.Name {
+				if provider == step.label() {
 					continue
 				}
-				after[provider] = append(after[provider], word.Name)
-				indegree[word.Name]++
+				after[provider] = append(after[provider], step.label())
+				indegree[step.label()]++
 			}
 		}
 	}
 	ready := []string{}
-	for name, n := range indegree {
+	for label, n := range indegree {
 		if n == 0 {
-			ready = append(ready, name)
+			ready = append(ready, label)
 		}
 	}
 	slices.Sort(ready)
-	ordered := []dictionary.Word{}
+	ordered := []planned{}
 	for len(ready) > 0 {
-		name := ready[0]
+		label := ready[0]
 		ready = ready[1:]
-		ordered = append(ordered, names[name])
+		ordered = append(ordered, byLabel[label])
 		next := append([]string{}, ready...)
-		for _, consumer := range after[name] {
+		for _, consumer := range after[label] {
 			indegree[consumer]--
 			if indegree[consumer] == 0 {
 				next = append(next, consumer)
@@ -487,7 +546,7 @@ func topo(words []dictionary.Word, bound map[string][]string) ([]dictionary.Word
 		slices.Sort(next)
 		ready = next
 	}
-	if len(ordered) != len(words) {
+	if len(ordered) != len(steps) {
 		return nil, fmt.Errorf("word dependencies cycle; no chain order is safe")
 	}
 	return ordered, nil

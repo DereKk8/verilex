@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# verify-verilex worker identity: prints who is running this script. launch records it; cleanup compares it.
+# usage: worker-id   (VERIFY_VERILEX_WORKER overrides; else the agent session id; else the terminal session id)
+set -euo pipefail
+if [ -n "${VERIFY_VERILEX_WORKER:-}" ]; then echo "env:$VERIFY_VERILEX_WORKER"
+elif [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then echo "claude:$CLAUDE_CODE_SESSION_ID"
+else echo "tty-session:$(ps -o sid= -p $$ | tr -d ' ')"; fi

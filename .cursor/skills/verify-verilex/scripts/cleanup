@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # verify-verilex Cleanup: tear down kept instances of every state home through verilex, then remove the session. Keeps evidence.
-# usage: cleanup SESSION
+# usage: cleanup SESSION   (refuses a session another worker launched: exit 2, removes nothing)
 set -uo pipefail
 S="${1:?usage: cleanup SESSION}"
 [ -f "$S/session" ] && [ -f "$S/owner" ] || { echo "cleanup: $S is not a verify-verilex session; left alone" >&2; exit 2; }
 [ "$(cat "$S/owner")" = "$(sed -n 's/^id=//p' "$S/session")" ] || { echo "cleanup: owner mismatch; left $S alone" >&2; exit 2; }
+[ -f "$S/worker" ] || { echo "cleanup: $S records no launching worker; left alone" >&2; exit 2; }
+[ "$(cat "$S/worker")" = "$("$(dirname "$0")/worker-id")" ] || { echo "cleanup: $S belongs to another worker; left alone (only its launcher may clean it up)" >&2; exit 2; }
 evidence="$(sed -n 's/^evidence=//p' "$S/session")"
 status=0
 if [ -x "$S/bin/verilex" ] && [ -d "$S/tally" ]; then

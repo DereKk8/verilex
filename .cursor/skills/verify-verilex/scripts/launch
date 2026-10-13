@@ -38,6 +38,7 @@ product=$S/tally
 evidence=$evidence
 SESSION
 echo "$id" > "$S/owner"
+"$skill/scripts/worker-id" > "$S/worker"
 cat > "$S/vx" <<VX
 #!/usr/bin/env bash
 exec "$skill/scripts/capture" "$S" "\$@"

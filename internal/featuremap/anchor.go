@@ -100,13 +100,14 @@ func Pin(root string, skillDirs []string, s Source) (Anchor, error) {
 	return a, nil
 }
 
-// Locate names the feature file a source reference points at, relative to root, without reading
-// it: the first skill directory that holds it. "" when the reference is not a
-// <skill>/<file>#<sub-feature> reference or no skill directory holds the file.
+// Locate names the feature file a reference points at, relative to root, without reading it:
+// the first skill directory that holds it. The #<sub-feature> part may be missing, as a word's
+// implements reference to a whole file has none. "" when the reference is not a <skill>/<file>
+// reference or no skill directory holds the file.
 func Locate(root string, skillDirs []string, ref string) string {
-	path, id, _ := strings.Cut(ref, "#")
+	path, _, _ := strings.Cut(ref, "#")
 	clean, ok := relative(path)
-	if !ok || id == "" {
+	if !ok {
 		return ""
 	}
 	for _, dir := range skillDirs {

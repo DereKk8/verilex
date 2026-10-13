@@ -139,6 +139,7 @@ func TestWeakIntentMatchFindsNoClaim(t *testing.T) {
 		"a red verdict for a broken product": "chain-red",
 		"skip a proven chain":                "chain-skipped",
 		"a chain runs live and cleans up":    "chain-runs-live",
+		"skip works":                         "chain-skipped",
 	} {
 		lines := strings.SplitAfter(verilex(t, root, nil, "index", "--intent", intent).stdout, "\n")
 		equal(t, lines[0], "intent: 1 claim(s) for '"+intent+"'\n")
@@ -146,27 +147,53 @@ func TestWeakIntentMatchFindsNoClaim(t *testing.T) {
 	}
 }
 
-// A short intent needs more than one shared term, but real two-term matches and the longer
-// intents the floor already accepts still return. This keeps the fix from widening recall loss.
+// A two-term intent that shares one term with a claim finds it only when that term names the
+// claim: it is what sets the claim's name apart from the other claims. `store` and `item` are in
+// every claim, so `store refunds` finds nothing; `list works` names item-listed. Intents that
+// share both terms, and longer intents the floor accepts, still return.
 func TestShortIntentRejectsOneSharedTerm(t *testing.T) {
 	root := product(t)
-	for _, intent := range []string{"store refunds", "list refunds", "store store store refund"} {
+	for _, intent := range []string{"store refunds", "store store store refund", "item refunds", "store backup"} {
 		done := verilex(t, root, nil, "index", "--intent", intent)
 		equal(t, done.code, 0)
 		equal(t, done.stdout, "intent: 0 claim(s) for '"+intent+"'\n")
 	}
-	for intent, claim := range map[string]string{
-		"tally list":                "item-listed",
-		"store opens":               "store-opened",
-		"item added":                "item-added",
-		"item added refund payment": "item-added",
-		"after tally add apple, tally list shows apple": "item-listed",
+	for intent, claims := range map[string][]string{
+		"tally list":                {"item-listed", "item-added"},
+		"store opens":               {"store-opened"},
+		"item added":                {"item-added"},
+		"item added refund payment": {"item-added"},
+		"after tally add apple, tally list shows apple": {"item-listed"},
+		"list works":      {"item-listed"},
+		"add apple":       {"item-added"},
+		"open command":    {"store-opened"},
+		"the add command": {"item-added"},
+		"tally exits":     {"item-added", "store-opened"},
 	} {
 		done := verilex(t, root, nil, "index", "--intent", intent)
 		equal(t, done.code, 0)
-		lines := strings.SplitAfter(done.stdout, "\n")
+		lines := strings.Split(strings.TrimSuffix(done.stdout, "\n"), "\n")
+		equal(t, lines[0], fmt.Sprintf("intent: %d claim(s) for '%s'", len(claims), intent))
+		found := []string{}
+		for _, line := range lines[1:] {
+			found = append(found, strings.SplitN(line, "  ", 2)[0])
+		}
+		equal(t, found, claims)
+	}
+}
+
+// A claim grouped under another as its alias is found by its own name and sentence as strongly
+// as the claim it is grouped under, so an agent that types the alias it saw finds the claim.
+func TestIntentFindsAClaimByItsAlias(t *testing.T) {
+	root := baseline(t)
+	v := pinOf(t, root, "item-added")
+	alias := claimLike(t, root, "entry-persisted", [2]string{"    - \"`added NAME` alone", "    - \"exit 0 alone does not prove the item was stored.\"\n    - \"`added NAME` alone"})
+	variant(t, root, "item-put", alias, storedRun(t, root))
+	equal(t, strings.SplitN(onboard(t, root, "item-put").stdout, "\n", 2)[0], "onboarded item-put: variant of "+v+" through claim entry-persisted, matched mechanically; caught dropped-add")
+	for _, intent := range []string{"entry-persisted", "an entry is persisted", "entry-persisted still works"} {
+		lines := strings.SplitAfter(verilex(t, root, nil, "index", "--intent", intent).stdout, "\n")
 		equal(t, lines[0], "intent: 1 claim(s) for '"+intent+"'\n")
-		equal(t, strings.SplitN(lines[1], "  ", 2)[0], claim)
+		equal(t, strings.SplitN(lines[1], "  ", 2)[0], "item-added")
 	}
 }
 

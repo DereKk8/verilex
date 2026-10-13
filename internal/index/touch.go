@@ -85,6 +85,10 @@ func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
 			_, hashes[name] = ix.sections(p, c)
 		}
 		for _, source := range c.Sources {
+			// A claim's source must name its sub-feature; one that does not pins no file.
+			if _, id, _ := strings.Cut(source.Ref, "#"); id == "" {
+				continue
+			}
 			root, dirs := lifecycle.SourceRoot(p, source)
 			if file := featuremap.Locate(root, dirs, source.Ref); file != "" {
 				deps = append(deps, filepath.Join(root, file))

@@ -335,6 +335,24 @@ func TestUnmappedDiffIsInconclusive(t *testing.T) {
 		"  unclaimed  probe-word: proves no claim; verify it with the product verify skill\n")
 }
 
+// A claimless word may implement a whole feature file, with no #<sub-feature>; an edit to that
+// file touches the word, alone or beside a change a claim covers.
+func TestWholeFileImplementsDependsOnTheFile(t *testing.T) {
+	root := product(t)
+	write(t, feature(root, "backup.md"), "# Backup\n\nA user backs the store up.\n", 0644)
+	equal(t, verilex(t, root, nil, "new", "probe-backup", "--implements", "verify-tally/features/backup.md").code, 0)
+	const file = ".cursor/skills/verify-tally/features/backup.md"
+	alone := verilex(t, root, nil, "run", "--changed", file)
+	equal(t, alone.code, 2)
+	contains(t, alone.stdout, "probe-backup proves no claim and the diff touched it")
+	green(t, root, nil, chain)
+	mixed := verilex(t, root, nil, "plan", "--changed", file, "--changed", ".verilex/words/item-listed/run").stdout
+	contains(t, mixed, "  unclaimed  probe-backup: proves no claim; verify it with the product verify skill\n")
+	if strings.Contains(mixed, "unmapped") {
+		t.Fatalf("a word depends on %s:\n%s", file, mixed)
+	}
+}
+
 // A diff no claim covers is answered without reading the verify skill: only where its feature
 // files are matters to a path. A feature file that blocks every read stands in for one too slow
 // to parse.

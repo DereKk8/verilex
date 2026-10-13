@@ -188,7 +188,7 @@ func (ix Index) Details(claim, word string) (dictionary.Word, Word, error) {
 // Intent finds the claims an intent names, best first and at most limit. A claim is found by its
 // name, sentence, evidence, aliases, sources and words; a term counts double in its name or
 // sentence, and a rarer term counts more. A claim must also cover at least half of what the
-// intent says, and more than one weighted term for a multi-term intent (see covers).
+// intent says, and a two-term intent must match both terms or name the claim (see covers).
 func (ix Index) Intent(text string, limit int) []Claim {
 	want := terms.Of(text)
 	primary, secondary := make([][]string, len(ix.Claims)), make([][]string, len(ix.Claims))
@@ -205,7 +205,7 @@ func (ix Index) Intent(text string, limit int) []Claim {
 	}
 	found := []scored{}
 	for i, c := range ix.Claims {
-		if !covers(want, primary[i], secondary[i]) {
+		if !covers(want, primary[i], secondary[i], distinct(c, frequency, len(ix.Claims))) {
 			continue
 		}
 		score := 0.0
@@ -246,24 +246,41 @@ func (ix Index) Intent(text string, limit int) []Claim {
 
 // covers is the relevance floor: a claim covers an intent when it matches at least half of the
 // intent's terms. A term in the claim's name or sentence counts whole, one only in the rest of
-// the claim counts half. Multi-term intents must match more than one weighted term, so a short
-// intent cannot pass on a single shared term. Longer intents keep the same relevance floor.
-func covers(want, primary, secondary []string) bool {
-	matched := 0.0
+// the claim counts half. A two-term intent that shares only one term with the claim passes only
+// when that term names the claim: it is all of a name's distinct terms, so `list works` finds
+// item-listed but `store refunds` finds nothing. Longer intents need two shared terms anyway.
+func covers(want, primary, secondary []string, names [][]string) bool {
+	matched, shared := 0.0, 0
 	for _, term := range want {
 		switch {
 		case slices.Contains(primary, term):
-			matched++
+			matched, shared = matched+1, shared+1
 		case slices.Contains(secondary, term):
-			matched += 0.5
+			matched, shared = matched+0.5, shared+1
 		}
 	}
-	return 2*matched >= float64(len(want)) && (len(want) == 1 || matched > 1)
+	return 2*matched >= float64(len(want)) && (len(want) == 1 || shared > 1 || slices.ContainsFunc(names, func(name []string) bool {
+		return len(name) > 0 && !slices.ContainsFunc(name, func(term string) bool { return !slices.Contains(want, term) })
+	}))
 }
 
-// doc gathers the terms a claim is found by: its name and sentence first, then the rest.
+// distinct lists, for each name a claim goes by (its own and its aliases'), the name's terms
+// found in fewer than all claims: what sets the name apart from the other claims.
+func distinct(c Claim, frequency map[string]int, claims int) [][]string {
+	result := [][]string{}
+	for _, name := range append([]string{c.Claim}, c.aliases...) {
+		result = append(result, slices.DeleteFunc(terms.Of(name), func(term string) bool { return frequency[term] >= claims }))
+	}
+	return result
+}
+
+// doc gathers the terms a claim is found by: its name and sentence and those of its aliases
+// first, then the rest.
 func (ix Index) doc(c Claim) ([]string, []string) {
-	rest := []string{}
+	rest, named := []string{}, []string{c.Claim, c.Sentence}
+	for _, name := range c.aliases {
+		named = append(named, name, ix.claims[name].Sentence)
+	}
 	for _, name := range append([]string{c.Claim}, c.aliases...) {
 		claim := ix.claims[name]
 		rest = append(rest, name, claim.Sentence, claim.Evidence.Action, claim.Evidence.Observation)
@@ -276,7 +293,7 @@ func (ix Index) doc(c Claim) ([]string, []string) {
 		j := slices.IndexFunc(ix.words, func(x dictionary.Word) bool { return x.Name == w.Word })
 		rest = append(rest, w.Word, ix.words[j].Promise)
 	}
-	primary := terms.Of(c.Claim + "\n" + c.Sentence)
+	primary := terms.Of(strings.Join(named, "\n"))
 	secondary := slices.DeleteFunc(terms.Of(strings.Join(rest, "\n")), func(term string) bool { return slices.Contains(primary, term) })
 	return primary, secondary
 }

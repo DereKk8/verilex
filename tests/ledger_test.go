@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DereKk8/verilex/internal/runner"
 )
@@ -233,4 +234,80 @@ func TestUnreadableLedgerRunsLive(t *testing.T) {
 	_, record := runJSON(t, root, nil, chain)
 	equal(t, *record.Verdict, "green")
 	ranLive(t, record)
+}
+
+// stranded plants a temporary entry, holding a file, that is old enough for prune to sweep.
+func stranded(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, ".tmp-cache")
+	if err := os.MkdirAll(filepath.Join(path, "keep"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(path, "keep", "f"), "not verilex's\n", 0600)
+	old := time.Now().Add(-48 * time.Hour)
+	for _, p := range []string{filepath.Join(path, "keep", "f"), filepath.Join(path, "keep"), path} {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return filepath.Join(path, "keep", "f")
+}
+
+// Rule: pruning deletes only inside the ledger's real directories. When the ledger, its
+// evidence/ or its passes/ is a symlink, verilex still reads and writes through it, but prune
+// follows no link, so old temporary entries where it points are kept.
+func TestPruneNeverFollowsALinkOutOfTheLedger(t *testing.T) {
+	for _, linked := range []string{"evidence", "passes", "."} {
+		t.Run(linked, func(t *testing.T) {
+			root := curated(t)
+			shared := filepath.Join(t.TempDir(), "ledger")
+			env := map[string]string{"VERILEX_LEDGER": shared}
+			green(t, root, env, chain)
+			ledger := filepath.Join(shared, "tally")
+			inside, outside := filepath.Join(ledger, linked), filepath.Join(t.TempDir(), "elsewhere")
+			if err := os.Rename(inside, outside); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, inside); err != nil {
+				t.Fatal(err)
+			}
+			kept := []string{stranded(t, outside)}
+			if linked == "passes" {
+				// Every real directory under a linked passes/ looks like a slot.
+				if err := os.Mkdir(filepath.Join(outside, "x"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				kept = append(kept, stranded(t, filepath.Join(outside, "x")))
+			}
+			// The ledger's own real root is still swept.
+			swept := stranded(t, ledger)
+			green(t, root, env, "store-open | item-stored pear | item-listed pear")
+			for _, path := range kept {
+				equal(t, read(t, path), "not verilex's\n")
+			}
+			if _, err := os.Stat(swept); linked != "." && !os.IsNotExist(err) {
+				t.Fatalf("prune kept %s inside the ledger: %v", swept, err)
+			}
+			equal(t, green(t, root, env, chain).Skipped, true)
+		})
+	}
+}
+
+// Rule: a project name is a plain name of one directory: . and .. are refused, so the ledger
+// never lands on, or prunes, the directory around VERILEX_LEDGER.
+func TestProjectNamedDotIsRefused(t *testing.T) {
+	for _, name := range []string{".", ".."} {
+		t.Run(name, func(t *testing.T) {
+			root := curated(t)
+			shared := filepath.Join(t.TempDir(), "ledger")
+			// Where the project's ledger would land: VERILEX_LEDGER itself, or the directory around it.
+			victim := stranded(t, filepath.Join(shared, name))
+			config := filepath.Join(root, ".verilex", "config.yaml")
+			edit(t, config, "project: tally", "project: "+name)
+			done := verilex(t, root, map[string]string{"VERILEX_LEDGER": shared}, "run", chain)
+			equal(t, done.code, 2)
+			equal(t, done.stderr, "verilex: refused: "+config+": 'project' must be a plain name\n")
+			equal(t, read(t, victim), "not verilex's\n")
+		})
+	}
 }

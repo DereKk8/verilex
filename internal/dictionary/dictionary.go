@@ -102,7 +102,7 @@ func FindProject(start string) (Project, error) {
 				return Project{}, err
 			}
 			name, ok := data["project"].(string)
-			if !ok || !regexp.MustCompile(`^[A-Za-z0-9._-]+$`).MatchString(name) {
+			if !ok || !regexp.MustCompile(`^[A-Za-z0-9._-]+$`).MatchString(name) || name == "." || name == ".." {
 				return Project{}, fmt.Errorf("%s: 'project' must be a plain name", config)
 			}
 			p := Project{Root: root, Name: name, SkillDirs: DefaultSkillDirs}

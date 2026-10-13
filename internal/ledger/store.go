@@ -327,22 +327,32 @@ const strandedAge = 24 * time.Hour
 // Age is judged on the storage's own clock, read from a file just created there, not on the
 // writer's: a writer whose clock runs ahead must not drop passes other instances wrote that are
 // still young. The age comes from each pass's record, never its file time, which a git checkout
-// or a copy resets. A call costs a directory listing per slot and a read of every pass. Only real
-// directories are slots: a symlink under passes/ is never followed. When the storage clock cannot
-// be read, nothing is pruned.
+// or a copy resets. A call costs a directory listing per slot and a read of every pass. When the
+// storage clock cannot be read, nothing is pruned.
+//
+// Deletion stays inside the ledger's real directories: prune follows no symlink, not even when
+// the ledger itself, evidence/ or passes/ is one. Passes are dropped only when both evidence/ and
+// passes/ are real, since dropping a pass removes its evidence.
 func (s Store) prune() {
+	if !realDir(s.dir) {
+		return
+	}
 	now, ok := s.storageNow()
 	if !ok {
 		return
 	}
+	evidence, passes := filepath.Join(s.dir, "evidence"), filepath.Join(s.dir, "passes")
 	s.sweep(s.dir, now)
-	s.sweep(filepath.Join(s.dir, "evidence"), now)
-	slots, _ := os.ReadDir(filepath.Join(s.dir, "passes"))
+	s.sweep(evidence, now)
+	if !realDir(evidence) || !realDir(passes) {
+		return
+	}
+	slots, _ := os.ReadDir(passes)
 	for _, slot := range slots {
 		if !slot.IsDir() {
 			continue
 		}
-		s.pruneSlot(filepath.Join(s.dir, "passes", slot.Name()), now)
+		s.pruneSlot(filepath.Join(passes, slot.Name()), now)
 	}
 }
 
@@ -365,14 +375,24 @@ func (s Store) pruneSlot(dir string, now time.Time) {
 	}
 }
 
-// sweep removes the temporary entries of dir that are strandedAge old or older.
+// sweep removes the temporary entries of dir that are strandedAge old or older, unless dir is
+// not a real directory.
 func (s Store) sweep(dir string, now time.Time) {
+	if !realDir(dir) {
+		return
+	}
 	files, _ := os.ReadDir(dir)
 	for _, file := range files {
 		if strings.HasPrefix(file.Name(), ".tmp-") && older(file, now, strandedAge) {
 			os.RemoveAll(filepath.Join(dir, file.Name()))
 		}
 	}
+}
+
+// realDir reports whether path is a directory itself, not a symlink to one.
+func realDir(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.IsDir()
 }
 
 func older(file fs.DirEntry, now time.Time, age time.Duration) bool {

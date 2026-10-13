@@ -239,7 +239,7 @@ func newer(p pass, q *pass) bool {
 }
 
 // Record adds a pass for each entry, keyed by the stamp slot it proved, and drops the expired
-// passes of each slot it writes. It refuses an entry that may not become a pass: one that is not
+// passes. It refuses an entry that may not become a pass: one that is not
 // green, has no stamp, was recorded on an instance its run did not launch, names a claim
 // version its stamp does not hold, or whose evidence misses the evidence contract. Passes
 // already recorded stay as they are: concurrent runs that prove one step record one pass each.
@@ -255,8 +255,8 @@ func (s Store) Record(entries map[string]Entry) error {
 		if err := s.add(slot, entries[slot], now); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", entries[slot].Label, err))
 		}
-		s.prune(slot, now)
 	}
+	s.prune()
 	return errors.Join(errs...)
 }
 
@@ -312,14 +312,35 @@ func holds(claim, fingerprint string) bool {
 	return ok && version != "" && strings.HasPrefix(fingerprint, version)
 }
 
-// prune drops the passes of a slot that are MaxAge old or older, then their evidence. A reader
-// that listed one first finds it gone and runs the step live. It leaves damaged files in place.
-func (s Store) prune(slot string, now time.Time) {
-	dir := filepath.Join(s.dir, "passes", slot)
+// strandedAge is how old a temporary entry must be before prune treats its writer as crashed.
+const strandedAge = 24 * time.Hour
+
+// prune drops every pass that is MaxAge old or older, in every slot, then its evidence, and the
+// temporary entries a crashed writer left. A reader that listed a pass first finds it gone and
+// runs the step live. It leaves damaged files in place.
+//
+// Age is judged on the storage's own clock, read from a file just created there, not on the
+// writer's: a writer whose clock runs ahead must not drop passes other instances wrote that are
+// still young. A pass also needs a file time that old before prune opens it, so a call costs a
+// directory listing per slot. When the storage clock cannot be read, nothing is pruned.
+func (s Store) prune() {
+	now, ok := s.storageNow()
+	if !ok {
+		return
+	}
+	s.sweep(filepath.Join(s.dir, "evidence"), now)
+	slots, _ := os.ReadDir(filepath.Join(s.dir, "passes"))
+	for _, slot := range slots {
+		s.pruneSlot(filepath.Join(s.dir, "passes", slot.Name()), now)
+	}
+}
+
+func (s Store) pruneSlot(dir string, now time.Time) {
+	s.sweep(dir, now)
 	files, _ := os.ReadDir(dir)
 	for _, file := range files {
 		m := passName.FindStringSubmatch(file.Name())
-		if m == nil {
+		if m == nil || !older(file, now, MaxAge) {
 			continue
 		}
 		p, damage := s.open(dir, m)
@@ -331,6 +352,37 @@ func (s Store) prune(slot string, now time.Time) {
 			os.RemoveAll(filepath.Join(s.dir, filepath.FromSlash(p.Evidence)))
 		}
 	}
+}
+
+// sweep removes the temporary entries of dir that are strandedAge old or older.
+func (s Store) sweep(dir string, now time.Time) {
+	files, _ := os.ReadDir(dir)
+	for _, file := range files {
+		if strings.HasPrefix(file.Name(), ".tmp-") && older(file, now, strandedAge) {
+			os.RemoveAll(filepath.Join(dir, file.Name()))
+		}
+	}
+}
+
+func older(file fs.DirEntry, now time.Time, age time.Duration) bool {
+	info, err := file.Info()
+	return err == nil && now.Sub(info.ModTime()) >= age
+}
+
+// storageNow reads the clock of the storage that holds the ledger, from the time of a file it
+// creates there.
+func (s Store) storageNow() (time.Time, bool) {
+	f, err := os.CreateTemp(s.dir, ".clock-")
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return time.Time{}, false
+	}
+	return info.ModTime(), true
 }
 
 // copyTree gives dest its own copy of the regular files and directories under src, linking

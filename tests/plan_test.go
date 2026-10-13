@@ -52,10 +52,17 @@ func skips(id string, labels ...string) string {
 // writer that bypasses verilex would, or the history in a kept run's run.json.
 func age(t *testing.T, path string, by time.Duration) {
 	t.Helper()
-	at := time.Now().Add(-by).UTC().Format(time.RFC3339)
+	then := time.Now().Add(-by)
+	at := then.UTC().Format(time.RFC3339)
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
 		for _, p := range passes(t, path) {
 			reseal(t, p, func(fields map[string]any) { fields["recorded"] = at })
+		}
+		// Prune only opens passes whose file time is old too, as it is on aged storage.
+		for _, p := range passes(t, path) {
+			if err := os.Chtimes(p.path, then, then); err != nil {
+				t.Fatal(err)
+			}
 		}
 		return
 	}

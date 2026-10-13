@@ -73,15 +73,18 @@ func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
 	claimDeps := map[string][]string{}
 	runbook := map[string][]string{}
 	hashes := map[string][]string{}
+	// Only a runbook entry is matched against section fingerprints, so the verify skill is read
+	// and parsed only for a diff that names one; a path needs only where the feature file is.
+	sectioned := slices.ContainsFunc(typed, func(change diffKind) bool { return change.kind == "runbook" })
 	for name, c := range ix.claims {
 		deps := []string{c.Path}
-		refs, digests := ix.sections(p, c)
-		runbook[name] = refs
-		hashes[name] = digests
+		if sectioned {
+			runbook[name], hashes[name] = ix.sections(p, c)
+		}
 		for _, source := range c.Sources {
 			root, dirs := lifecycle.SourceRoot(p, source)
-			if anchor, err := featuremap.Pin(root, dirs, featuremap.Source{Ref: source.Ref, Requirements: source.Requirements, Prose: source.Prose, Covered: source.Covered}); err == nil && anchor.File != "" {
-				deps = append(deps, filepath.Join(root, anchor.File))
+			if file := featuremap.Locate(root, dirs, source.Ref); file != "" {
+				deps = append(deps, filepath.Join(root, file))
 			}
 		}
 		claimDeps[name] = deps

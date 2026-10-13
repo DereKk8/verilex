@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "summary": "Record durable run usage and fix four defects found by zero-trust review.",
+  "files": [
+    {
+      "path": "internal/cli/usage.go",
+      "summary": "Capture usage without changing product verdicts.",
+      "annotations": [
+        {
+          "newRange": [62, 89],
+          "summary": "newUsage limits Git identity capture to 250 milliseconds and one MiB of product-local diff output.",
+          "rationale": "Large binary diffs delayed even skipped runs, so incomplete hashes are omitted instead of delaying verification. Live proof with a modified 64 MiB binary completed in 0.282 seconds. TestUsageBoundsTrackedDiffAndCapturesSmallChanges also checks exact small staged and unstaged diff hashes.",
+          "author": "fm/verilex-run-ledger"
+        },
+        {
+          "newRange": [100, 111],
+          "summary": "finish removes the start snapshot when execution refuses a continuation.",
+          "rationale": "A competing continuation can win after planning, so the rejected attempt must not remain unfinished. TestKeptInstanceGoesToExactlyOneContinuingRun and live CLI proof both show only the kept run and its successful continuation.",
+          "author": "fm/verilex-run-ledger"
+        }
+      ]
+    },
+    {
+      "path": "internal/usage/store.go",
+      "summary": "Keep usage separate from skip proof and preserve readable totals.",
+      "annotations": [
+        {
+          "newRange": [200, 215],
+          "summary": "Read saturates an overflowing token total and labels the total as a lower bound.",
+          "rationale": "Two valid int64 counts previously made every ledger read fail. Per-run values remain exact, so later caller corrections restore exact totals. TestUsageHugeCallerTokensKeepLedgerReadable proves saturation, readable text and JSON, and correction. No harness token telemetry enters the core.",
+          "author": "fm/verilex-run-ledger"
+        }
+      ]
+    },
+    {
+      "path": "agent/internal/proxy/proxy.go",
+      "summary": "Keep caller usage data outside the brain's authority.",
+      "annotations": [
+        {
+          "newRange": [294, 295],
+          "summary": "pinArgs refuses brain-supplied token counts, estimate labels and change references.",
+          "rationale": "The brain is under test, so it cannot choose the data used for evaluation. TestBrainCannotSupplyCallerOwnedUsageData drives the sandboxed launcher, including equals-form flags, and checks one legitimate green usage entry. A host caller can annotate tokens after verification. macOS was not verified locally.",
+          "author": "fm/verilex-run-ledger"
+        }
+      ]
+    },
+    {
+      "path": "docs/usage-ledger.md",
+      "summary": "State the storage contract and first-version limits.",
+      "annotations": [
+        {
+          "newRange": [11, 25],
+          "summary": "The documentation requires every own-work caller to select persistent shared storage.",
+          "rationale": "The default is per state home, so a temporary launcher home loses usage on removal unless VERILEX_USAGE_LEDGER is set. Mixed token totals and complete unbounded JSON are explicit limits, not claims of complete evaluation tooling.",
+          "author": "fm/verilex-run-ledger"
+        }
+      ]
+    }
+  ]
+}

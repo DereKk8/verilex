@@ -65,7 +65,7 @@ smoke() { scripts/smoke; }
 
 # The verilex build that grades the canary: a reviewed, known-good commit. Never the build under test,
 # which could grade its own regression green. Bump it only in a reviewed change, built from main.
-canary_driver=249b64d079153abaac342b10065f1633259b2b88
+canary_driver=a5ce6bc9b9fcbc2bcf2789ea0386384a04ac5daa
 canary() (
   # verilex proves its own claims (.verilex/) on this checkout: live, in throwaway state, so no ledger
   # written by earlier code can skip a step, and red when a canary word drifted or is not admitted.

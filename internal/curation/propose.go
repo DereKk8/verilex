@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -167,7 +168,7 @@ func proposalsDir(p dictionary.Project, word string) string {
 
 func wordFiles(w dictionary.Word) (map[string]string, error) {
 	files := map[string]string{}
-	err := lifecycle.EachFile(w, func(rel string, data []byte) {
+	err := lifecycle.EachFile(w, func(rel string, _ fs.FileMode, data []byte) {
 		if utf8.Valid(data) {
 			files[rel] = string(data)
 		} else {

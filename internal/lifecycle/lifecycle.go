@@ -347,11 +347,12 @@ func SourceRoot(p dictionary.Project, source dictionary.ClaimSource) (string, []
 	return filepath.Join(p.Root, source.Repo), dictionary.DefaultSkillDirs
 }
 
-// WordDigest hashes every file of a word's directory except its admission record.
+// WordDigest hashes every file of a word's directory except its admission record: its name,
+// permissions and contents, as a proof stamp does.
 func WordDigest(w dictionary.Word) (string, error) {
 	h := sha256.New()
-	err := EachFile(w, func(rel string, data []byte) {
-		fmt.Fprintf(h, "%s\x00%d\x00", rel, len(data))
+	err := EachFile(w, func(rel string, perm fs.FileMode, data []byte) {
+		fmt.Fprintf(h, "%s\x00%o\x00%d\x00", rel, perm, len(data))
 		h.Write(data)
 	})
 	return hex.EncodeToString(h.Sum(nil)), err
@@ -359,7 +360,7 @@ func WordDigest(w dictionary.Word) (string, error) {
 
 // EachFile visits a word's files in lexical order, skipping its admission record and
 // interpreter caches, which are not the word.
-func EachFile(w dictionary.Word, visit func(rel string, data []byte)) error {
+func EachFile(w dictionary.Word, visit func(rel string, perm fs.FileMode, data []byte)) error {
 	return filepath.WalkDir(w.Path, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -374,9 +375,13 @@ func EachFile(w dictionary.Word, visit func(rel string, data []byte)) error {
 		if err != nil || rel == admissionFile || rel == admissionFile+".tmp" {
 			return err
 		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
 		data, err := os.ReadFile(path)
 		if err == nil {
-			visit(filepath.ToSlash(rel), data)
+			visit(filepath.ToSlash(rel), info.Mode().Perm(), data)
 		}
 		return err
 	})

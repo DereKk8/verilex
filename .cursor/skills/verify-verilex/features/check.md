@@ -1,6 +1,6 @@
 # Check
 
-`verilex check` compares each admitted word with the project now: for a word that proves a claim, its onboarding decision (seal, word digest, frame and shared word files, claim version, planted defects) and the claim's review state; for a word without a claim, its admission record's word digest, frame and shared word files, and stored section hashes. Changed word files, a changed frame step or shared word file, a decision edited by hand, a new planted defect, a claim that needs review, or a changed or missing section makes the word drift-suspect: it always runs and no earlier result is trusted for it. Drift is computed on every call, never cached.
+`verilex check` compares each admitted word with the project now: for a word that proves a claim, its onboarding decision (seal, word digest, frame and shared word files, claim version, planted defects) and the claim's review state; for a word without a claim, its admission record's word digest, frame and shared word files, and stored section hashes. Changed word files (contents or permissions), a changed frame step or shared word file, a decision edited by hand, a new planted defect, a claim that needs review, or a changed or missing section makes the word drift-suspect: it always runs and no earlier result is trusted for it. Drift is computed on every call, never cached.
 
 ## Sub-features
 

@@ -178,14 +178,14 @@ func sameStates(uses []string, args [][]string, word string, words []dictionary.
 // substitute replaces the step at index k of chain with another word, binding each of its args
 // by the claim arg in the same position.
 func substitute(chain string, k int, word dictionary.Word, values map[int]string, claim dictionary.Claim, words []dictionary.Word) (string, []dictionary.Step, error) {
-	argv := []string{shellWord(word.Name)}
+	argv := []string{dictionary.ChainWord(word.Name)}
 	for _, arg := range word.Args {
 		i := slices.Index(claim.Args, arg)
 		value, ok := values[i]
 		if i < 0 || !ok {
 			return "", nil, fmt.Errorf("%s takes arg %s, which its claim does not name", word.Name, arg)
 		}
-		argv = append(argv, shellWord(value))
+		argv = append(argv, dictionary.ChainWord(value))
 	}
 	segments := strings.Split(chain, "|")
 	segments[k] = " " + strings.Join(argv, " ")

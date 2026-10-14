@@ -1,0 +1,15 @@
+claim: self-skill-session
+sentence: The verification session freezes its binary, detects tampering and refuses another worker's cleanup.
+entry: [cli]
+evidence:
+  action: "Drive the `self-skill-session` scenario against the checkout's built verilex or shipped scripts."
+  observation: "launch freezes --bin across a source rebuild; doctor accepts the frozen session and refuses tampering with exit 1; cleanup refuses a different worker with exit 2 and unchanged session files, then removes the exact session under its launching identity."
+defects:
+  skill-cleanup-foreign: {CANARY_DEFECT: skill-cleanup-foreign}
+  skill-unpinned-bin: {CANARY_DEFECT: skill-unpinned-bin}
+  skill-doctor-no-hash: {CANARY_DEFECT: skill-doctor-no-hash}
+sources:
+  - ref: verify-verilex/features/self.md#self-skill-session
+    prose: e1ea920a0256
+    requirements:
+      - "`self-skill-session`: Expect launch freezes --bin across a source rebuild; doctor accepts the frozen session and refuses tampering with exit 1; cleanup refuses a different worker with exit 2 and unchanged session files, then removes the exact session under its launching identity."

@@ -1,0 +1,15 @@
+claim: self-drift
+sentence: Changed word files and added or removed planted defects force drift and recover when restored.
+entry: [cli]
+evidence:
+  action: "Drive the `self-drift` scenario against the checkout's built verilex or shipped scripts."
+  observation: "check names changed item-listed, new another-dropped-add and removed dropped-add defects as drift; plan runs each drifted chain live; restoring files clears drift and restores skip."
+defects:
+  drift-ignore-removed: {CANARY_DEFECT: drift-ignore-removed}
+  drift-ignore-word: {CANARY_DEFECT: drift-ignore-word}
+  drift-ignore-defect: {CANARY_DEFECT: drift-ignore-defect}
+sources:
+  - ref: verify-verilex/features/self.md#self-drift
+    prose: f0f8fdd51687
+    requirements:
+      - "`self-drift`: Expect check names changed item-listed, new another-dropped-add and removed dropped-add defects as drift; plan runs each drifted chain live; restoring files clears drift and restores skip."

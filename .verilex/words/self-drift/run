@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from self_word import (c, source, start, expect, doc, plan, edit, baseline, external, setup,
+                       json, shutil, subprocess)
+
+
+def drift():
+    baseline()
+    clean = c.must("clean", "check").stdout
+    expect(clean.strip() == "check: no drift (3 admitted)", "baseline already drifted")
+    word = c.instance / "tally/.verilex/words/item-listed/word.md"
+    old = word.read_text()
+    word.write_text(old + "\nprobe\n")
+    changed = c.must("word-drift", "check").stdout
+    expect("item-listed: the word's files changed since onboarding" in changed, "changed word not reported as drift")
+    expect(all(not s["skipped"] for s in plan("word-plan", c.CHAIN)["steps"]), "drift plan trusted previous green")
+    word.write_text(old)
+    claim = c.instance / "tally/.verilex/claims/item-added.yaml"
+    old = edit(claim, "defects:\n", "defects:\n  another-dropped-add: {TALLY_DEFECT: drop-adds}\n")
+    changed = c.must("defect-drift", "check").stdout
+    expect("item-stored: claim item-added declares planted defect another-dropped-add" in changed,
+           "new planted defect not reported as drift")
+    expect("drift-suspect" in plan("defect-plan", c.CHAIN).get("rerun", ""), "new defect left plan skippable")
+    claim.write_text(old)
+    edit(claim, "  dropped-add: {TALLY_DEFECT: drop-adds}\n", "")
+    removed = c.must("removed-defect", "check").stdout
+    expect("item-stored: claim item-added no longer declares planted defect dropped-add" in removed,
+           "removed planted defect not reported as drift")
+    expect("drift-suspect" in plan("removed-plan", c.CHAIN).get("rerun", ""),
+           "removed defect left plan skippable")
+    claim.write_text(old)
+    expect(c.must("restored", "check").stdout.strip() == "check: no drift (3 admitted)", "restoring files did not clear drift")
+    restored = plan("restored-plan", c.CHAIN)
+    expect(all(s["skipped"] for s in restored["steps"]) and "rerun" not in restored, "restoring files did not restore skip")
+    c.result("pass", observation="check names changed item-listed, new another-dropped-add and removed dropped-add defects as drift; plan runs each drifted chain live; restoring files clears drift and restores skip")
+
+
+try:
+    start("self-drift")
+    drift()
+except (OSError, subprocess.TimeoutExpired) as error:
+    c.result("blocked", detail=str(error))

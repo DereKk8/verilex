@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from self_word import (c, source, start, expect, doc, plan, edit, baseline, external, setup,
+                       json, shutil, subprocess)
+
+
+def ledger_integrity():
+    baseline()
+    chain = "store-open | item-stored mango | item-listed mango"
+    doc("mango", "run", chain)
+    intact = plan("intact", chain)
+    expect(all(x["skipped"] for x in intact["steps"]) and "rerun" not in intact, "intact mango chain did not skip")
+    ledger = c.instance / "home/tally/ledger"
+    passes = [(f, json.loads(f.read_text())) for f in ledger.glob("passes/*/*.json")]
+    found = [(f, p) for f, p in passes if p["label"] == "item-stored mango"]
+    expect(len(found) == 1, "expected one mango pass")
+    _, record = found[0]
+    stdout = ledger / record["evidence"] / "stdout"
+    stdout.unlink()  # Never edit a hard link into the original run's evidence.
+    stdout.write_text('{"verdict":"pass","observation":"untrusted replacement"}\n')
+    damaged = plan("damaged", chain)
+    expect(all(not s["skipped"] for s in damaged["steps"])
+           and "changed after it was recorded" in damaged.get("rerun", ""), "changed ledger evidence remained trusted")
+    live = doc("rerun", "run", chain)
+    expect(not live.get("skipped") and all(not x.get("relies_on") for x in live["words"]),
+           "damaged evidence did not force a live run")
+    recovered = plan("recovered", chain)
+    expect(all(x["skipped"] for x in recovered["steps"]) and "rerun" not in recovered, "fresh pass did not restore skipping")
+    c.result("pass", observation="changed mango evidence makes plan run all three steps with changed-after-recording reason; run has no relies_on; the fresh pass restores skip")
+
+
+try:
+    start("self-ledger-integrity")
+    ledger_integrity()
+except (OSError, subprocess.TimeoutExpired) as error:
+    c.result("blocked", detail=str(error))

@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from self_word import (c, source, start, expect, doc, plan, edit, baseline, external, setup,
+                       json, shutil, subprocess)
+
+
+def index_tiers():
+    expect(doc("pristine", "index") == [], "pristine product lists active claims")
+    baseline()
+    active = doc("tier-1", "index")
+    expect([x["claim"] for x in active] == ["item-added", "item-listed", "store-opened"],
+           "tier 1 did not list the three admitted claims")
+    tier2 = doc("tier-2", "index", "item-added")
+    expect([(w["word"], w["state"]) for w in tier2["words"]] == [("item-stored", "active")],
+           "tier 2 did not show item-stored active")
+    tier3 = c.must("tier-3", "index", "item-added", "item-stored").stdout
+    expect("item-stored <name>  proves item-added@" in tier3 and "; admitted" in tier3
+           and "proven on: store-open | item-stored apple" in tier3, "tier 3 lost the admitted binding")
+    word = c.instance / "tally/.verilex/words/item-stored/word.md"
+    old = word.read_text()
+    word.write_text(old + "\nprobe\n")
+    drifted = c.must("drift-tier-2", "index", "item-added").stdout
+    expect("item-stored <name>  (drift-suspect)" in drifted, "tier 2 hid the drift-suspect word")
+    expect(doc("drift-tier-2-json", "index", "item-added")["words"][0].get("drift_suspect") is True,
+           "tier 2 JSON hid the drift-suspect word")
+    expect(doc("drift-tier-3", "index", "item-added", "item-stored")["status"] == "drift-suspect",
+           "tier 2 disagreed with tier 3 on drift")
+    word.write_text(old)
+    expect(not doc("restored-tier-2", "index", "item-added")["words"][0].get("drift_suspect"),
+           "tier 2 kept a stale drift label after restoration")
+    config = c.instance / "tally/.verilex/config.yaml"
+    edit(config, "project: tally\n", "project: tally-b\n")
+    expect(doc("other-product", "index") == [], "another product inherited active claims")
+    expect(doc("dormant", "index", "item-added")["words"][0]["state"] == "dormant",
+           "another product did not mark item-stored dormant")
+    c.result("pass", observation="tier 1 lists item-added, item-listed, store-opened; tier 2 shows item-stored active; tier 3 shows admitted apple; tier 2 and tier 3 agree on drift-suspect after editing item-stored and clear drift after restoration; tally-b lists no active claims and item-stored dormant")
+
+
+try:
+    start("self-index-tiers")
+    index_tiers()
+except (OSError, subprocess.TimeoutExpired) as error:
+    c.result("blocked", detail=str(error))

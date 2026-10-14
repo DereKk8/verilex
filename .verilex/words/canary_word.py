@@ -16,7 +16,8 @@ def verilex(label: str, *args: str, **env: str) -> subprocess.CompletedProcess:
     so the inner build reads and writes only its own home and ledger."""
     clean = {k: v for k, v in os.environ.items() if not k.startswith(("VERILEX_", "TALLY_"))}
     clean.update(VERILEX_HOME=str(instance / "home"), TALLY_STORES=str(instance / "stores"),
-                 XDG_CONFIG_HOME=str(instance / "config"), **env)
+                 XDG_CONFIG_HOME=str(instance / "config"))
+    clean.update(env)
     done = subprocess.run([instance / "bin" / "verilex", *args], cwd=instance / "tally", env=clean,
                           capture_output=True, text=True, timeout=600, check=False)
     shown = " ".join(f"{k}={v}" for k, v in env.items())
@@ -26,9 +27,9 @@ def verilex(label: str, *args: str, **env: str) -> subprocess.CompletedProcess:
     return done
 
 
-def must(label: str, *args: str) -> subprocess.CompletedProcess:
+def must(label: str, *args: str, **env: str) -> subprocess.CompletedProcess:
     """A setup step: when it does not exit 0, the word's preconditions did not hold."""
-    done = verilex(label, *args)
+    done = verilex(label, *args, **env)
     if done.returncode != 0:
         result("blocked", detail=f"setup `verilex {' '.join(args)}` exited {done.returncode}: {said(done)}")
     return done

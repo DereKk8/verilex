@@ -1,0 +1,14 @@
+claim: self-index-tiers
+sentence: Index tiers list this product's admitted words and expose word drift consistently.
+entry: [cli]
+evidence:
+  action: "Drive the `self-index-tiers` scenario against the checkout's built verilex or shipped scripts."
+  observation: "tier 1 lists item-added, item-listed, store-opened; tier 2 shows item-stored active; tier 3 shows admitted apple; tier 2 and tier 3 agree on drift-suspect after editing item-stored and clear drift after restoration; tally-b lists no active claims and item-stored dormant."
+defects:
+  index-hide-drift: {CANARY_DEFECT: index-hide-drift}
+  index-no-active: {CANARY_DEFECT: index-no-active}
+sources:
+  - ref: verify-verilex/features/self.md#self-index-tiers
+    prose: 971eedfe802e
+    requirements:
+      - "`self-index-tiers`: Expect tier 1 lists item-added, item-listed, store-opened; tier 2 shows item-stored active; tier 3 shows admitted apple; tier 2 and tier 3 agree on drift-suspect after editing item-stored and clear drift after restoration; tally-b lists no active claims and item-stored dormant."

@@ -335,6 +335,25 @@ func TestEditingFeatureMapSectionMarksWordDriftSuspect(t *testing.T) {
 	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (2 admitted)\n")
 }
 
+// A word file's permissions decide how it runs, as its contents do, so changing them is drift.
+func TestChangingWordFilePermissionsMarksWordDriftSuspect(t *testing.T) {
+	root := product(t)
+	used(t, root, "store-open")
+	used(t, root, "store-open")
+	onboard(t, root, "store-open")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (1 admitted)\n")
+
+	run := filepath.Join(root, ".verilex", "words", "store-open", "run")
+	if err := os.Chmod(run, 0700); err != nil {
+		t.Fatal(err)
+	}
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 1 admitted drift-suspect; they always run\n  store-open: the word's files changed since onboarding\n")
+	if err := os.Chmod(run, 0755); err != nil {
+		t.Fatal(err)
+	}
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (1 admitted)\n")
+}
+
 // Rule: a word runs with more than its own directory: the helpers beside the word directories
 // and the frame. Onboarding judged the word with them, so a change to either leaves every word
 // drift-suspect until it is onboarded again. A feature-map line no claim cites, or config.yaml,

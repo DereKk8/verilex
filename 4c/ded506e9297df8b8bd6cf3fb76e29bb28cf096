@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "summary": "Word drift now hashes file permissions, and every frame step and word runs Python with a per-run bytecode directory, so no cache in the checkout ever runs.",
+  "files": [
+    {
+      "path": "internal/lifecycle/lifecycle.go",
+      "summary": "Adds each file's permission bits to the word digest that admission drift compares.",
+      "annotations": [
+        {
+          "newRange": [354, 355],
+          "summary": "WordDigest now writes each file's permission bits, in octal, between its name and its length.",
+          "rationale": "The proof stamp and the binding digest already hash permissions, so a chmod on a word file changed the stamp but left the word admitted. The format change makes every existing onboarding record drift-suspect, which is the safe direction. TestChangingWordFilePermissionsMarksWordDriftSuspect fails on main and passes here.",
+          "author": "fm/verilex-word-mode-drift"
+        },
+        {
+          "newRange": [378, 381],
+          "summary": "EachFile reads the mode with os.Stat, which follows symlinks the way fingerprint.Tree does.",
+          "rationale": "DirEntry.Info would report a symlink's own 0777 mode, so the digest would disagree with the stamp for a linked file. Directory permissions stay outside the word digest; only file bits were in scope.",
+          "author": "fm/verilex-word-mode-drift"
+        }
+      ]
+    },
+    {
+      "path": "internal/runner/runner.go",
+      "summary": "Sets PYTHONPYCACHEPREFIX for every frame step and word to the run's own pycache directory and removes it when the run or cleanup ends.",
+      "annotations": [
+        {
+          "newRange": [502, 505],
+          "summary": "environment forces PYTHONPYCACHEPREFIX to <run dir>/pycache, after the caller's Env changes, like the VERILEX_* values.",
+          "rationale": "Drift and stamps skip __pycache__, and Python loaded a planted unchecked-hash .pyc from the checkout, so a planted cache could turn a defect green. A cache prefix makes Python ignore in-tree caches. Chosen over hashing caches because Python writes them on every run, which would make words drift after each run. A fresh directory per run also avoids stale bytecode from a same-second, same-size edit. Limit: python -E or -I ignores the variable; docs/adding-verilex.md forbids both. Cost: Python code recompiles on every run.",
+          "author": "fm/verilex-word-mode-drift"
+        },
+        {
+          "newRange": [141, 141],
+          "summary": "Execute removes the run's pycache directory when it returns.",
+          "rationale": "Run directories are never pruned, so per-run bytecode would grow without bound. A kept instance's own processes may recreate the directory while they live; Python treats a missing prefix as a cache miss, so that only leaves files, never wrong code. proof.sh in the task data showed 0 pycache directories left after a bytecode-writing word.",
+          "author": "fm/verilex-word-mode-drift"
+        }
+      ]
+    },
+    {
+      "path": "tests/rules_test.go",
+      "summary": "Adds the planted-cache scenario and re-admits the word in the 'word permissions' stamp case.",
+      "annotations": [
+        {
+          "newRange": [305, 336],
+          "summary": "TestPlantedInterpreterCacheNeverRuns plants an always-pass tally_word cache and expects the drop-adds defect to stay red.",
+          "rationale": "On main the run exits 0 (false green) because Python loads the unchecked-hash cache; here it exits 1 with item-stored red. The test needs python3, which the tally fixture already needs.",
+          "author": "fm/verilex-word-mode-drift"
+        },
+        {
+          "newRange": [215, 215],
+          "summary": "The 'word permissions' case now re-admits item-stored after the chmod, like the other word-file cases.",
+          "rationale": "A chmod is now drift, so without re-admission the second identical run would run live instead of skipping.",
+          "author": "fm/verilex-word-mode-drift"
+        }
+      ]
+    }
+  ]
+}

@@ -138,6 +138,7 @@ func (e Refused) Unwrap() error { return e.Err }
 // or on the kept one the plan continues, and the steps the plan skips reuse their proof.
 func (r *Run) Execute(p Plan, opts Options) (Record, error) {
 	defer r.release()
+	defer os.RemoveAll(r.record.pycache())
 	r.record.Rerun, r.record.Ticket, r.keep = p.Rerun, opts.Ticket, opts.Keep
 	if p.kept == nil && p.Skipped() {
 		return r.reuse(p.entries, p.stamps)
@@ -451,6 +452,7 @@ func Cleanup(project dictionary.Project, record *Record, dir string) error {
 }
 
 func cleanup(project dictionary.Project, record *Record, dir string, env Env) error {
+	defer os.RemoveAll(record.pycache())
 	evidence := filepath.Join(dir, "frame-cleanup")
 	code, err := execute([]string{project.Frame("cleanup")}, evidence, environment(project, record, evidence, env), frameTimeout, "")
 	if err != nil {
@@ -497,9 +499,13 @@ func cleanup(project dictionary.Project, record *Record, dir string, env Env) er
 	return Save(dir, record)
 }
 
+// environment is what a frame step or word runs with. Python keeps its bytecode in the run's own
+// directory, never beside the code: neither drift nor a stamp reads interpreter caches, so a
+// cache in the checkout must never run in place of the code they fingerprint. A fresh directory
+// per run also never holds bytecode a same-second edit left stale.
 func environment(project dictionary.Project, record *Record, evidence string, change Env) []string {
 	instance, _ := json.Marshal(record.Instance)
-	values := map[string]string{"VERILEX_RUN": record.owner(), "VERILEX_PROJECT_ROOT": project.Root, "VERILEX_INSTANCE": string(instance), "VERILEX_EVIDENCE": evidence}
+	values := map[string]string{"VERILEX_RUN": record.owner(), "VERILEX_PROJECT_ROOT": project.Root, "VERILEX_INSTANCE": string(instance), "VERILEX_EVIDENCE": evidence, "PYTHONPYCACHEPREFIX": record.pycache()}
 	env := []string{}
 	for _, v := range os.Environ() {
 		key, _, _ := strings.Cut(v, "=")
@@ -512,11 +518,14 @@ func environment(project dictionary.Project, record *Record, evidence string, ch
 	for _, key := range slices.Sorted(maps.Keys(change.Set)) {
 		env = append(env, key+"="+change.Set[key])
 	}
-	for _, key := range []string{"VERILEX_RUN", "VERILEX_PROJECT_ROOT", "VERILEX_INSTANCE", "VERILEX_EVIDENCE"} {
+	for _, key := range []string{"VERILEX_RUN", "VERILEX_PROJECT_ROOT", "VERILEX_INSTANCE", "VERILEX_EVIDENCE", "PYTHONPYCACHEPREFIX"} {
 		env = append(env, key+"="+values[key])
 	}
 	return env
 }
+
+// pycache is where Python keeps the bytecode of a run's frame steps and words.
+func (r Record) pycache() string { return filepath.Join(r.Dir, "pycache") }
 
 // owner is the run that launched a record's instance; frame steps and words see it as VERILEX_RUN.
 func (r Record) owner() string {

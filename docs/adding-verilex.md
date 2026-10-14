@@ -24,7 +24,7 @@
 
 ## Environment
 
-Frame steps and words receive these environment variables: `VERILEX_RUN` (the id of the run that launched the instance, which a continuing run keeps; label everything you launch with it), `VERILEX_INSTANCE` (the launch's `instance`, as JSON; `null` if launch failed), `VERILEX_PROJECT_ROOT` and `VERILEX_EVIDENCE` (this step's evidence directory).
+Frame steps and words receive these environment variables: `VERILEX_RUN` (the id of the run that launched the instance, which a continuing run keeps; label everything you launch with it), `VERILEX_INSTANCE` (the launch's `instance`, as JSON; `null` if launch failed), `VERILEX_PROJECT_ROOT` and `VERILEX_EVIDENCE` (this step's evidence directory). They also run with `PYTHONPYCACHEPREFIX` set to a directory of the run's own, so Python never loads bytecode from `__pycache__` in the checkout, which neither drift nor a stamp fingerprints. Never start Python with `-E` or `-I` in a frame step or word: both ignore that variable.
 
 ## The word contract
 

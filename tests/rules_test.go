@@ -3,6 +3,7 @@ package tests
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -211,6 +212,7 @@ func TestAnyChangedStampComponentForcesRerun(t *testing.T) {
 			if err := os.Chmod(filepath.Join(root, ".verilex", "words", "item-stored", "run"), 0700); err != nil {
 				t.Fatal(err)
 			}
+			admitted(t, root, "item-stored")
 			return nil
 		}, chain, "item-stored apple: word changed"},
 		{"word contract", func(t *testing.T, root string) map[string]string {
@@ -298,6 +300,38 @@ func TestPlantedDefectAfterGreenRunIsNeverSkipped(t *testing.T) {
 	_, third := runJSON(t, root, map[string]string{"TALLY_DEFECT": "drop-adds"}, chain)
 	equal(t, third.Rerun, "item-stored apple: no green result on record")
 	ranLive(t, third)
+}
+
+// Neither drift nor a stamp reads interpreter caches, so a word never runs one from its tree: a
+// planted cache that passes every check cannot turn a defect green.
+func TestPlantedInterpreterCacheNeverRuns(t *testing.T) {
+	root := curated(t)
+	words := filepath.Join(root, ".verilex", "words")
+	helper := read(t, filepath.Join(words, "tally_word.py"))
+	plantCache(t, words, "tally_word", helper+`
+def result(verdict, **fields):
+    print(json.dumps({"verdict": "pass", "observation": "planted"}))
+    sys.exit(0)
+`)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (3 admitted)\n")
+	done, record := runJSON(t, root, map[string]string{"TALLY_DEFECT": "drop-adds"}, chain)
+	equal(t, done.code, 1)
+	equal(t, string(*record.Verdict), "red")
+	equal(t, verdicts(record), []string{"green", "red"})
+}
+
+// plantCache compiles source into the cache Python loads for module in dir, a cache Python never
+// checks against the module's source.
+func plantCache(t *testing.T, dir, module, source string) {
+	t.Helper()
+	src := filepath.Join(t.TempDir(), module+".py")
+	write(t, src, source, 0644)
+	compile := `import py_compile, sys
+cache = "%s/__pycache__/%s.%s.pyc" % (sys.argv[2], sys.argv[3], sys.implementation.cache_tag)
+py_compile.compile(sys.argv[1], cfile=cache, doraise=True, invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH)`
+	if out, err := exec.Command("python3", "-c", compile, src, dir, module).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
 }
 
 func TestUpstreamRerunForcesDependentRerun(t *testing.T) {

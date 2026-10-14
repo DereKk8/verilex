@@ -1,7 +1,10 @@
 package tests
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -333,6 +336,94 @@ func TestEditingFeatureMapSectionMarksWordDriftSuspect(t *testing.T) {
 
 	contains(t, onboard(t, root, "store-open").stdout, "onboarded store-open: claim "+pinOf(t, root, "store-opened")+" joins the vocabulary; caught dirty-open\n")
 	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (2 admitted)\n")
+}
+
+// A word file's permissions decide how it runs, as its contents do, so changing them is drift.
+func TestChangingWordFilePermissionsMarksWordDriftSuspect(t *testing.T) {
+	root := product(t)
+	used(t, root, "store-open")
+	used(t, root, "store-open")
+	onboard(t, root, "store-open")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (1 admitted)\n")
+
+	run := filepath.Join(root, ".verilex", "words", "store-open", "run")
+	if err := os.Chmod(run, 0700); err != nil {
+		t.Fatal(err)
+	}
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 1 of 1 admitted drift-suspect; they always run\n  store-open: the word's files changed since onboarding\n")
+	if err := os.Chmod(run, 0755); err != nil {
+		t.Fatal(err)
+	}
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (1 admitted)\n")
+}
+
+// A record an earlier verilex wrote hashed no permissions, so it cannot show that a word's
+// permissions are the ones judged. The word stays drift-suspect, and the reason says why rather
+// than claiming that files changed.
+func TestRecordWithoutPermissionDigestIsDriftSuspect(t *testing.T) {
+	root := product(t)
+	addWord(t, root, "store-glanced", `echo '{"verdict": "pass", "observation": "fine"}'`+"\n")
+	used(t, root, "store-open | store-glanced")
+	used(t, root, "store-open | store-glanced")
+	onboard(t, root, "store-open")
+	admit(t, root, "store-glanced")
+	project, err := dictionary.FindProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	words, err := lifecycle.LoadWords(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := grouping.Load(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, word := range words {
+		switch word.Name {
+		case "store-open":
+			older := g.Words[word.Name]
+			older.Digest = digestWithoutPermissions(t, word)
+			g.Set(word.Name, older)
+			if err = grouping.Save(project, g); err != nil {
+				t.Fatal(err)
+			}
+		case "store-glanced":
+			var a lifecycle.Admission
+			if err = json.Unmarshal([]byte(read(t, lifecycle.AdmissionPath(word))), &a); err != nil {
+				t.Fatal(err)
+			}
+			a.WordDigest = digestWithoutPermissions(t, word)
+			data, err := json.Marshal(a)
+			if err != nil {
+				t.Fatal(err)
+			}
+			write(t, lifecycle.AdmissionPath(word), string(data), 0644)
+		}
+	}
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 2 of 2 admitted drift-suspect; they always run\n"+
+		"  store-glanced: admitted before verilex hashed word permissions; propose it again\n"+
+		"  store-open: onboarded before verilex hashed word permissions; onboard it again\n")
+
+	run := filepath.Join(root, ".verilex", "words", "store-open", "run")
+	write(t, run, read(t, run)+"\n# changed\n", 0755)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 2 of 2 admitted drift-suspect; they always run\n"+
+		"  store-glanced: admitted before verilex hashed word permissions; propose it again\n"+
+		"  store-open: the word's files changed since onboarding\n")
+}
+
+// digestWithoutPermissions is the word digest as verilex stored it before it hashed permissions.
+func digestWithoutPermissions(t *testing.T, w dictionary.Word) string {
+	t.Helper()
+	h := sha256.New()
+	err := lifecycle.EachFile(w, func(rel string, _ fs.FileMode, data []byte) {
+		fmt.Fprintf(h, "%s\x00%d\x00", rel, len(data))
+		h.Write(data)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Rule: a word runs with more than its own directory: the helpers beside the word directories

@@ -419,7 +419,14 @@ func TestUncoveredRunbookDoesNotReadTheVerifySkill(t *testing.T) {
 					if command == "plan" {
 						prefix = "plan: "
 					}
-					equal(t, done.stdout, prefix+"inconclusive: no claim covers this change; fall back to the product verify skill\n")
+					got := done.stdout
+					if command == "run" {
+						// The usage ledger records the uncovered run and names it on a second line.
+						head, id, named := strings.Cut(got, "\nrun: ")
+						equal(t, named && id != "\n" && strings.Index(id, "\n") == len(id)-1, true)
+						got = head + "\n"
+					}
+					equal(t, got, prefix+"inconclusive: no claim covers this change; fall back to the product verify skill\n")
 				}
 				equal(t, done.stderr, "")
 			})

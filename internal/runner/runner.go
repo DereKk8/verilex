@@ -54,6 +54,9 @@ func New(project dictionary.Project, chain string, steps []dictionary.Step) (*Ru
 	return newRun(project, chain, steps, "")
 }
 
+// Snapshot returns the run record before execution so callers can record its start.
+func (r *Run) Snapshot() Record { return r.record }
+
 // Trial runs a chain live on a fresh instance outside the product's run history: its record and
 // evidence go to dir, env applies to every frame step and word, and nothing it proves enters the
 // ledger or counts as a use. Onboarding drives its trials through it.

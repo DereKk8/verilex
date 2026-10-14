@@ -291,6 +291,8 @@ func pinArgs(args []string, project, ticket string) ([]string, string, error) {
 		switch {
 		case arg == "--":
 			literal = true
+		case name == "--tokens" || name == "--estimated" || name == "--change":
+			return nil, sub, fmt.Errorf("%s is not available to the brain: usage data belongs to the caller", name)
 		case arg == "--keep" || name == "--continue":
 			return nil, sub, fmt.Errorf("%s is not available to the brain: each launcher run owns one instance and leaves none behind", name)
 		case arg == "--json":

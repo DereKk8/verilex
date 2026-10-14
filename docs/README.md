@@ -18,6 +18,7 @@ This index is also the navigation of the docs site: each `##` heading is a secti
 - [Proof stamps and skipping](skipping.md): what a stamp covers, when a chain is skipped, and the shared ledger.
 - [Plan](plan.md): the skip decision without a run, and claim plans for a diff.
 - [Continuing a kept instance](continue.md): `--keep` and `--continue`, and why a word that changes state never runs twice.
+- [Usage ledger](usage-ledger.md): durable run data, caller tokens, later misses and totals, separate from proof stamps.
 
 ## Claims and words
 

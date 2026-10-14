@@ -189,6 +189,10 @@ func TestKeptInstanceGoesToExactlyOneContinuingRun(t *testing.T) {
 	equal(t, won, 1)
 	equal(t, recordOf(t, root, kept.Run).ContinuedBy, winner.Run)
 	equal(t, stores(t, root), []string{})
+	totals := usageJSON(t, root, nil)["totals"].(map[string]any)
+	equal[any](t, totals["runs"], float64(2))
+	equal[any](t, totals["green"], float64(2))
+	equal[any](t, totals["unfinished"], float64(0))
 }
 
 // Liveness is the run's own process, not its record: once a run dies mid-chain, its instance is

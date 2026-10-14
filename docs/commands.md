@@ -33,6 +33,6 @@ Every command takes `--project <dir>` before the command name, the product check
 
 ## Exit codes
 
-For `run`: `0` green, `1` red, `2` inconclusive or refused.
+Exit codes: `0` green, `1` red, `2` inconclusive or refused.
 
-For `stale`: `0` nothing stale (no output), `1` some claims are unproven, `2` could not decide for at least one claim or refused. Exit `1` is not a red product verdict. Each line starts with `unproven` or `inconclusive`, then the claim and the first reason its planned chain cannot be skipped. An inconclusive claim does not hide other claims. See [the stale sweep](skipping.md#list-unproven-claims).
+`stale` differs: `0` nothing stale (no output), `1` some claims are unproven, `2` could not decide for at least one claim or refused. Exit `1` is not a red product verdict. Each line starts with `unproven` or `inconclusive`, then the claim and the first reason its planned chain cannot be skipped. An inconclusive claim does not hide other claims. See [the stale sweep](skipping.md#list-unproven-claims).

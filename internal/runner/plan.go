@@ -40,6 +40,9 @@ type Plan struct {
 	Skip []Skip `json:"steps"`
 	// Rerun is the first reason a step runs live; empty when every step is skipped.
 	Rerun string `json:"rerun,omitempty"`
+	// Unreadable is a ledger read failure. The run still falls back to live execution, but a
+	// read-only sweep cannot decide whether the proof stands without reading it.
+	Unreadable error `json:"-"`
 	// Ticket is the resolved run ticket, when one was given.
 	Ticket *ticket.Ticket `json:"ticket,omitempty"`
 
@@ -87,7 +90,7 @@ func Decide(project dictionary.Project, steps []dictionary.Step, opts Options) (
 	case opts.ForceLive != "":
 		p.Rerun = opts.ForceLive
 	default:
-		if p.entries, p.Rerun = ledger.At(LedgerDir(project)).Reuse(labels, claims, p.stamps); p.Rerun != "" {
+		if p.entries, p.Rerun, p.Unreadable = ledger.At(LedgerDir(project)).Reuse(labels, claims, p.stamps); p.Rerun != "" {
 			p.entries = nil
 		}
 	}

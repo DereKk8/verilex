@@ -41,7 +41,8 @@ func green(t *testing.T, run string) ledger.Entry {
 }
 
 func reuse(store ledger.Store, claim string) ([]ledger.Entry, string) {
-	return store.Reuse([]string{"item-stored apple"}, []string{claim}, []stamp.Stamp{step})
+	entries, why, _ := store.Reuse([]string{"item-stored apple"}, []string{claim}, []stamp.Stamp{step})
+	return entries, why
 }
 
 // Rule: only a green result whose run launched its own instance, whose claim version its stamp

@@ -26,6 +26,19 @@ Anything missing or unclear runs the chain live: a word without `inputs` or with
 
 A stamp covers only what it lists. A word that reads anything else (another file, a service, a tool's version) must declare it in `inputs` or `env`, or leave `inputs` out (or empty) so it is never skipped.
 
+## List unproven claims
+
+`verilex stale` checks every current grouped claim, including dormant claims and claims without a word. It uses the same word selection, argument binding and dependency order as a claim plan, then the exact skip decision shared by `plan` and `run`. Each claim is checked on its own planned chain, including providers. A missing or stale provider therefore lists dependent claims too, even when their own words have matching passes.
+
+```
+$ verilex stale
+unproven  item-listed: item-listed apple: word changed
+```
+
+The command prints one line per claim whose chain cannot be skipped, with the first reason: a changed stamp, expired or missing proof, or a provisional or drift-suspect word. `unproven` means the recorded proof cannot skip that chain now, not that the product failed. A chain that cannot be planned (for example missing arguments or a word), or an unreadable ledger, prints `inconclusive` instead. The sweep continues through other claims. It launches nothing and writes no state, ledger, stamps or usage records.
+
+Exit codes are `0` when nothing is stale (including an empty claim set, with no output), `1` when some claims are unproven, and `2` when at least one claim could not be decided or the command was refused. Exit `0` is not a new live product verdict. Without arguments for a provisional word, run a chain that binds them before the sweep can decide that claim. The sweep reads only declared stamp inputs. It cannot detect an undeclared dependency, or changes to external configuration or images that no stamp fingerprints. Use `plan` or `run` with `--changed` for those changes.
+
 ## The shared ledger
 
 The ledger is a directory of passes that every verilex instance pointed at it reads and writes. By default it is `~/.local/state/verilex/<project>/ledger/` (under `VERILEX_HOME`). With `VERILEX_LEDGER` set, it is `$VERILEX_LEDGER/<project>/`. Point stateless instances, each with a state home of its own, at one shared directory, and they keep the skip savings: a pass one instance records skips the same chain on every other. [Where the ledger lives](ledger-placement.md) records why the ledger is a directory and not a single in-repo file or a service, with measurements.

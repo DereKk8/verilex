@@ -50,6 +50,16 @@ expect ok prose-choose-a 'choose a parser'
 expect ok prose-take-a 'take a moment'
 expect ok prose-numbered-a '1. a smaller importer'
 expect ok redacted-in-resolution "lets go with B [option B: [redacted: internal url] holds the old parser, so rebuild the importer on it and ship one pull request]"
+expect refused coordinated-or "lets go with B or C [option B: $sentence]"
+expect ok coordinated-or-resolved "lets go with B or C [option B: $sentence] [option C: $sentence]"
+expect refused coordinated-and "option B and C [option B: $sentence]"
+expect refused coordinated-numbers "pick 2, 3 or 4 [option 2: $sentence] [option 3: $sentence]"
+expect ok coordinated-numbers-resolved "pick 2, 3 or 4 [option 2: $sentence] [option 3: $sentence] [option 4: $sentence]"
+expect ok coordinated-prose "go with B and then ship it [option B: $sentence]"
+expect ok option-article 'make this an option a user can enable'
+expect refused option-capital-a 'make this option A'
+expect ok wrapped-resolution "lets go with B [option B: rebuild the importer on the existing parser,"$'\n> '"keep the old file format readable, and ship it as one pull request]"
+expect refused wrapped-short-resolution "lets go with B [option B: rebuild the importer"$'\n> '"on the parser]"
 expect ok two-resolved "option A or option B [option A: $sentence] [option B: $sentence]"
 
 # corpus <dir>: count the comments there that the checker refuses for a label.

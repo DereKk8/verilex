@@ -7,26 +7,55 @@ awk '
   function fail(m) { print "refused: " m > "/dev/stderr"; bad = 1 }
   # A label ("option B", "item 43") means nothing to a reader who never saw the question. The quote must
   # carry [option B: sentence] or [item 43: sentence]; the author words stay unchanged (like [redacted: kind]).
-  # cs: the label must be a digit or an uppercase letter in the original text, so prose such as "take a moment" passes.
-  function label(s, o, re, kind, cs,   m, t, n, base, e, lbl, orig) {
+  # cs 1: after a verb the label must be a digit or an uppercase letter in the original text, so "take a
+  # moment" passes. cs 2: after "option" only a lowercase "a" is the article, so "an option a user can set" passes.
+  # co: further labels joined by "or", "and" or a comma ("go with B or C", "pick 2, 3 or 4") need a resolution too.
+  function label(s, o, re, kind, cs, ln, co,   base, m, tl, lbl, orig, end, found, t, n) {
     base = 0
     while (match(s, re)) {
-      m = substr(s, RSTART, RLENGTH); e = base + RSTART + RLENGTH - 1
-      base = e; s = substr(s, RSTART + RLENGTH)
-      n = length(m); gsub(/[^a-z0-9]+$/, "", m); e -= n - length(m)
-      n = split(m, t, /[^a-z0-9]+/); lbl = t[n]
-      orig = substr(o, e - length(lbl) + 1, length(lbl))
-      if (cs && orig ~ /^[a-z]$/) continue
-      need[kind " " lbl] = NR
+      m = substr(s, RSTART, RLENGTH); sub(/[^a-z0-9]+$/, "", m); tl = length(m)
+      n = split(m, t, /[^a-z0-9]+/); lbl = t[n]; end = base + RSTART - 1 + tl
+      orig = substr(o, end - length(lbl) + 1, length(lbl)); s = substr(s, RSTART + tl); base = end
+      found = !((cs == 1 && orig ~ /^[a-z]$/) || (cs == 2 && orig == "a"))
+      if (found) need[kind " " lbl] = ln
+      while (co && found && match(s, /^([[:space:]]*,[[:space:]]*(or[[:space:]]+|and[[:space:]]+)?|[[:space:]]+(or|and)[[:space:]]+)([a-z]|[0-9]+)([^a-z0-9_]|$)/)) {
+        m = substr(s, RSTART, RLENGTH); sub(/[^a-z0-9]+$/, "", m); tl = length(m)
+        n = split(m, t, /[^a-z0-9]+/); lbl = t[n]; end = base + RSTART - 1 + tl
+        orig = substr(o, end - length(lbl) + 1, length(lbl))
+        if (lbl !~ /^[0-9]+$/ && (kind == "item" || orig ~ /^[aiI]$/)) break
+        need[kind " " lbl] = ln; s = substr(s, RSTART + tl); base = end
+      }
     }
   }
-  function endquote(   k, p, msg) {
+  # endquote: one quote is its consecutive "> " lines, so a resolution may wrap across them.
+  function endquote(   k, p, msg, s, o, m, t, B, E, lines, n, i, ln) {
+    o = blk; s = tolower(o)
+    while (match(s, /\[(option|item)[[:space:]]+[a-z0-9]+[[:space:]]*:([^][]|\[[^]]*\])*\]/)) {
+      m = substr(s, RSTART + 1, RLENGTH - 2)
+      o = substr(o, 1, RSTART - 1) " " substr(o, RSTART + RLENGTH)
+      s = substr(s, 1, RSTART - 1) " " substr(s, RSTART + RLENGTH)
+      k = m; sub(/[[:space:]]*:.*/, "", k); split(k, t, /[[:space:]]+/); k = t[1] " " t[2]
+      sub(/^[^:]*:/, "", m); gsub(/\n>/, " ", m)
+      res[k] = split(m, t, /[[:space:]]+/) - (m ~ /^[[:space:]]/) - (m ~ /[[:space:]]$/)
+    }
+    B = "(^|[^a-z0-9_])"; E = "([^a-z0-9_]|$)"
+    n = split(s, lines, "\n"); split(o, olines, "\n")
+    for (i = 1; i <= n; i++) {
+      ln = blkstart + i - 1; s = lines[i]; o = olines[i]
+      label(s, o, B "option[[:space:]]+([a-z]|[0-9]+)" E, "option", 2, ln, 1)
+      label(s, o, B "(go|went|going)[[:space:]]+with[[:space:]]+([a-z]|[0-9]+)" E, "option", 1, ln, 1)
+      label(s, o, B "(pick|choose|chose|take)[[:space:]]+([a-z]|[0-9]+)" E, "option", 1, ln, 1)
+      label(s, o, "^>[[:space:]]*[a-z][[:space:]]*$", "option", 0, ln, 0)
+      label(s, o, "^>[[:space:]]*[0-9]+\\.[[:space:]]*[a-z]" E, "option", 1, ln, 0)
+      label(s, o, "^>[[:space:]]*[0-9]+\\.[[:space:]]*[a-z]([^a-z0-9_[:space:]]|[[:space:]]*$)", "option", 0, ln, 0)
+      label(s, o, B "item[[:space:]]+[0-9]+" E, "item", 0, ln, 1)
+    }
     for (k in need) {
       if (k in res && res[k] >= 8) continue
       split(k, p, " "); msg = (k in res) ? "its resolution has " res[k] " words, at least 8 are needed" : "it has no resolution"
       fail("line " need[k] ": the quote refers to " p[1] " " toupper(p[2]) " but " msg "; find what " toupper(p[2]) " meant in the author'\''s earlier words or the task instructions and append [" p[1] " " toupper(p[2]) ": <self-contained sentence of at least 8 words>] to the quote, leaving the author'\''s words unchanged")
     }
-    delete need; delete res
+    delete need; delete res; blk = ""
   }
   NR == 1 && $0 != "## Author prompts" { fail("first line must be exactly: ## Author prompts") }
   /^\*\*Why this PR exists:\*\*/ { inwhy = 1; seenwhy = 1; if (nq) fail("the Why this PR exists paragraph must come before the quotes") }
@@ -35,22 +64,8 @@ awk '
   !/^> / && inq { endquote(); inq = 0 }
   /^> / {
     nq++; inq = 1
-    o = $0; s = tolower(o)
-    while (match(s, /\[(option|item)[[:space:]]+[a-z0-9]+[[:space:]]*:([^][]|\[[^]]*\])*\]/)) {
-      m = substr(s, RSTART + 1, RLENGTH - 2)
-      o = substr(o, 1, RSTART - 1) " " substr(o, RSTART + RLENGTH)
-      s = substr(s, 1, RSTART - 1) " " substr(s, RSTART + RLENGTH)
-      k = m; sub(/[[:space:]]*:.*/, "", k); split(k, t, /[[:space:]]+/); k = t[1] " " t[2]
-      sub(/^[^:]*:/, "", m); res[k] = split(m, t, /[[:space:]]+/) - (m ~ /^[[:space:]]/) - (m ~ /[[:space:]]$/)
-    }
-    B = "(^|[^a-z0-9_])"; E = "([^a-z0-9_]|$)"
-    label(s, o, B "option[[:space:]]+([a-z]|[0-9]+)" E, "option", 0)
-    label(s, o, B "(go|went|going)[[:space:]]+with[[:space:]]+([a-z]|[0-9]+)" E, "option", 1)
-    label(s, o, B "(pick|choose|chose|take)[[:space:]]+([a-z]|[0-9]+)" E, "option", 1)
-    label(s, o, "^>[[:space:]]*[a-z][[:space:]]*$", "option", 0)
-    label(s, o, "^>[[:space:]]*[0-9]+\\.[[:space:]]*[a-z]" E, "option", 1)
-    label(s, o, "^>[[:space:]]*[0-9]+\\.[[:space:]]*[a-z]([^a-z0-9_[:space:]]|[[:space:]]*$)", "option", 0)
-    label(s, o, B "item[[:space:]]+[0-9]+" E, "item", 0)
+    if (blk == "") blkstart = NR
+    blk = blk (blk == "" ? "" : "\n") $0
     q = $0; n = 0; short = 0
     while (match(q, /(^|[[:space:]])[0-9]+\.[[:space:]]+[^0-9]*/)) {
       item = substr(q, RSTART, RLENGTH); n++

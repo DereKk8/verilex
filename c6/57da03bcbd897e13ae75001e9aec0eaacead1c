@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "summary": "Add a read-only stale proof sweep that uses the shared chain skip decision and document its distinct exits.",
+  "files": [
+    {
+      "path": "docs/commands.md",
+      "summary": "Keep shared command exit codes and describe stale as the exception.",
+      "annotations": [
+        {
+          "newRange": [37, 38],
+          "summary": "The exit-code section retains the shared rule and distinguishes stale's unproven result from a red product verdict.",
+          "rationale": "Zero-trust review found that the original edit removed the shared rule, so the final fix restores it. Full scripts/ci passed on c657da0. The final-head Verilex run reports this document as unmapped, not independently proven.",
+          "author": "fm/verilex-stale-sweep"
+        }
+      ]
+    },
+    {
+      "path": "internal/index/stale.go",
+      "summary": "Plan each grouped claim and report proof chains that cannot skip.",
+      "annotations": [
+        {
+          "newRange": [1, 50],
+          "summary": "Stale reuses claim ordering, admitted argument bindings and runner.Decide for each claim, including its providers.",
+          "rationale": "A selected word's matching pass is insufficient because every provider must also stand for the chain to skip. Eight CLI regressions and the live provider-edit proof pass. External dependencies absent from stamps remain outside the sweep.",
+          "author": "fm/verilex-stale-sweep"
+        }
+      ]
+    },
+    {
+      "path": "internal/ledger/store.go",
+      "summary": "Preserve ledger read errors without changing the existing live-run fallback.",
+      "annotations": [
+        {
+          "newRange": [84, 86],
+          "summary": "Reuse now returns the read error separately from its existing rerun reason.",
+          "rationale": "Runs can recover by executing live, but a read-only sweep cannot recover unreadable proof. Therefore the sweep reports inconclusive rather than unproven. TestStaleUnreadableProviderLedgerIsInconclusive covers upstream failures, and complete scripts/ci passes.",
+          "author": "fm/verilex-stale-sweep"
+        }
+      ]
+    },
+    {
+      "path": "internal/runner/plan.go",
+      "summary": "Carry ledger read failures alongside the unchanged skip decision.",
+      "annotations": [
+        {
+          "newRange": [43, 45],
+          "summary": "Plan.Unreadable lets the sweep distinguish unreadable proof without parsing a reason string or changing plan JSON.",
+          "rationale": "The live runner must retain its conservative fallback, so the error is carried separately instead of refusing every run. Complete scripts/ci and the trusted-driver canaries pass. Zero-trust external review remains pending.",
+          "author": "fm/verilex-stale-sweep"
+        }
+      ]
+    },
+    {
+      "path": "tests/stale_test.go",
+      "summary": "Drive the compiled CLI through stale, clean and undecidable proof cases.",
+      "annotations": [
+        {
+          "newRange": [1, 157],
+          "summary": "Eight CLI tests require literal output, distinct exits, provider propagation and unchanged product and state files.",
+          "rationale": "A read-only command must not gain apparent correctness by writing new proof. Every new test fails on main and passes here. Independent live driving also compares paths, modes, bytes and run listings around sweeps.",
+          "author": "fm/verilex-stale-sweep"
+        }
+      ]
+    }
+  ]
+}

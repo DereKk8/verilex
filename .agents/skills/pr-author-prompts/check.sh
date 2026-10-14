@@ -28,12 +28,14 @@ awk '
     }
   }
   # endquote: one quote is its consecutive "> " lines, so a resolution may wrap across them.
-  function endquote(   k, p, msg, s, o, m, t, B, E, lines, n, i, ln) {
+  function endquote(   k, p, msg, pad, s, o, m, t, B, E, lines, n, i, ln) {
     o = blk; s = tolower(o)
     while (match(s, /\[(option|item)[[:space:]]+[a-z0-9]+[[:space:]]*:([^][]|\[[^]]*\])*\]/)) {
       m = substr(s, RSTART + 1, RLENGTH - 2)
-      o = substr(o, 1, RSTART - 1) " " substr(o, RSTART + RLENGTH)
-      s = substr(s, 1, RSTART - 1) " " substr(s, RSTART + RLENGTH)
+      # keep the newlines, so a label after a wrapped resolution reports its own line
+      pad = substr(s, RSTART, RLENGTH); gsub(/[^\n]/, "", pad); pad = " " pad
+      o = substr(o, 1, RSTART - 1) pad substr(o, RSTART + RLENGTH)
+      s = substr(s, 1, RSTART - 1) pad substr(s, RSTART + RLENGTH)
       k = m; sub(/[[:space:]]*:.*/, "", k); split(k, t, /[[:space:]]+/); k = t[1] " " t[2]
       sub(/^[^:]*:/, "", m); gsub(/\n>/, " ", m)
       res[k] = split(m, t, /[[:space:]]+/) - (m ~ /^[[:space:]]/) - (m ~ /[[:space:]]$/)

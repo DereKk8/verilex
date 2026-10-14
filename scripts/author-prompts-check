@@ -58,6 +58,11 @@ expect ok redacted-in-resolution "option B [option B: [redacted: internal url] h
 expect ok wrapped-resolution "option B [option B: rebuild the importer on the existing parser,"$'\n> '"keep the old file format readable, and ship it as one pull request]"
 expect refused wrapped-short-resolution "option B [option B: rebuild the importer"$'\n> '"on the parser]"
 
+# The unresolved label after a wrapped resolution is reported on its own line.
+comment "option B [option B: rebuild the importer on the existing parser,"$'\n> '"keep the old file format readable, and ship it as one pull request]"$'\n> '"then option C"
+"$check" "$work/c.md" 2>"$work/err" || true
+grep -q '^refused: line 7: the quote refers to option C' "$work/err" || { echo "FAIL wrapped-line-number: want line 7 for option C"; cat "$work/err"; fails=$((fails + 1)); }
+
 # corpus <dir>: count the comments there that the checker refuses for a label.
 corpus() {
   local f out n=0

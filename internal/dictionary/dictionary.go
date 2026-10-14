@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"unicode"
 
 	"github.com/dlclark/regexp2"
 	"go.yaml.in/yaml/v3"
@@ -89,6 +90,29 @@ type Step struct {
 
 func (s Step) Label() string { return strings.Join(append([]string{s.Word.Name}, s.Argv...), " ") }
 
+// ChainWord quotes one chain token so a chain built from it parses back to the same token.
+func ChainWord(token string) string {
+	if token != "" && strings.IndexFunc(token, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r) && !strings.ContainsRune("-_./:@+,=%", r)
+	}) < 0 {
+		return token
+	}
+	return "'" + strings.ReplaceAll(token, "'", `'"'"'`) + "'"
+}
+
+// ChainStep writes one step so ParseChain reads back the same word and arguments. It refuses a
+// token holding '|': ParseChain splits steps on it before quotes apply, so no quoting carries it.
+func ChainStep(name string, argv []string) (string, error) {
+	tokens := make([]string, 0, len(argv)+1)
+	for _, token := range append([]string{name}, argv...) {
+		if strings.ContainsRune(token, '|') {
+			return "", fmt.Errorf("%s argument %s cannot be written in a chain, which splits steps on '|'", name, quote(token))
+		}
+		tokens = append(tokens, ChainWord(token))
+	}
+	return strings.Join(tokens, " "), nil
+}
+
 func Executable(path string) bool {
 	return syscall.Access(path, 1) == nil
 }
@@ -102,7 +126,7 @@ func FindProject(start string) (Project, error) {
 				return Project{}, err
 			}
 			name, ok := data["project"].(string)
-			if !ok || !regexp.MustCompile(`^[A-Za-z0-9._-]+$`).MatchString(name) {
+			if !ok || !regexp.MustCompile(`^[A-Za-z0-9._-]+$`).MatchString(name) || name == "." || name == ".." {
 				return Project{}, fmt.Errorf("%s: 'project' must be a plain name", config)
 			}
 			p := Project{Root: root, Name: name, SkillDirs: DefaultSkillDirs}

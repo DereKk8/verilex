@@ -940,3 +940,33 @@ func TestPlanRefusesAStaleAdmittedWordWithItsPin(t *testing.T) {
 	}
 	equal(t, verilex(t, root, nil, "onboard", "item-listed").stderr, stale("item-listed", v1, v2))
 }
+
+// Rule: a claim plan writes each argument the way the chain parser reads it, so an argument with a
+// space stays one argument. item-stored onboarded on 'big apple' plans, runs and is then skipped on it.
+func TestPlanKeepsAnArgumentWithASpaceWhole(t *testing.T) {
+	root := product(t)
+	onChain := "store-open | item-stored 'big apple'"
+	used(t, root, onChain)
+	used(t, root, onChain)
+	onboard(t, root, "store-open")
+	onboard(t, root, "item-stored")
+	plan := planClaims(t, root, "--claim", "item-added")
+	equal(t, plan.Chain, onChain)
+	equal(t, plan.Order, []string{"store-opened", "item-added"})
+	equal(t, plan.Run, []liveClaim{{Claim: "item-added", Word: "item-stored", Step: "item-stored big apple", Reason: "word admission changed"}})
+	done := verilex(t, root, nil, "run", "--json", "--claim", "item-added")
+	var record runner.Record
+	if err := json.Unmarshal([]byte(done.stdout), &record); err != nil || done.code != 0 {
+		t.Fatalf("run --claim item-added: exit %d %v\n%s%s", done.code, err, done.stdout, done.stderr)
+	}
+	equal(t, record.Chain, onChain)
+	equal(t, string(*record.Verdict), "green")
+	equal(t, record.Words[1].Args, []string{"big apple"})
+	plan = planClaims(t, root, "--claim", "item-added")
+	if len(plan.Skip) != 1 || plan.Skip[0].Claim != "item-added" || plan.Skip[0].ReliesOn != record.Run || len(plan.Run) != 0 {
+		t.Fatalf("plan after green: skip %+v run %+v", plan.Skip, plan.Run)
+	}
+	done = verilex(t, root, nil, "run", "--claim", "item-added")
+	equal(t, done.code, 0)
+	contains(t, done.stdout, "green: 2 green, skipped: stamps match run "+record.Run+"; run ")
+}

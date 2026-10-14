@@ -3,6 +3,7 @@ package ledger
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -33,10 +34,15 @@ import (
 // one: concurrent instances lose no pass and never mix two into one. Readers trust no file: a
 // pass stands only when it matches its digest, proved the step's claim version on an instance its
 // run launched, and its evidence still meets the evidence contract.
-type Store struct{ dir string }
+type Store struct {
+	dir string
+	// probed, when set, runs on the clock probe file before its time is read; tests move the
+	// storage clock away from the writer's with it.
+	probed func(path string)
+}
 
 // At opens the ledger kept in dir.
-func At(dir string) Store { return Store{dir} }
+func At(dir string) Store { return Store{dir: dir} }
 
 // passFormat changes whenever the meaning of a pass file changes, so older passes stop standing.
 const passFormat = "verilex-pass-1"
@@ -167,13 +173,22 @@ func (s Store) find(st stamp.Stamp, claim string, now time.Time) (Entry, string,
 // open reads the pass file whose name matched passName as m, and says why it is damaged: its
 // content does not hash to the digest in its name, is no pass, or names another stamp or slot.
 func (s Store) open(dir string, m []string) (pass, string) {
-	var p pass
 	data, err := os.ReadFile(filepath.Join(dir, m[0]))
 	if errors.Is(err, fs.ErrNotExist) {
 		// Recording dropped an expired pass after the directory was listed.
-		return p, "no green result on record"
+		return pass{}, "no green result on record"
 	}
-	if err != nil || digest(data) != m[2] || json.Unmarshal(data, &p) != nil || p.Format != passFormat || p.Stamp != m[1] || p.Slot != filepath.Base(dir) || !evidenceRef.MatchString(p.Evidence) {
+	if err != nil {
+		return pass{}, damaged
+	}
+	return parse(data, filepath.Base(dir), m)
+}
+
+// parse reads the content of a pass file in slot whose name matched passName as m, and says why
+// it is damaged.
+func parse(data []byte, slot string, m []string) (pass, string) {
+	var p pass
+	if digest(data) != m[2] || json.Unmarshal(data, &p) != nil || p.Format != passFormat || p.Stamp != m[1] || p.Slot != slot || !evidenceRef.MatchString(p.Evidence) {
 		return pass{}, damaged
 	}
 	return p, ""
@@ -239,7 +254,7 @@ func newer(p pass, q *pass) bool {
 }
 
 // Record adds a pass for each entry, keyed by the stamp slot it proved, and drops the expired
-// passes of each slot it writes. It refuses an entry that may not become a pass: one that is not
+// passes. It refuses an entry that may not become a pass: one that is not
 // green, has no stamp, was recorded on an instance its run did not launch, names a claim
 // version its stamp does not hold, or whose evidence misses the evidence contract. Passes
 // already recorded stay as they are: concurrent runs that prove one step record one pass each.
@@ -255,8 +270,8 @@ func (s Store) Record(entries map[string]Entry) error {
 		if err := s.add(slot, entries[slot], now); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", entries[slot].Label, err))
 		}
-		s.prune(slot, now)
 	}
+	s.prune()
 	return errors.Join(errs...)
 }
 
@@ -312,25 +327,165 @@ func holds(claim, fingerprint string) bool {
 	return ok && version != "" && strings.HasPrefix(fingerprint, version)
 }
 
-// prune drops the passes of a slot that are MaxAge old or older, then their evidence. A reader
-// that listed one first finds it gone and runs the step live. It leaves damaged files in place.
-func (s Store) prune(slot string, now time.Time) {
-	dir := filepath.Join(s.dir, "passes", slot)
-	files, _ := os.ReadDir(dir)
-	for _, file := range files {
+// strandedAge is how old a temporary entry must be before prune treats its writer as crashed.
+const strandedAge = 24 * time.Hour
+
+// stranded matches the temporary names verilex itself creates (os.CreateTemp and os.MkdirTemp
+// with the prefixes below), so prune never removes another tool's .tmp- entries.
+var stranded = regexp.MustCompile(`^\.tmp-(clock-)?[0-9]+$`)
+
+// maxPass is the largest pass file prune reads, far above the 1.4 KB a pass takes: a damaged or
+// planted larger file under a pass name is left unread and in place, so it costs no recording run.
+const maxPass = 1 << 20
+
+// prune drops every pass that is MaxAge old or older, in every slot, then its evidence, and the
+// temporary entries a crashed writer left. A reader that listed a pass first finds it gone and
+// runs the step live. It leaves damaged files in place.
+//
+// Age is judged on the storage's own clock, read from a file just created there, not on the
+// writer's: a writer whose clock runs ahead must not drop passes other instances wrote that are
+// still young. The age comes from each pass's record, never its file time, which a git checkout
+// or a copy resets. A call costs a directory listing per slot and a read of every pass. When the
+// storage clock cannot be read, nothing is pruned.
+//
+// Deletion stays inside the ledger's real directories: prune follows no symlink, not even when
+// the ledger itself, evidence/ or passes/ is one. Passes are dropped only when both evidence/ and
+// passes/ are real, since dropping a pass removes its evidence. Every listing, read and removal
+// goes through a directory prune opened and checked once, so a co-writer that swaps one for a
+// symlink mid-way cannot steer it outside.
+func (s Store) prune() {
+	root := openReal(os.Lstat, os.OpenRoot, s.dir)
+	if root == nil {
+		return
+	}
+	defer root.Close()
+	now, ok := s.storageNow(root)
+	if !ok {
+		return
+	}
+	sweep(root, now)
+	evidence := openReal(root.Lstat, root.OpenRoot, "evidence")
+	if evidence == nil {
+		return
+	}
+	defer evidence.Close()
+	sweep(evidence, now)
+	passes := openReal(root.Lstat, root.OpenRoot, "passes")
+	if passes == nil {
+		return
+	}
+	defer passes.Close()
+	for _, slot := range list(passes) {
+		if !slot.IsDir() {
+			continue
+		}
+		if dir := openReal(passes.Lstat, passes.OpenRoot, slot.Name()); dir != nil {
+			s.pruneSlot(dir, evidence, slot.Name(), now)
+			dir.Close()
+		}
+	}
+}
+
+func (s Store) pruneSlot(dir, evidence *os.Root, slot string, now time.Time) {
+	sweep(dir, now)
+	for _, file := range list(dir) {
 		m := passName.FindStringSubmatch(file.Name())
 		if m == nil {
 			continue
 		}
-		p, damage := s.open(dir, m)
+		info, err := dir.Lstat(m[0])
+		if err != nil || !info.Mode().IsRegular() || info.Size() > maxPass {
+			continue
+		}
+		p, damage := parse(readCapped(dir, m[0]), slot, m)
 		at, err := time.Parse(time.RFC3339, p.Recorded)
 		if damage != "" || err != nil || now.Sub(at) < MaxAge {
 			continue
 		}
-		if os.Remove(filepath.Join(dir, m[0])) == nil {
-			os.RemoveAll(filepath.Join(s.dir, filepath.FromSlash(p.Evidence)))
+		if dir.Remove(m[0]) == nil {
+			evidence.RemoveAll(strings.TrimPrefix(p.Evidence, "evidence/"))
 		}
 	}
+}
+
+// sweep removes the temporary entries verilex created in dir that are strandedAge old or older.
+func sweep(dir *os.Root, now time.Time) {
+	for _, file := range list(dir) {
+		if !stranded.MatchString(file.Name()) {
+			continue
+		}
+		if info, err := dir.Lstat(file.Name()); err == nil && now.Sub(info.ModTime()) >= strandedAge {
+			dir.RemoveAll(file.Name())
+		}
+	}
+}
+
+// openReal opens name as a root when it is a directory itself, not a symlink to one, and is still
+// the directory it checked once open, even if a co-writer swapped the path in between.
+func openReal(lstat func(string) (fs.FileInfo, error), open func(string) (*os.Root, error), name string) *os.Root {
+	checked, err := lstat(name)
+	if err != nil || !checked.IsDir() {
+		return nil
+	}
+	r, err := open(name)
+	if err != nil {
+		return nil
+	}
+	if opened, err := r.Stat("."); err != nil || !os.SameFile(checked, opened) {
+		r.Close()
+		return nil
+	}
+	return r
+}
+
+// list returns the entries of dir, or none when it cannot be read.
+func list(dir *os.Root) []fs.DirEntry {
+	f, err := dir.Open(".")
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	files, _ := f.ReadDir(-1)
+	return files
+}
+
+// readCapped reads name in dir, or returns nil when it cannot be read or holds more than maxPass.
+func readCapped(dir *os.Root, name string) []byte {
+	f, err := dir.Open(name)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxPass+1))
+	if err != nil || len(data) > maxPass {
+		return nil
+	}
+	return data
+}
+
+// storageNow reads the clock of the storage that holds the ledger, from the time of a file it
+// creates in root. The probe has a name of stranded's shape, so a later sweep removes one a
+// killed run stranded.
+func (s Store) storageNow(root *os.Root) (time.Time, bool) {
+	var n [4]byte
+	if _, err := rand.Read(n[:]); err != nil {
+		return time.Time{}, false
+	}
+	name := ".tmp-clock-" + strconv.FormatUint(uint64(binary.BigEndian.Uint32(n[:])), 10)
+	f, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer root.Remove(name)
+	defer f.Close()
+	if s.probed != nil {
+		s.probed(filepath.Join(s.dir, name))
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return time.Time{}, false
+	}
+	return info.ModTime(), true
 }
 
 // copyTree gives dest its own copy of the regular files and directories under src, linking

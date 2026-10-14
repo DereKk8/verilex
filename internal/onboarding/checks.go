@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"unicode"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/featuremap"
@@ -125,14 +124,4 @@ func git(dir string, args ...string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
-}
-
-// shellWord quotes one chain token so a chain built from it parses back to the same token.
-func shellWord(token string) string {
-	if token != "" && strings.IndexFunc(token, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsNumber(r) && !strings.ContainsRune("-_./:@+,=%", r)
-	}) < 0 {
-		return token
-	}
-	return "'" + strings.ReplaceAll(token, "'", `'"'"'`) + "'"
 }

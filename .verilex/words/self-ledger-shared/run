@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from self_word import (c, source, start, expect, doc, baseline, external, setup,
+from self_word import (c, source, start, expect, doc, plan, edit, baseline, external, setup,
                        json, shutil, subprocess)
 
 
@@ -20,7 +20,7 @@ def ledger_shared():
     records = doc("reader-runs", "runs", VERILEX_LEDGER=shared, VERILEX_HOME=reader_home)
     expect(len(records) == 1 and records[0]["cleanup"] == "none" and not c.stores(),
            "shared reuse launched or left a store")
-    alone = doc("alone", "plan", c.CHAIN, VERILEX_HOME=str(c.instance / "alone"))
+    alone = plan("alone", c.CHAIN, VERILEX_HOME=str(c.instance / "alone"))
     expect(all(not x["skipped"] for x in alone["steps"]), "isolated home reused shared passes")
     audit = setup("audit", [source / ".cursor/skills/verify-verilex/scripts/ledger-audit", shared + "/tally", writer_home, reader_home])
     expect("proven: 3  passes: 3  intact: 3  matched: 3  lost: 0  forged: 0  damaged: 0  unowned: 0" in audit.stdout,

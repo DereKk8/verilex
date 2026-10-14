@@ -8,122 +8,122 @@ words:
     digest: 691e04eaf79e0d93e3e3b1ed7e0017a18ca1e102dc21db344daf7a120a79d110
     binding:
       frame: 06161a8d5eb9e0e6efd2c8d02bfcd29fe362e4000df821b3acad5b11205f2a5a
-      shared: db87135fabeaf76acaed37314aea0682f278bdca9e1ff2f24d3b9a59712ef739
+      shared: 589552a333bc6b5b028f9bdb12c7950251e624116bdd4a197808a72bffff7749
     match: new
     defects:
       no-order-check: 343524a2139e
     uses:
       verilex:
-        - 1791934655-a44a5a762af9
-        - 1791934656-1ea933374f9e
+        - 1791937915-58a65918f6d5
+        - 1791937916-c4dab3d2d389
     chain: chain-order-refused
     claim_sources: 76a1da6d7e02892c10aa7f0e43ae01a380884a740b9516b73010ac2ad407a2df
-    date: "2026-10-13T23:38:59Z"
-    record: 1791934739-91ff87
-    seal: 23273c2b7417f0a9c882eb7fe2a2b558f20d4cfeb98ba7c834849dececf322af
+    date: "2026-10-14T00:33:20Z"
+    record: 1791938000-015fe1
+    seal: 73c4eb790169bbb04b78205c9e7ab7f36e1a9ed6032491e4afa64032f3d3863c
   chain-red:
     claim: chain-red@a5fa50654384
     entry: cli
     digest: 578e26aeccf92367d4a0f975b8468bdcbc832aff49465e57b6b64d8844a89a7a
     binding:
       frame: 06161a8d5eb9e0e6efd2c8d02bfcd29fe362e4000df821b3acad5b11205f2a5a
-      shared: db87135fabeaf76acaed37314aea0682f278bdca9e1ff2f24d3b9a59712ef739
+      shared: 589552a333bc6b5b028f9bdb12c7950251e624116bdd4a197808a72bffff7749
     match: new
     defects:
       fail-is-green: 8ed657e55bb9
     uses:
       verilex:
-        - 1791934657-7aa700fc41dd
-        - 1791934659-b3c59ce648be
+        - 1791937917-91d781e1846d
+        - 1791937919-92a135756449
     chain: chain-red
     claim_sources: ef067368308fe0f8654cada244d23f28e240d1f29bd72fd69e5ec670346b311d
-    date: "2026-10-13T23:39:03Z"
-    record: 1791934743-0bfa15
-    seal: ffcb67f19183d36ed2ecb594126644138088e91a80e6d16b514037757386fa10
+    date: "2026-10-14T00:33:23Z"
+    record: 1791938003-af34b0
+    seal: 751a9abfc6c227544b4c201c5e74cec7ecf4a0088337ab474fdfe3200adf8305
   chain-runs-live:
     claim: chain-runs-live@14f20a7ab1be
     entry: cli
     digest: e6826a572908692aad7c3e9d738adc1e0ba509a22381460db0dbb17e333aa175
     binding:
       frame: 06161a8d5eb9e0e6efd2c8d02bfcd29fe362e4000df821b3acad5b11205f2a5a
-      shared: db87135fabeaf76acaed37314aea0682f278bdca9e1ff2f24d3b9a59712ef739
+      shared: 589552a333bc6b5b028f9bdb12c7950251e624116bdd4a197808a72bffff7749
     match: new
     defects:
       skipped-cleanup: 3bc4e7142a5e
     uses:
       verilex:
-        - 1791934660-888de5a9fff7
-        - 1791934661-dc671c55b5ba
+        - 1791937920-4f7eb428a2d1
+        - 1791937921-9e0555621743
     chain: chain-runs-live
     claim_sources: 3c218fd4aeeb14a6058cd5765f8aa67abf09e5788df39c1bf2448cd7c4128113
-    date: "2026-10-13T23:39:06Z"
-    record: 1791934746-e139b7
-    seal: df814ce1066f852316c4f2a48860d369ea676065d07d0fb57ea2c1865279e515
+    date: "2026-10-14T00:33:26Z"
+    record: 1791938006-ea2f0c
+    seal: 37d5f7c20ca0f3439c4e958f215874dd44c1decc03eaef0be40641113ec1f8b2
   chain-skipped:
     claim: chain-skipped@629142197b43
     entry: cli
     digest: 097ac688be9ae2d43e900b1df4982745fa53460a9fa41f90904856f3560c6eda
     binding:
       frame: 06161a8d5eb9e0e6efd2c8d02bfcd29fe362e4000df821b3acad5b11205f2a5a
-      shared: db87135fabeaf76acaed37314aea0682f278bdca9e1ff2f24d3b9a59712ef739
+      shared: 589552a333bc6b5b028f9bdb12c7950251e624116bdd4a197808a72bffff7749
     match: new
     defects:
       never-skip: 9daab33e4c7c
     uses:
       verilex:
-        - 1791934663-921b5f3919b2
-        - 1791934666-b3959b43f364
+        - 1791937923-5f9e755f0221
+        - 1791937926-19eea03651e2
     chain: chain-skipped
     claim_sources: 8fba5a0fff2dd724f6183ee32c41ed66fc2717283b42fcca52d7c926bcc0c728
-    date: "2026-10-13T23:39:09Z"
-    record: 1791934749-7b309c
-    seal: 137357a44af2d254a7a598060f6a516fe1094684177cf56140d664ba0d261b80
+    date: "2026-10-14T00:33:29Z"
+    record: 1791938009-32fee7
+    seal: 69f4e6de4ecbe6a13a2a2e6c72d6a4570f93f051dd948837e18affad894a90aa
   self-agent-diff-request:
     claim: self-agent-diff-request@dd9743eddff1
     entry: cli
-    digest: 3cc0470107d92e151dad0890c5ccf360144c89d01aceb94e7e0956202fda27c1
+    digest: e06762e3dbe098c6552df41a64d17da7b7d8ff4121451843550dc9164eb6229f
     binding:
       frame: 06161a8d5eb9e0e6efd2c8d02bfcd29fe362e4000df821b3acad5b11205f2a5a
-      shared: db87135fabeaf76acaed37314aea0682f278bdca9e1ff2f24d3b9a59712ef739
+      shared: 589552a333bc6b5b028f9bdb12c7950251e624116bdd4a197808a72bffff7749
     match: new
     defects:
       agent-drop-diff: 9ee9223086eb
     uses:
       verilex:
-        - 1791934669-53a140d11402
-        - 1791934674-69115cedb016
+        - 1791937930-a5b306133498
+        - 1791937934-e1329fcde0c9
     chain: self-agent-diff-request
     claim_sources: 9956c311323ed68aae9fb49b1171ec407d633d4ef8ae0e99c5e60fc7c532a7cc
-    date: "2026-10-13T23:39:15Z"
-    record: 1791934755-c48d85
-    seal: 87f31aae910408b13e08f84fdf04ca1959b34ea0a0c4c1128aebf1c654857b09
+    date: "2026-10-14T00:33:35Z"
+    record: 1791938015-c66baf
+    seal: 8a922b5c7bdb454bac9fdc5c398c45a4e6b9508f12141c665738db05955de9fd
   self-ci-main-ref:
     claim: self-ci-main-ref@3daf1ede9f88
     entry: cli
-    digest: 7fdb375fb8455f583b967a5b0e917204f99d8397952d50d6e4358d5d8941bfd2
+    digest: a57ce5e0c4100f70559b6786939a5bec0ae074a8f5076aedacff647c3f53a31d
     binding:
       frame: 06161a8d5eb9e0e6efd2c8d02bfcd29fe362e4000df821b3acad5b11205f2a5a
-      shared: db87135fabeaf76acaed37314aea0682f278bdca9e1ff2f24d3b9a59712ef739
+      shared: 589552a333bc6b5b028f9bdb12c7950251e624116bdd4a197808a72bffff7749
     match: new
     defects:
       ci-trust-tag: 41fdf8c6d374
       guards-trust-tag: 75b7b96f734b
     uses:
       verilex:
-        - 1791934679-385ca24eadbc
-        - 1791934680-b090c9ea2647
+        - 1791937939-9245f7b8ed5a
+        - 1791937940-1d094be06ba7
     chain: self-ci-main-ref
     claim_sources: 3222995b00dad5a39f47cdbd6e1a6e6d275f13cd4bd888e0690437b8d8797023
-    date: "2026-10-13T23:39:21Z"
-    record: 1791934761-d99ce1
-    seal: c3f8d8ee8a173b781aca0bfd7c8c65bf03d4d4c42f540fbaceb81d32cb405094
+    date: "2026-10-14T00:33:42Z"
+    record: 1791938022-7216cd
+    seal: 318b425c06eeb7894bd47e9f9defc5ed5a0fbb57e93be290d58108b7f368ca66
   self-drift:
     claim: self-drift@98cd5b7a1cad
     entry: cli
-    digest: 94e843285cd54d0c7b5ae3c0a55083550f8c73c4b307e95e05328df1d3f0c5b7
+    digest: 232fec255aeeb495a13c1a79f7f7dc96fd656b1e2b6b175f13a9aadc9eb4973f
     binding:
       frame: 06161a8d5eb9e0e6efd2c8d02bfcd29fe362e4000df821b3acad5b11205f2a5a
-      shared: db87135fabeaf76acaed37314aea0682f278bdca9e1ff2f24d3b9a59712ef739
+      shared: 589552a333bc6b5b028f9bdb12c7950251e624116bdd4a197808a72bffff7749
     match: new
     defects:
       drift-ignore-defect: 88bf32cab35d
@@ -131,116 +131,116 @@ words:
       drift-ignore-word: 16023ae7006a
     uses:
       verilex:
-        - 1791934681-1c82790c86c6
-        - 1791934685-19217af5370c
+        - 1791937941-05e4a9ffa753
+        - 1791937945-1b978af52fe1
     chain: self-drift
     claim_sources: e6aa36362f76f73be40a454fcfc676103bc000a549f6dded471a8782cc7099d0
-    date: "2026-10-13T23:39:26Z"
-    record: 1791934766-42f36b
-    seal: 1f024b6c51a0eb2128e7542fc5e92c2591598fb39628de35f020bb3826aaca7a
+    date: "2026-10-14T00:33:46Z"
+    record: 1791938026-4ef4b3
+    seal: e526376d5f9c8acae1d052686d2fd12be61f8457f74e11d25a7dfc05f7ebe4df
   self-index-changed:
     claim: self-index-changed@14e45886e4ef
     entry: cli
-    digest: 28bf6649d781249a8ec6bc180808b2237379dca6015cb687dc123d492c2b53ea
+    digest: 9c1954d7fdda3d4547eecb625de02ee181809714571823f56e84371feeef45f8
     binding:
       frame: 06161a8d5eb9e0e6efd2c8d02bfcd29fe362e4000df821b3acad5b11205f2a5a
-      shared: db87135fabeaf76acaed37314aea0682f278bdca9e1ff2f24d3b9a59712ef739
+      shared: 589552a333bc6b5b028f9bdb12c7950251e624116bdd4a197808a72bffff7749
     match: new
     defects:
       index-no-change: 2c09358f91f2
     uses:
       verilex:
-        - 1791934689-6db6e3f97872
-        - 1791934692-f221b238c28a
+        - 1791937948-4be20b639108
+        - 1791937952-91a86db0b3de
     chain: self-index-changed
     claim_sources: a3761e86bf65fc25efee33579057444ce8c6d4740cbeb3426be467ed4ffdbcb0
-    date: "2026-10-13T23:39:35Z"
-    record: 1791934775-0523bd
-    seal: bfef658ccd483b87c644f59c5c2288e08d57a8cc2247fac0471af23640818f3f
+    date: "2026-10-14T00:33:54Z"
+    record: 1791938034-5d878c
+    seal: 055b98e38fb2823490db0f99e67a665ceab53df908fc21d952c33fbd210fcb13
   self-index-tiers:
     claim: self-index-tiers@ac98ed92d7fc
     entry: cli
-    digest: 16dd0f3e3070ee372219949015ae802286b81dbcd95f05023188d24e765b188d
+    digest: 394d56a22366360d2a4be2b73c9d2c405a2a9d2d2d57ade0eefe04f296806e4d
     binding:
       frame: 06161a8d5eb9e0e6efd2c8d02bfcd29fe362e4000df821b3acad5b11205f2a5a
-      shared: db87135fabeaf76acaed37314aea0682f278bdca9e1ff2f24d3b9a59712ef739
+      shared: 589552a333bc6b5b028f9bdb12c7950251e624116bdd4a197808a72bffff7749
     match: new
     defects:
       index-hide-drift: f1625374cd6f
       index-no-active: 4d8202cf18f7
     uses:
       verilex:
-        - 1791934696-97f701f16ecd
-        - 1791934700-9f6c59d21190
+        - 1791937955-efac32f7637f
+        - 1791937959-e30f7e86e771
     chain: self-index-tiers
     claim_sources: c0458ce7d7c7c444775c068325c4bdeb3776f58e6d96f18a62653abc5fa91aba
-    date: "2026-10-13T23:39:40Z"
-    record: 1791934780-679ec4
-    seal: 3aa082a8e5ac523ed5668863b572d6415d2e76e2e2e1a22524663e1ea8bb690a
+    date: "2026-10-14T00:34:00Z"
+    record: 1791938040-c4f6c9
+    seal: 31273526cf188b2025aad0ddff11adec291aee0e759df8bbcd2ba99853ee59d4
   self-ledger-integrity:
     claim: self-ledger-integrity@6fbccebde823
     entry: cli
-    digest: 44831a38159c74c9658eb7519b2768b97f3a04ee8f2a3e6c156db78b3733f3c4
+    digest: 120c35dd6067c36ff9edb83e596db000ecc29a9022f47f7ff8a3276c9728e136
     binding:
       frame: 06161a8d5eb9e0e6efd2c8d02bfcd29fe362e4000df821b3acad5b11205f2a5a
-      shared: db87135fabeaf76acaed37314aea0682f278bdca9e1ff2f24d3b9a59712ef739
+      shared: 589552a333bc6b5b028f9bdb12c7950251e624116bdd4a197808a72bffff7749
     match: new
     defects:
       ledger-trust-evidence: 714065b014c8
     uses:
       verilex:
-        - 1791934704-0af89374f04b
-        - 1791934708-3cf146fd7bc9
+        - 1791937962-c1506504ec6f
+        - 1791937967-e30821fddae1
     chain: self-ledger-integrity
     claim_sources: 43ea043689fd503927f740ab43183065558f672a4c7bdfd393cbd897c3aaf6fc
-    date: "2026-10-13T23:39:46Z"
-    record: 1791934786-4e7289
-    seal: 690336af7f80e809d33e5a17d88a49d67477a25e2469b8bbf7c4a8654522ee3c
+    date: "2026-10-14T00:34:06Z"
+    record: 1791938046-bd78c9
+    seal: f4ed351cd0f94b4e79beb7c4edc50b7ed2742966367a09e7d91f40f0afdd3f82
   self-ledger-shared:
     claim: self-ledger-shared@b0a08b1373c5
     entry: cli
-    digest: 6aa41e466e43d43e809f6a1ac96abccee56da8e82d87cb5bb88f660c745dabf4
+    digest: a895f4c2e2d4f69059c4ab60627fd52108e0f219023927a7a6d66ac6018bb0c2
     binding:
       frame: 06161a8d5eb9e0e6efd2c8d02bfcd29fe362e4000df821b3acad5b11205f2a5a
-      shared: db87135fabeaf76acaed37314aea0682f278bdca9e1ff2f24d3b9a59712ef739
+      shared: 589552a333bc6b5b028f9bdb12c7950251e624116bdd4a197808a72bffff7749
     match: new
     defects:
       ledger-not-shared: 4bf2faac9fbf
     uses:
       verilex:
-        - 1791934713-274d6c7ce886
-        - 1791934717-942ada4f013d
+        - 1791937971-a8129e1e7def
+        - 1791937975-ce26969f3af3
     chain: self-ledger-shared
     claim_sources: 5e892219b1296ba81727a2e48e03720fd331171048881d41a5cfd7aa8d9fa3fc
-    date: "2026-10-13T23:39:52Z"
-    record: 1791934792-e341e6
-    seal: f203a156f2402a5caa5266d71a4abf9a6646d6f0327b9ef083c032110a8306fc
+    date: "2026-10-14T00:34:12Z"
+    record: 1791938052-b68df6
+    seal: 20d080cbeea5446bd177f85499fbf12212c329fea198650bcf9a2f22bd343edf
   self-plan-binding:
     claim: self-plan-binding@b5bbc96b4a5a
     entry: cli
-    digest: e708400de67fbbf7e6e9c8225051899b1db73b201218c9c84c295ab9caab8f52
+    digest: b4ec04de1727dc70d01ba8719916a34d4e6cb0630b27af8eacd6f1135b73bbff
     binding:
       frame: 06161a8d5eb9e0e6efd2c8d02bfcd29fe362e4000df821b3acad5b11205f2a5a
-      shared: db87135fabeaf76acaed37314aea0682f278bdca9e1ff2f24d3b9a59712ef739
+      shared: 589552a333bc6b5b028f9bdb12c7950251e624116bdd4a197808a72bffff7749
     match: new
     defects:
       plan-no-binding: d5917bc2f5c1
     uses:
       verilex:
-        - 1791934722-9696dce7c11f
-        - 1791934727-4ce4113f3806
+        - 1791937979-fe9725ba3dd0
+        - 1791937983-44b683f3f844
     chain: self-plan-binding
     claim_sources: 4645a0ea9a2de87b323256e970ad59ed0c39e822b041d989143d199c37fa36d7
-    date: "2026-10-13T23:39:57Z"
-    record: 1791934797-e9366d
-    seal: 561ff0f54ee8433daee405b5d00bc6690a912638030a510585129c22687701bf
+    date: "2026-10-14T00:34:18Z"
+    record: 1791938058-935455
+    seal: 4081d700a4b7b0ef3cc082e9a5d6f38768a4a0e7b1e8051756e8ce17ee186183
   self-skill-session:
     claim: self-skill-session@69aeb6897d44
     entry: cli
-    digest: fdd43e80948f234241e5f79163332124fde74331e25af483c828827493a007c0
+    digest: e762cf6607628a12b316762102cbedf7906527ea19fe67614c9a78c02144b0fa
     binding:
       frame: 06161a8d5eb9e0e6efd2c8d02bfcd29fe362e4000df821b3acad5b11205f2a5a
-      shared: db87135fabeaf76acaed37314aea0682f278bdca9e1ff2f24d3b9a59712ef739
+      shared: 589552a333bc6b5b028f9bdb12c7950251e624116bdd4a197808a72bffff7749
     match: new
     defects:
       skill-cleanup-foreign: 106c907c2c9d
@@ -248,10 +248,10 @@ words:
       skill-unpinned-bin: d9c059eb4611
     uses:
       verilex:
-        - 1791934730-ab4c918d9b9d
-        - 1791934732-0fb1130a8fd2
+        - 1791937987-cf764dfff2ae
+        - 1791937988-5be735f59d1c
     chain: self-skill-session
     claim_sources: 030cb48c957077ed0c742b6a0d9b0841b61e618b4963edff1c472151f78722ca
-    date: "2026-10-13T23:40:03Z"
-    record: 1791934803-88519d
-    seal: 13d5aa0bc1a504826257c1cdba6563ca0006a3e5462edf670924a456e03fe471
+    date: "2026-10-14T00:34:23Z"
+    record: 1791938063-d5fd37
+    seal: 497348674b501ea788277f1ffeda8d94765a21417db4c9a9516e12352b958f34

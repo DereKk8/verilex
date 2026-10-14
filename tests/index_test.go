@@ -132,6 +132,10 @@ func TestWeakIntentMatchFindsNoClaim(t *testing.T) {
 	} {
 		equal(t, verilex(t, root, nil, "index", "--intent", intent).stdout, "intent: 0 claim(s) for '"+intent+"'\n")
 	}
+	// A known miss, not a real one: "skip works" found chain-skipped until the self-check claims
+	// put "skip" in several claims, so it no longer sets chain-skipped apart. Held here so a change
+	// that brings it back is visible.
+	equal(t, verilex(t, root, nil, "index", "--intent", "skip works").stdout, "intent: 0 claim(s) for 'skip works'\n")
 	for intent, claims := range map[string][]string{
 		"a chain out of order is refused":    {"chain-order-refused"},
 		"a red verdict for a broken product": {"chain-red"},

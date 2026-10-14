@@ -1,8 +1,10 @@
 """CLI scenarios for Verilex's self claims. Each word owns a fresh scratch product."""
 
+import contextlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 from pathlib import Path
 
@@ -54,8 +56,17 @@ def external(label, argv, cwd=None, clean_git=False, **extra):
             env.pop(key, None)
     env.update(VERILEX_HOME=str(c.instance / "home"), TALLY_STORES=str(c.instance / "stores"),
                XDG_CONFIG_HOME=str(c.instance / "config"), **extra)
-    done = subprocess.run([str(a) for a in argv], cwd=cwd or c.instance, env=env,
-                          capture_output=True, text=True, timeout=120, check=False)
+    # Its own process group, so a timeout stops everything it started, not just the first process.
+    proc = subprocess.Popen([str(a) for a in argv], cwd=cwd or c.instance, env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        stdout, stderr = proc.communicate(timeout=120)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.communicate()
+        raise
+    done = subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
     (c.evidence / f"{label}.txt").write_text(
         f"$ {' '.join(str(a) for a in argv)}\nexit {done.returncode}\n"
         f"--- stdout\n{done.stdout}--- stderr\n{done.stderr}")
@@ -67,3 +78,22 @@ def setup(label, argv, cwd=None, **env):
     if done.returncode:
         c.result("blocked", detail=f"{label}: exit {done.returncode}: {c.said(done)}")
     return done
+
+
+def plan(label, chain, **env):
+    """`plan --json` for chain, holding exactly one step per chain step, in order."""
+    value = doc(label, "plan", chain, **env)
+    want = [step.strip() for step in chain.split("|")]
+    got = [step.get("step") for step in value.get("steps") or []]
+    expect(got == want, f"{label}: plan steps {got}, not {want}")
+    return value
+
+
+def edit(path, old, new):
+    """Replace old with new in a fixture file, returning its previous text. A fixture that no longer holds
+    old exactly once cannot drive the scenario, so the word is blocked, never red."""
+    text = path.read_text()
+    if text.count(old) != 1:
+        c.result("blocked", detail=f"fixture {path.relative_to(c.instance)} no longer holds {old!r} exactly once")
+    path.write_text(text.replace(old, new))
+    return text

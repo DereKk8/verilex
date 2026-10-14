@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from self_word import (c, source, start, expect, doc, baseline, external, setup,
+from self_word import (c, source, start, expect, doc, plan, edit, baseline, external, setup,
                        json, shutil, subprocess)
 
 
@@ -33,7 +33,7 @@ def index_tiers():
     expect(not doc("restored-tier-2", "index", "item-added")["words"][0].get("drift_suspect"),
            "tier 2 kept a stale drift label after restoration")
     config = c.instance / "tally/.verilex/config.yaml"
-    config.write_text(config.read_text().replace("project: tally", "project: tally-b"))
+    edit(config, "project: tally\n", "project: tally-b\n")
     expect(doc("other-product", "index") == [], "another product inherited active claims")
     expect(doc("dormant", "index", "item-added")["words"][0]["state"] == "dormant",
            "another product did not mark item-stored dormant")

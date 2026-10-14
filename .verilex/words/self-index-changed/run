@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from self_word import (c, source, start, expect, doc, baseline, external, setup,
+from self_word import (c, source, start, expect, doc, plan, edit, baseline, external, setup,
                        json, shutil, subprocess)
 
 
@@ -20,9 +20,9 @@ def index_changed():
     expect([x["claim"] for x in changed["claims"]] == ["item-listed"] and bool(changed["chains"]),
            "changed word did not select item-listed and its chains")
     for i, chain in enumerate(changed["chains"]):
-        plan = doc(f"plan-{i}", "plan", chain["chain"])
+        planned = plan(f"plan-{i}", chain["chain"])
         expect(chain["run"] is True and not chain.get("refused")
-               and chain["reason"] == plan.get("rerun") and all(not s["skipped"] for s in plan["steps"]),
+               and chain["reason"] == planned.get("rerun") and all(not s["skipped"] for s in planned["steps"]),
                "index --changed disagrees with plan after word drift")
     expect(doc("unmapped", "index", "--changed", "unrelated.txt")["claims"] == [],
            "unrelated path selected claims")

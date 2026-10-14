@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import sys
+import tempfile
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -8,7 +9,7 @@ from self_word import (c, source, start, expect, doc, baseline, external, setup,
                        json, shutil, subprocess)
 
 
-def agent_diff_request():
+def agent_diff_request(temp):
     baseline()
     tally = c.instance / "tally"
     setup("git-init", ["git", "init", "-q"], tally, clean_git=True)
@@ -24,7 +25,7 @@ def agent_diff_request():
     flags = [c.instance / "bin/verilex-agent", "--project", tally, "--verilex", c.instance / "bin/verilex",
              "--skill", skill, "--brain", brain, "--harness", "stub", "--model", "stub", "--claim", "store-opened", "--diff", "HEAD"]
     omitted_home = c.instance / "omitted-home"
-    omitted = external("omitted-diff", [*flags, "--home", omitted_home], clean_git=True)
+    omitted = external("omitted-diff", [*flags, "--home", omitted_home], clean_git=True, TMPDIR=str(temp))
     if "sandbox" in omitted.stderr and "was not asked about" not in omitted.stderr:
         c.result("blocked", detail=c.said(omitted))
     # The refusal also names the claims the diff touches; the change itself must be among the gaps.
@@ -37,15 +38,24 @@ def agent_diff_request():
     (c.evidence / "omitted-run.json").write_text(json.dumps(record, indent=2))
     expect(record["verdict"] == "green" and record["requested"]["changed"] == [], "refusal did not observe a genuine green without the diff")
     brain.write_text("#!/bin/sh\nverilex run --changed bin/tally\n")
-    covered = external("covered-diff", [*flags, "--home", c.instance / "covered-home"], clean_git=True)
+    covered = external("covered-diff", [*flags, "--home", c.instance / "covered-home"], clean_git=True,
+                       TMPDIR=str(temp))
     expect(covered.returncode == 0, f"covered diff did not return green: {c.said(covered)}")
     doc = json.loads(covered.stdout)
     expect(doc["verdict"] == "green" and doc["requested"]["changed"] == ["bin/tally"] and not c.stores(), "covered run failed its second view")
     c.result("pass", observation="launcher refuses omitted bin/tally with exit 2 and empty stdout although its run record is green; a run requested with bin/tally returns green and leaves no store")
 
 
+temp = None
 try:
     start("self-agent-diff-request")
-    agent_diff_request()
+    # The launcher keeps its work directory under TMPDIR only when that path is at most 40 characters, and a
+    # timeout kill skips its own removal. So it gets a short directory this word owns and always removes:
+    # inside the instance when that path is short enough, else a fresh one under /tmp.
+    temp = Path(tempfile.mkdtemp(prefix="vt-", dir=c.instance if len(str(c.instance)) <= 26 else "/tmp"))
+    agent_diff_request(temp)
 except (OSError, subprocess.TimeoutExpired) as error:
     c.result("blocked", detail=str(error))
+finally:
+    if temp is not None:
+        shutil.rmtree(temp, ignore_errors=True)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The blocking checks. CI calls each step; run with no argument to run them all.
-# usage: scripts/ci [lint|mod|vuln|test|build|smoke|boundary|site|canary|canary-guards ...]
+# usage: scripts/ci [lint|mod|vuln|test|build|smoke|boundary|site|canary|canary-guards|author-prompts ...]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -10,7 +10,7 @@ lint() {
   go vet ./...
   go tool staticcheck ./...
   go tool actionlint
-  shellcheck .cursor/skills/verify-verilex/scripts/* .verilex/frame/* scripts/ci scripts/canary-guards scripts/smoke scripts/docs
+  shellcheck .cursor/skills/verify-verilex/scripts/* .verilex/frame/* scripts/ci scripts/canary-guards scripts/smoke scripts/docs scripts/author-prompts-check
   go vet ./agent/...
   go tool staticcheck ./agent/...
 }
@@ -113,13 +113,14 @@ canary() (
   return 1
 )
 
-steps=("$@"); [ $# -gt 0 ] || steps=(lint mod vuln test build smoke boundary site canary canary-guards)
+steps=("$@"); [ $# -gt 0 ] || steps=(lint mod vuln test build smoke boundary site canary canary-guards author-prompts)
 for step in "${steps[@]}"; do
   echo "== $step"
   case "$step" in
     lint|mod|vuln|build|smoke|boundary|site|canary) "$step" ;;
     test) test_ ;;
     canary-guards) scripts/canary-guards ;;
+    author-prompts) scripts/author-prompts-check ;;
     *) echo "unknown step: $step" >&2; exit 2 ;;
   esac
 done

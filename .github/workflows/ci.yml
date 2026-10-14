@@ -56,7 +56,7 @@ jobs:
           sudo apt-get install -y -q bubblewrap
           printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile bwrap /usr/bin/bwrap flags=(unconfined) {\n  userns,\n}\n' | sudo tee /etc/apparmor.d/bwrap
           sudo apparmor_parser -r /etc/apparmor.d/bwrap
-      - run: scripts/ci test build smoke canary canary-guards | tee ci.log
+      - run: scripts/ci test build smoke canary canary-guards author-prompts | tee ci.log
         shell: bash
       - name: coverage
         if: always()
@@ -73,7 +73,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: scripts/ci test build canary-guards
+      - run: scripts/ci test build canary-guards author-prompts
 
   # The only required check: passes only when every job above succeeded.
   ci:

@@ -51,6 +51,8 @@ When the latest prompt alone fails the test:
 - Keep a fragment quote only when it adds the author's voice on top of that paragraph; drop answer lists that only make sense next to their questions.
 - When the author's own words never say why, write only what they asked for and say plainly that they gave no reason. Do not invent one.
 
+A quote that names an option or item label ("option B", "Item 43, approved") means nothing to a reader who never saw the question. Find what the label meant in the author's earlier words or the task instructions, and append the resolution to that quote as `[option B: <self-contained sentence>]` or `[item 43: <self-contained sentence>]`, with at least 8 words. The label must match, and the author's words stay unchanged, as with `[redacted: kind]`. The checker catches only the explicit shapes "option X" (X one uppercase letter) and "item N" (N a number), and the labels listed right after them ("option B or C"). It does not catch other ways to point at a choice, so resolve each of those by hand too. Example: `> lets go with B [option B: rebuild the importer on the existing parser, keep the old file format readable, and ship it as one pull request]`.
+
 Always write the paragraph, even when the quotes are clear. Rewrite it on a later push when the PR's purpose has grown.
 
 ## 4. Sanitize
@@ -85,6 +87,6 @@ Post it only through this skill's script, run from the repository root. It runs 
 .agents/skills/pr-author-prompts/post.sh "$PR" prompts.md
 ```
 
-The checker refuses a missing or thin Why paragraph, one that does not start from the author, one that points at context the reader lacks, and quotes that are numbered answers to unseen questions. It cannot judge meaning, so passing it does not replace step 3. The script keeps one comment per PR: it edits the existing `## Author prompts` comment in place and creates one only when none exists. Never post or edit the comment with `gh` directly.
+The checker refuses a missing or thin Why paragraph, one that does not start from the author, one that points at context the reader lacks, quotes that are numbered answers to unseen questions, and quotes that name an "option X" or "item N" label without a matching resolution. It cannot judge meaning, so passing it does not replace step 3. The script keeps one comment per PR: it edits the existing `## Author prompts` comment in place and creates one only when none exists. Never post or edit the comment with `gh` directly.
 
 On a later push, add any new author prompts for that push, redo step 3, and edit the same comment.

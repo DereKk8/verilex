@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Regression tests for the pr-author-prompts check.sh label rule: a quote that names an option or item
+# the reader never sees is refused unless it carries a matching resolution of at least 8 words, and the
+# real Author prompts comments in scripts/testdata/author-prompts are never refused for a label.
+# usage: scripts/author-prompts-check
+set -euo pipefail
+cd "$(dirname "$0")/.."
+check=.agents/skills/pr-author-prompts/check.sh
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+fails=0
+why='**Why this PR exists:** The author wants the importer rebuilt on the existing parser so that old files stay readable, and asked for it to ship as one pull request that reviewers can check.'
+sentence='rebuild the importer on the existing parser, keep the old file format readable, and ship it as one pull request'
+# comment <quote>: a comment that passes every other rule, with the given quote.
+comment() { printf '## Author prompts\n\n%s\n\n> %s\n' "$why" "$1" > "$work/c.md"; }
+# expect <ok|refused> <name> <quote>
+expect() {
+  comment "$3"
+  if "$check" "$work/c.md" 2>"$work/err"; then got=ok; else got=refused; fi
+  [ "$got" = "$1" ] && return
+  echo "FAIL $2: wanted $1, got $got"; cat "$work/err"; fails=$((fails + 1))
+}
+check="$PWD/$check"
+
+expect ok plain-quote 'make the importer faster'
+expect refused option-upper 'Option C please'
+expect refused options-plural 'options B and C'
+expect refused item-approved 'Item 40, approved for fixing now: "Yes".'
+expect refused item-bare 'Item 43, approved: "Yes".'
+expect refused items-plural 'items 4, 5 and 6'
+expect refused option-any-letter 'option F'
+expect refused option-after-prose 'lets go with option B'
+expect ok option-resolved "option B [option B: $sentence]"
+expect ok option-f-resolved "option F [option F: $sentence]"
+expect ok item-resolved "Item 43, approved: \"Yes\". [item 43: $sentence]"
+expect ok item-resolved-uppercase "item 40 yes [Item 40: $sentence]"
+expect ok verb-form-resolved "lets go with B [option B: $sentence]"
+expect refused wrong-label "option B [option C: $sentence]"
+expect refused wrong-kind "option B [item B: $sentence]"
+expect refused short-resolution 'option B [option B: use the old parser please]'
+expect refused one-of-two-resolved "option A or option B [option A: $sentence]"
+expect ok two-resolved "option A or option B [option A: $sentence] [option B: $sentence]"
+expect refused coordinated-or "option B or C [option B: $sentence]"
+expect ok coordinated-or-resolved "option B or C [option B: $sentence] [option C: $sentence]"
+expect refused coordinated-or-i "option B or I [option B: $sentence]"
+expect refused coordinated-and "options B and C [option B: $sentence]"
+expect ok coordinated-and-resolved "options B and C [option B: $sentence] [option C: $sentence]"
+expect refused coordinated-items "items 4, 5 and 6 [item 4: $sentence] [item 5: $sentence]"
+expect ok coordinated-items-resolved "items 4, 5 and 6 [item 4: $sentence] [item 5: $sentence] [item 6: $sentence]"
+expect ok prose-option-article 'an option a user can enable'
+expect ok prose-lowercase-option 'lets go with option a'
+expect ok prose-option-number 'option 10 is slower'
+expect ok prose-take 'take 2 minutes to check'
+expect ok prose-choose 'choose 2 workers'
+expect ok prose-go-with 'lets go with B'
+expect ok prose-bare-letter 'B'
+expect ok redacted-in-resolution "option B [option B: [redacted: internal url] holds the old parser, so rebuild the importer on it and ship one pull request]"
+expect ok wrapped-resolution "option B [option B: rebuild the importer on the existing parser,"$'\n> '"keep the old file format readable, and ship it as one pull request]"
+expect refused wrapped-short-resolution "option B [option B: rebuild the importer"$'\n> '"on the parser]"
+
+# The unresolved label after a wrapped resolution is reported on its own line.
+comment "option B [option B: rebuild the importer on the existing parser,"$'\n> '"keep the old file format readable, and ship it as one pull request]"$'\n> '"then option C"
+"$check" "$work/c.md" 2>"$work/err" || true
+grep -q '^refused: line 7: the quote refers to option C' "$work/err" || { echo "FAIL wrapped-line-number: want line 7 for option C"; cat "$work/err"; fails=$((fails + 1)); }
+
+# corpus <dir>: count the comments there that the checker refuses for a label.
+corpus() {
+  local f out n=0
+  for f in "$1"/*.md; do
+    out="$("$check" "$f" 2>&1)" || true
+    if grep -q 'the quote refers to' <<<"$out"; then echo "FAIL $f: refused for a label" >&2; n=$((n + 1)); fi
+  done
+  echo "$n"
+}
+fails=$((fails + $(corpus scripts/testdata/author-prompts)))
+# The suite must turn red when a fixture is refused for a label.
+mkdir "$work/bad"; comment 'option B'; cp "$work/c.md" "$work/bad/bad.md"
+[ "$(corpus "$work/bad" 2>/dev/null)" = 1 ] || { echo "FAIL corpus check does not count a refused fixture"; fails=$((fails + 1)); }
+[ "$fails" -eq 0 ] || { echo "author-prompts-check: $fails failed"; exit 1; }
+echo "author-prompts-check: ok"

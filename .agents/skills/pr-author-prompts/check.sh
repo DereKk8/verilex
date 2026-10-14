@@ -7,22 +7,22 @@ awk '
   function fail(m) { print "refused: " m > "/dev/stderr"; bad = 1 }
   # A label ("option B", "item 43") means nothing to a reader who never saw the question. The quote must
   # carry [option B: sentence] or [item 43: sentence]; the author words stay unchanged (like [redacted: kind]).
-  # cs 1: after a verb the label must be a digit or an uppercase letter in the original text, so "take a
-  # moment" passes. cs 2: after "option" only a lowercase "a" is the article, so "an option a user can set" passes.
-  # co: further labels joined by "or", "and" or a comma ("go with B or C", "pick 2, 3 or 4") need a resolution too.
-  function label(s, o, re, kind, cs, ln, co,   base, m, tl, lbl, orig, end, found, t, n) {
+  # label: record each explicit "option X" (X one uppercase letter) and "item N" (N a number) in a line, and the
+  # further labels listed right after it ("option B or C", "items 4, 5 and 6"). The label is matched case-sensitively,
+  # so "an option a user can set" is prose. Any other way to refer to a choice the author must resolve by hand.
+  function label(s, o, re, kind, ln,   base, m, tl, lbl, orig, end, t, n) {
     base = 0
     while (match(s, re)) {
       m = substr(s, RSTART, RLENGTH); sub(/[^a-z0-9]+$/, "", m); tl = length(m)
       n = split(m, t, /[^a-z0-9]+/); lbl = t[n]; end = base + RSTART - 1 + tl
       orig = substr(o, end - length(lbl) + 1, length(lbl)); s = substr(s, RSTART + tl); base = end
-      found = !((cs == 1 && orig ~ /^[a-z]$/) || (cs == 2 && orig == "a"))
-      if (found) need[kind " " lbl] = ln
-      while (co && found && match(s, /^([[:space:]]*,[[:space:]]*(or[[:space:]]+|and[[:space:]]+)?|[[:space:]]+(or|and)[[:space:]]+)([a-z]|[0-9]+)([^a-z0-9_]|$)/)) {
+      if (kind == "option" && orig !~ /^[A-Z]$/) continue
+      need[kind " " lbl] = ln
+      while (match(s, /^([[:space:]]*,[[:space:]]*(or[[:space:]]+|and[[:space:]]+)?|[[:space:]]+(or|and)[[:space:]]+)([a-z]|[0-9]+)([^a-z0-9_]|$)/)) {
         m = substr(s, RSTART, RLENGTH); sub(/[^a-z0-9]+$/, "", m); tl = length(m)
         n = split(m, t, /[^a-z0-9]+/); lbl = t[n]; end = base + RSTART - 1 + tl
         orig = substr(o, end - length(lbl) + 1, length(lbl))
-        if (lbl !~ /^[0-9]+$/ && (kind == "item" || orig ~ /^[aiI]$/)) break
+        if (kind == "option" ? orig !~ /^[A-Z]$/ : lbl !~ /^[0-9]+$/) break
         need[kind " " lbl] = ln; s = substr(s, RSTART + tl); base = end
       }
     }
@@ -42,13 +42,8 @@ awk '
     n = split(s, lines, "\n"); split(o, olines, "\n")
     for (i = 1; i <= n; i++) {
       ln = blkstart + i - 1; s = lines[i]; o = olines[i]
-      label(s, o, B "option[[:space:]]+([a-z]|[0-9]+)" E, "option", 2, ln, 1)
-      label(s, o, B "(go|went|going)[[:space:]]+with[[:space:]]+([a-z]|[0-9]+)" E, "option", 1, ln, 1)
-      label(s, o, B "(pick|choose|chose|take)[[:space:]]+([a-z]|[0-9]+)" E, "option", 1, ln, 1)
-      label(s, o, "^>[[:space:]]*[a-z][[:space:]]*$", "option", 0, ln, 0)
-      label(s, o, "^>[[:space:]]*[0-9]+\\.[[:space:]]*[a-z]" E, "option", 1, ln, 0)
-      label(s, o, "^>[[:space:]]*[0-9]+\\.[[:space:]]*[a-z]([^a-z0-9_[:space:]]|[[:space:]]*$)", "option", 0, ln, 0)
-      label(s, o, B "item[[:space:]]+[0-9]+" E, "item", 0, ln, 1)
+      label(s, o, B "options?[[:space:]]+[a-z]" E, "option", ln)
+      label(s, o, B "items?[[:space:]]+[0-9]+" E, "item", ln)
     }
     for (k in need) {
       if (k in res && res[k] >= 8) continue

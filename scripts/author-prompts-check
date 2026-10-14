@@ -23,44 +23,40 @@ expect() {
 check="$PWD/$check"
 
 expect ok plain-quote 'make the importer faster'
-expect refused option-go-with 'lets go with B'
+expect refused option-upper 'Option C please'
+expect refused options-plural 'options B and C'
 expect refused item-approved 'Item 40, approved for fixing now: "Yes".'
 expect refused item-bare 'Item 43, approved: "Yes".'
-expect refused option-word 'Option C please'
-expect refused pick-letter 'ok pick A'
-expect refused bare-letter 'B'
-expect refused numbered-letter '2. b'
-expect ok option-resolved "lets go with B [option B: $sentence]"
-expect ok item-resolved "Item 43, approved: \"Yes\". [item 43: $sentence]"
-expect ok item-resolved-lowercase "item 40 yes [Item 40: $sentence]"
-expect refused wrong-label "lets go with B [option C: $sentence]"
-expect refused wrong-kind "lets go with B [item B: $sentence]"
-expect refused short-resolution 'lets go with B [option B: use the old parser please]'
-expect refused one-of-two-resolved "option A or option B [option A: $sentence]"
-expect refused option-letter-f 'option F'
-expect refused option-number 'option 10'
-expect refused go-with-f 'lets go with F'
-expect refused go-with-number 'lets go with 12'
-expect refused option-lowercase 'option b'
-expect refused bare-letter-f 'f'
+expect refused items-plural 'items 4, 5 and 6'
+expect refused option-any-letter 'option F'
+expect refused option-after-prose 'lets go with option B'
+expect ok option-resolved "option B [option B: $sentence]"
 expect ok option-f-resolved "option F [option F: $sentence]"
-expect ok option-10-resolved "option 10 [option 10: $sentence]"
-expect ok prose-go-with-a 'go with a smaller fix'
-expect ok prose-choose-a 'choose a parser'
-expect ok prose-take-a 'take a moment'
-expect ok prose-numbered-a '1. a smaller importer'
-expect ok redacted-in-resolution "lets go with B [option B: [redacted: internal url] holds the old parser, so rebuild the importer on it and ship one pull request]"
-expect refused coordinated-or "lets go with B or C [option B: $sentence]"
-expect ok coordinated-or-resolved "lets go with B or C [option B: $sentence] [option C: $sentence]"
-expect refused coordinated-and "option B and C [option B: $sentence]"
-expect refused coordinated-numbers "pick 2, 3 or 4 [option 2: $sentence] [option 3: $sentence]"
-expect ok coordinated-numbers-resolved "pick 2, 3 or 4 [option 2: $sentence] [option 3: $sentence] [option 4: $sentence]"
-expect ok coordinated-prose "go with B and then ship it [option B: $sentence]"
-expect ok option-article 'make this an option a user can enable'
-expect refused option-capital-a 'make this option A'
-expect ok wrapped-resolution "lets go with B [option B: rebuild the importer on the existing parser,"$'\n> '"keep the old file format readable, and ship it as one pull request]"
-expect refused wrapped-short-resolution "lets go with B [option B: rebuild the importer"$'\n> '"on the parser]"
+expect ok item-resolved "Item 43, approved: \"Yes\". [item 43: $sentence]"
+expect ok item-resolved-uppercase "item 40 yes [Item 40: $sentence]"
+expect ok verb-form-resolved "lets go with B [option B: $sentence]"
+expect refused wrong-label "option B [option C: $sentence]"
+expect refused wrong-kind "option B [item B: $sentence]"
+expect refused short-resolution 'option B [option B: use the old parser please]'
+expect refused one-of-two-resolved "option A or option B [option A: $sentence]"
 expect ok two-resolved "option A or option B [option A: $sentence] [option B: $sentence]"
+expect refused coordinated-or "option B or C [option B: $sentence]"
+expect ok coordinated-or-resolved "option B or C [option B: $sentence] [option C: $sentence]"
+expect refused coordinated-or-i "option B or I [option B: $sentence]"
+expect refused coordinated-and "options B and C [option B: $sentence]"
+expect ok coordinated-and-resolved "options B and C [option B: $sentence] [option C: $sentence]"
+expect refused coordinated-items "items 4, 5 and 6 [item 4: $sentence] [item 5: $sentence]"
+expect ok coordinated-items-resolved "items 4, 5 and 6 [item 4: $sentence] [item 5: $sentence] [item 6: $sentence]"
+expect ok prose-option-article 'an option a user can enable'
+expect ok prose-lowercase-option 'lets go with option a'
+expect ok prose-option-number 'option 10 is slower'
+expect ok prose-take 'take 2 minutes to check'
+expect ok prose-choose 'choose 2 workers'
+expect ok prose-go-with 'lets go with B'
+expect ok prose-bare-letter 'B'
+expect ok redacted-in-resolution "option B [option B: [redacted: internal url] holds the old parser, so rebuild the importer on it and ship one pull request]"
+expect ok wrapped-resolution "option B [option B: rebuild the importer on the existing parser,"$'\n> '"keep the old file format readable, and ship it as one pull request]"
+expect refused wrapped-short-resolution "option B [option B: rebuild the importer"$'\n> '"on the parser]"
 
 # corpus <dir>: count the comments there that the checker refuses for a label.
 corpus() {
@@ -73,7 +69,7 @@ corpus() {
 }
 fails=$((fails + $(corpus scripts/testdata/author-prompts)))
 # The suite must turn red when a fixture is refused for a label.
-mkdir "$work/bad"; comment 'lets go with B'; cp "$work/c.md" "$work/bad/bad.md"
+mkdir "$work/bad"; comment 'option B'; cp "$work/c.md" "$work/bad/bad.md"
 [ "$(corpus "$work/bad" 2>/dev/null)" = 1 ] || { echo "FAIL corpus check does not count a refused fixture"; fails=$((fails + 1)); }
 [ "$fails" -eq 0 ] || { echo "author-prompts-check: $fails failed"; exit 1; }
 echo "author-prompts-check: ok"

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Regression tests for the pr-author-prompts check.sh label rule: a quote that names an option or item
+# the reader never sees is refused unless it carries a matching resolution of at least 8 words, and the
+# real Author prompts comments in scripts/testdata/author-prompts are never refused for a label.
+# usage: scripts/author-prompts-check
+set -euo pipefail
+cd "$(dirname "$0")/.."
+check=.agents/skills/pr-author-prompts/check.sh
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+fails=0
+why='**Why this PR exists:** The author wants the importer rebuilt on the existing parser so that old files stay readable, and asked for it to ship as one pull request that reviewers can check.'
+sentence='rebuild the importer on the existing parser, keep the old file format readable, and ship it as one pull request'
+# comment <quote>: a comment that passes every other rule, with the given quote.
+comment() { printf '## Author prompts\n\n%s\n\n> %s\n' "$why" "$1" > "$work/c.md"; }
+# expect <ok|refused> <name> <quote>
+expect() {
+  comment "$3"
+  if "$check" "$work/c.md" 2>"$work/err"; then got=ok; else got=refused; fi
+  [ "$got" = "$1" ] && return
+  echo "FAIL $2: wanted $1, got $got"; cat "$work/err"; fails=$((fails + 1))
+}
+check="$PWD/$check"
+
+expect ok plain-quote 'make the importer faster'
+expect refused option-go-with 'lets go with B'
+expect refused item-approved 'Item 40, approved for fixing now: "Yes".'
+expect refused item-bare 'Item 43, approved: "Yes".'
+expect refused option-word 'Option C please'
+expect refused pick-letter 'ok pick a'
+expect refused bare-letter 'B'
+expect refused numbered-letter '2. b'
+expect ok option-resolved "lets go with B [option B: $sentence]"
+expect ok item-resolved "Item 43, approved: \"Yes\". [item 43: $sentence]"
+expect ok item-resolved-lowercase "item 40 yes [Item 40: $sentence]"
+expect refused wrong-label "lets go with B [option C: $sentence]"
+expect refused wrong-kind "lets go with B [item B: $sentence]"
+expect refused short-resolution 'lets go with B [option B: use the old parser please]'
+expect refused one-of-two-resolved "option A or option B [option A: $sentence]"
+expect ok two-resolved "option A or option B [option A: $sentence] [option B: $sentence]"
+
+for f in scripts/testdata/author-prompts/*.md; do
+  if "$check" "$f" 2>&1 | grep -q 'the quote refers to'; then echo "FAIL $f: refused for a label"; fails=$((fails + 1)); fi
+done
+[ "$fails" -eq 0 ] || { echo "author-prompts-check: $fails failed"; exit 1; }
+echo "author-prompts-check: ok"

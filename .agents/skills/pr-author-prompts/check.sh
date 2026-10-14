@@ -7,11 +7,17 @@ awk '
   function fail(m) { print "refused: " m > "/dev/stderr"; bad = 1 }
   # A label ("option B", "item 43") means nothing to a reader who never saw the question. The quote must
   # carry [option B: sentence] or [item 43: sentence]; the author words stay unchanged (like [redacted: kind]).
-  function label(s, re, kind,   m, t, n) {
+  # cs: the label must be a digit or an uppercase letter in the original text, so prose such as "take a moment" passes.
+  function label(s, o, re, kind, cs,   m, t, n, base, e, lbl, orig) {
+    base = 0
     while (match(s, re)) {
-      m = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
-      gsub(/[^a-z0-9]+$/, "", m); n = split(m, t, /[^a-z0-9]+/)
-      need[kind " " t[n]] = NR
+      m = substr(s, RSTART, RLENGTH); e = base + RSTART + RLENGTH - 1
+      base = e; s = substr(s, RSTART + RLENGTH)
+      n = length(m); gsub(/[^a-z0-9]+$/, "", m); e -= n - length(m)
+      n = split(m, t, /[^a-z0-9]+/); lbl = t[n]
+      orig = substr(o, e - length(lbl) + 1, length(lbl))
+      if (cs && orig ~ /^[a-z]$/) continue
+      need[kind " " lbl] = NR
     }
   }
   function endquote(   k, p, msg) {
@@ -29,19 +35,22 @@ awk '
   !/^> / && inq { endquote(); inq = 0 }
   /^> / {
     nq++; inq = 1
-    s = tolower($0)
-    while (match(s, /\[(option|item)[[:space:]]+[a-z0-9]+[[:space:]]*:[^]]*\]/)) {
+    o = $0; s = tolower(o)
+    while (match(s, /\[(option|item)[[:space:]]+[a-z0-9]+[[:space:]]*:([^][]|\[[^]]*\])*\]/)) {
       m = substr(s, RSTART + 1, RLENGTH - 2)
+      o = substr(o, 1, RSTART - 1) " " substr(o, RSTART + RLENGTH)
       s = substr(s, 1, RSTART - 1) " " substr(s, RSTART + RLENGTH)
       k = m; sub(/[[:space:]]*:.*/, "", k); split(k, t, /[[:space:]]+/); k = t[1] " " t[2]
       sub(/^[^:]*:/, "", m); res[k] = split(m, t, /[[:space:]]+/) - (m ~ /^[[:space:]]/) - (m ~ /[[:space:]]$/)
     }
-    label(s, "(^|[^a-z0-9_])option[[:space:]]+[a-e1-9]([^a-z0-9_]|$)", "option")
-    label(s, "(^|[^a-z0-9_])(go|went|going)[[:space:]]+with[[:space:]]+[a-e]([^a-z0-9_]|$)", "option")
-    label(s, "(^|[^a-z0-9_])(pick|choose|chose|take)[[:space:]]+[a-e]([^a-z0-9_]|$)", "option")
-    label(s, "^>[[:space:]]*[a-e][[:space:]]*$", "option")
-    label(s, "(^|[^a-z0-9_])item[[:space:]]+[0-9]+([^a-z0-9_]|$)", "item")
-    label(s, "^>[[:space:]]*[0-9]+\\.[[:space:]]*[a-e]([^a-z0-9_]|$)", "option")
+    B = "(^|[^a-z0-9_])"; E = "([^a-z0-9_]|$)"
+    label(s, o, B "option[[:space:]]+([a-z]|[0-9]+)" E, "option", 0)
+    label(s, o, B "(go|went|going)[[:space:]]+with[[:space:]]+([a-z]|[0-9]+)" E, "option", 1)
+    label(s, o, B "(pick|choose|chose|take)[[:space:]]+([a-z]|[0-9]+)" E, "option", 1)
+    label(s, o, "^>[[:space:]]*[a-z][[:space:]]*$", "option", 0)
+    label(s, o, "^>[[:space:]]*[0-9]+\\.[[:space:]]*[a-z]" E, "option", 1)
+    label(s, o, "^>[[:space:]]*[0-9]+\\.[[:space:]]*[a-z]([^a-z0-9_[:space:]]|[[:space:]]*$)", "option", 0)
+    label(s, o, B "item[[:space:]]+[0-9]+" E, "item", 0)
     q = $0; n = 0; short = 0
     while (match(q, /(^|[[:space:]])[0-9]+\.[[:space:]]+[^0-9]*/)) {
       item = substr(q, RSTART, RLENGTH); n++

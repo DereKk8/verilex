@@ -27,7 +27,7 @@ expect refused option-go-with 'lets go with B'
 expect refused item-approved 'Item 40, approved for fixing now: "Yes".'
 expect refused item-bare 'Item 43, approved: "Yes".'
 expect refused option-word 'Option C please'
-expect refused pick-letter 'ok pick a'
+expect refused pick-letter 'ok pick A'
 expect refused bare-letter 'B'
 expect refused numbered-letter '2. b'
 expect ok option-resolved "lets go with B [option B: $sentence]"
@@ -37,10 +37,33 @@ expect refused wrong-label "lets go with B [option C: $sentence]"
 expect refused wrong-kind "lets go with B [item B: $sentence]"
 expect refused short-resolution 'lets go with B [option B: use the old parser please]'
 expect refused one-of-two-resolved "option A or option B [option A: $sentence]"
+expect refused option-letter-f 'option F'
+expect refused option-number 'option 10'
+expect refused go-with-f 'lets go with F'
+expect refused go-with-number 'lets go with 12'
+expect refused option-lowercase 'option b'
+expect refused bare-letter-f 'f'
+expect ok option-f-resolved "option F [option F: $sentence]"
+expect ok option-10-resolved "option 10 [option 10: $sentence]"
+expect ok prose-go-with-a 'go with a smaller fix'
+expect ok prose-choose-a 'choose a parser'
+expect ok prose-take-a 'take a moment'
+expect ok prose-numbered-a '1. a smaller importer'
+expect ok redacted-in-resolution "lets go with B [option B: [redacted: internal url] holds the old parser, so rebuild the importer on it and ship one pull request]"
 expect ok two-resolved "option A or option B [option A: $sentence] [option B: $sentence]"
 
-for f in scripts/testdata/author-prompts/*.md; do
-  if "$check" "$f" 2>&1 | grep -q 'the quote refers to'; then echo "FAIL $f: refused for a label"; fails=$((fails + 1)); fi
-done
+# corpus <dir>: count the comments there that the checker refuses for a label.
+corpus() {
+  local f out n=0
+  for f in "$1"/*.md; do
+    out="$("$check" "$f" 2>&1)" || true
+    if grep -q 'the quote refers to' <<<"$out"; then echo "FAIL $f: refused for a label" >&2; n=$((n + 1)); fi
+  done
+  echo "$n"
+}
+fails=$((fails + $(corpus scripts/testdata/author-prompts)))
+# The suite must turn red when a fixture is refused for a label.
+mkdir "$work/bad"; comment 'lets go with B'; cp "$work/c.md" "$work/bad/bad.md"
+[ "$(corpus "$work/bad" 2>/dev/null)" = 1 ] || { echo "FAIL corpus check does not count a refused fixture"; fails=$((fails + 1)); }
 [ "$fails" -eq 0 ] || { echo "author-prompts-check: $fails failed"; exit 1; }
 echo "author-prompts-check: ok"

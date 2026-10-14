@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "summary": "Moves the canary driver to the PR 51 merge and onboards all 13 repository words again, so none is drift-suspect.",
+  "files": [
+    {
+      "path": "scripts/ci",
+      "summary": "Pins the build that grades the canary.",
+      "annotations": [
+        {
+          "newRange": [68, 68],
+          "summary": "canary_driver moves from 249b64d to a5ce6bc, the merge commit of PR 51 on main.",
+          "rationale": "The old driver computes the word digest without permissions, so words onboarded with the new digest would all be drift-suspect under it and the canary would fail. Verified: full scripts/ci passed on 54cbcb8 with green: 13 green and check: no drift (13 admitted).",
+          "author": "fm/verilex-reonboard-words"
+        }
+      ]
+    },
+    {
+      "path": ".verilex/frame/launch",
+      "summary": "Plants each claim's defects into a copied source tree.",
+      "annotations": [
+        {
+          "newRange": [19, 19],
+          "summary": "The never-skip defect now replaces the Reuse call that also assigns p.Unreadable, as PR 50 changed it.",
+          "rationale": "PR 50 made ledger.Reuse return an error too, so the old literal no longer matched and chain-skipped could not be gated. Verified: chain-skipped onboarded and caught never-skip on 54cbcb8.",
+          "author": "fm/verilex-reonboard-words"
+        },
+        {
+          "newRange": [25, 25],
+          "summary": "The drift-ignore-word defect now disables filesDrift's digest check instead of the line PR 51 removed.",
+          "rationale": "PR 51 replaced `if digest != d.Digest {` with filesDrift, so the old literal no longer matched and the self-drift onboarding trial was inconclusive (launch exited 2). `digest == stored` stays in the edit because Go refuses an unused variable. Verified: self-drift onboarded and caught drift-ignore-word; all 19 defect literals match main at 54cbcb8.",
+          "author": "fm/verilex-reonboard-words"
+        }
+      ]
+    },
+    {
+      "path": ".verilex/grouping.yaml",
+      "summary": "Holds the new sealed onboarding decisions for all 13 words.",
+      "annotations": [
+        {
+          "newRange": [8, 8],
+          "summary": "Only digests, frame fingerprints, uses, dates, record ids and seals change; claims, chains and matches stay as on main.",
+          "rationale": "Each word was onboarded from two solo fresh runs with a build of 54cbcb8, because uses from a full chain store a long prefix chain that plan --claim would then run. Verified: verilex check prints check: no drift (13 admitted).",
+          "author": "fm/verilex-reonboard-words"
+        }
+      ]
+    }
+  ]
+}

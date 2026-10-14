@@ -42,7 +42,7 @@ func claimSurface(project dictionary.Project, words []dictionary.Word, args opti
 		return 0
 	}
 	if plan.Inconclusive != "" {
-		return nothingCovered(plan, args, out, refuse)
+		return nothingCovered(project, plan, args, out, stderr, refuse)
 	}
 	steps, err := dictionary.ParseChain(plan.Chain, words)
 	if err != nil {
@@ -60,7 +60,9 @@ func claimSurface(project dictionary.Project, words []dictionary.Word, args opti
 	if err != nil {
 		return refuse(err)
 	}
+	args.capture.begin(run.Snapshot(), stderr)
 	record, runErr := run.Execute(decided, opts)
+	defer func() { args.capture.finish(record, stderr) }()
 	if refused := (runner.Refused{}); errors.As(runErr, &refused) {
 		return refuse(refused.Err)
 	}
@@ -186,9 +188,14 @@ func nextCommand(claim string, changed []string, fresh bool) string {
 
 // nothingCovered answers a run whose diff no claim covers. Green would claim the product works
 // with no evidence, so the verdict is inconclusive and nothing launches.
-func nothingCovered(plan index.ClaimPlan, args options, out io.Writer, refuse func(error) int) int {
+func nothingCovered(project dictionary.Project, plan index.ClaimPlan, args options, out, stderr io.Writer, refuse func(error) int) int {
+	id, err := args.capture.uncovered(project, args, plan.Inconclusive, stderr)
+	if err != nil {
+		return refuse(err)
+	}
 	if args.json {
 		value := struct {
+			Run       string          `json:"run"`
 			Format    string          `json:"format"`
 			Verdict   verdict.Verdict `json:"verdict"`
 			Reason    string          `json:"reason"`
@@ -197,12 +204,12 @@ func nothingCovered(plan index.ClaimPlan, args options, out io.Writer, refuse fu
 			runner.Gaps
 			Claims    []runner.ClaimReport `json:"claims"`
 			Uncovered []runner.Uncovered   `json:"uncovered"`
-		}{runner.ClaimRunFormat, verdict.Inconclusive, plan.Inconclusive, requested(args), plan.Touched, plan.Gaps, []runner.ClaimReport{}, []runner.Uncovered{}}
+		}{id, runner.ClaimRunFormat, verdict.Inconclusive, plan.Inconclusive, requested(args), plan.Touched, plan.Gaps, []runner.ClaimReport{}, []runner.Uncovered{}}
 		if err := encode(out, value); err != nil {
 			return refuse(err)
 		}
 	} else {
-		fmt.Fprintf(out, "inconclusive: %s\n", plan.Inconclusive)
+		fmt.Fprintf(out, "inconclusive: %s\nrun: %s\n", plan.Inconclusive, id)
 	}
 	return verdict.Inconclusive.ExitCode()
 }

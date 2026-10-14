@@ -1,0 +1,104 @@
+package tests
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func usageJSON(t *testing.T, root string, env map[string]string) map[string]any {
+	t.Helper()
+	got := verilex(t, root, env, "usage", "--json")
+	equal(t, got.code, 0)
+	var result map[string]any
+	if err := json.Unmarshal([]byte(got.stdout), &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestUsageRecordsVerdictsAndSurvivesCleanup(t *testing.T) {
+	root := product(t)
+	green := verilex(t, root, nil, "run", chain, "--tokens", "120", "--estimated", "--change", "local-change")
+	equal(t, green.code, 0)
+	id := lastRun(t, root).Run
+	equal(t, verilex(t, root, map[string]string{"TALLY_DEFECT": "drop-adds"}, "run", chain).code, 1)
+	equal(t, verilex(t, root, nil, "run", "--changed", "missing.go").code, 2)
+	equal(t, verilex(t, root, nil, "usage", id, "--miss", "review found a broken requirement").code, 0)
+	equal(t, verilex(t, root, nil, "usage", id, "--tokens", "150", "--estimated").code, 0)
+	if err := os.RemoveAll(filepath.Join(filepath.Dir(root), "state", "tally", "runs")); err != nil {
+		t.Fatal(err)
+	}
+	result := usageJSON(t, root, nil)
+	totals := result["totals"].(map[string]any)
+	equal[any](t, totals["runs"], float64(3))
+	equal[any](t, totals["green"], float64(1))
+	equal[any](t, totals["red"], float64(1))
+	equal[any](t, totals["inconclusive"], float64(1))
+	equal[any](t, totals["misses"], float64(1))
+	equal[any](t, totals["tokens"], float64(150))
+	equal[any](t, totals["tokens_unknown"], float64(2))
+	equal[any](t, totals["tokens_estimated"], float64(1))
+	entries := result["entries"].([]any)
+	found := false
+	for _, raw := range entries {
+		entry := raw.(map[string]any)
+		record := entry["record"].(map[string]any)
+		if record["run"] == id {
+			found = true
+			equal(t, record["project"], "tally")
+			equal(t, entry["change"], "local-change")
+			equal(t, entry["miss"].(map[string]any)["review"], "review found a broken requirement")
+			if entry["seconds"].(float64) <= 0 {
+				t.Fatal("missing measured runtime")
+			}
+			equal(t, len(record["words"].([]any)), 3)
+		}
+	}
+	equal(t, found, true)
+}
+
+func TestUsageConcurrentRunsAndInvalidInput(t *testing.T) {
+	root := product(t)
+	shared := t.TempDir()
+	env := map[string]string{"VERILEX_USAGE_LEDGER": shared}
+	var pending []*process
+	for i := 0; i < 4; i++ {
+		pending = append(pending, start(t, root, env, "run", chain))
+	}
+	for _, p := range pending {
+		equal(t, p.wait(t).code, 0)
+	}
+	totals := usageJSON(t, root, env)["totals"].(map[string]any)
+	equal[any](t, totals["runs"], float64(4))
+	equal[any](t, totals["green"], float64(4))
+	equal(t, verilex(t, root, env, "run", chain, "--tokens", "-1").code, 2)
+	equal(t, verilex(t, root, env, "usage", "../outside", "--miss", "review").code, 2)
+	equal(t, verilex(t, root, env, "usage", "absent", "--tokens", "10").code, 2)
+	equal[any](t, usageJSON(t, root, env)["totals"].(map[string]any)["runs"], float64(4))
+}
+
+func TestUsageNeverMarksRedOrInconclusiveAsMiss(t *testing.T) {
+	root := product(t)
+	equal(t, verilex(t, root, map[string]string{"TALLY_DEFECT": "drop-adds"}, "run", chain).code, 1)
+	id := lastRun(t, root).Run
+	got := verilex(t, root, nil, "usage", id, "--miss", "review")
+	equal(t, got.code, 2)
+	contains(t, got.stderr, "only a green run")
+	equal[any](t, usageJSON(t, root, nil)["totals"].(map[string]any)["misses"], float64(0))
+}
+
+func TestUsageAnnotationHonorsJSON(t *testing.T) {
+	root := product(t)
+	equal(t, verilex(t, root, nil, "run", chain).code, 0)
+	id := lastRun(t, root).Run
+	got := verilex(t, root, nil, "usage", id, "--tokens", "3", "--json")
+	equal(t, got.code, 0)
+	var result map[string]any
+	if err := json.Unmarshal([]byte(got.stdout), &result); err != nil {
+		t.Fatalf("not JSON: %q: %v", got.stdout, err)
+	}
+	equal[any](t, result, map[string]any{"run": id})
+	equal[any](t, usageJSON(t, root, nil)["totals"].(map[string]any)["tokens"], float64(3))
+}

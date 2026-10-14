@@ -39,6 +39,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Quiet output](output.md) - verdict first, failures only, evidence by reference.
 - [Run a chain](run.md) - `verilex run` live, refused, `--keep`, `--fresh`, `--json`, and stamp-based skipping.
 - [Plan](plan.md) - `verilex plan`, the same skip decision without running, including `--continue`, `--json`, and a claim plan for derived claims, named claims and a diff.
+- [Stale proof sweep](stale.md) - `verilex stale`: unproven claims, provider chains, inconclusive decisions, distinct exit codes and no state changes.
 - [Continue a kept instance](continue.md) - `verilex run --continue`: proven prefix skipped, refresh and doctor, refusals.
 - [Run tickets](tickets.md) - `verilex ticket`, `run --ticket` and `plan --ticket`: precedence, named profiles, refusals naming the field, and concurrent runs that share no ticket state.
 - [Words](words.md) - `verilex words`: the dictionary with lifecycle status.

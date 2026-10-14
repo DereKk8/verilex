@@ -56,7 +56,7 @@ func main() {
 			}
 			for _, s := range steps(i) {
 				t := time.Now()
-				if _, why := store.Reuse([]string{s.Components["word"]}, []string{""}, []stamp.Stamp{s}); why != "" {
+				if _, why, _ := store.Reuse([]string{s.Components["word"]}, []string{""}, []stamp.Stamp{s}); why != "" {
 					fmt.Fprintln(os.Stderr, why)
 				}
 				mu.Lock()

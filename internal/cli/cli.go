@@ -22,7 +22,7 @@ import (
 	"github.com/DereKk8/verilex/internal/verdict"
 )
 
-const usageText = "usage: verilex [-h] [--project PROJECT] {run,plan,ticket,words,claims,index,runs,usage,cleanup,new,onboard,propose,admit,gap,check} ...\n"
+const usageText = "usage: verilex [-h] [--project PROJECT] {run,plan,stale,ticket,words,claims,index,runs,usage,cleanup,new,onboard,propose,admit,gap,check} ...\n"
 
 type options struct {
 	project, command, operand, verdict, from, ticket, intent, sameAs string
@@ -117,6 +117,8 @@ func Main(argv []string, out, stderr io.Writer) int {
 		return cleanup(project, args.operand, out, refuse)
 	case "claims":
 		return claims(project, args.json, out, refuse)
+	case "stale":
+		return stale(project, out, refuse)
 	case "ticket":
 		args.ticket = args.operand
 	}
@@ -242,6 +244,7 @@ var optional = map[string][]string{"index": {"claim", "word"}, "usage": {"RUN"}}
 var commands = map[string]command{
 	"run":     {"chain", "[--keep] [--fresh] [--no-chain] [--continue RUN] [--ticket FILE] [--claim CLAIM ...] [--named CLAIM ...] [--changed CHANGE ...] [--tokens N] [--estimated] [--change REF] [--json] [chain]", "run a chain, or the chain planned from claims and a diff", []string{"--keep", "--fresh", "--no-chain", "--json", "--estimated"}, []string{"--continue", "--ticket", "--claim", "--named", "--changed", "--tokens", "--change"}},
 	"plan":    {"chain", "[--no-chain] [--continue RUN] [--ticket FILE] [--claim CLAIM ...] [--named CLAIM ...] [--changed CHANGE ...] [--json] [chain]", "show whether a chain would be skipped, or plan claims and a diff, running nothing", []string{"--no-chain", "--json"}, []string{"--continue", "--ticket", "--claim", "--named", "--changed"}},
+	"stale":   {"", "", "list claims whose planned proof would not be skipped, running and writing nothing", nil, nil},
 	"ticket":  {"file", "[--json] file", "validate a run ticket and resolve its profile and defaults", []string{"--json"}, nil},
 	"words":   {"", "", "list the dictionary and each word's lifecycle status", nil, nil},
 	"claims":  {"", "[--json]", "list each claim's current version, the words that prove it, and any review it needs", []string{"--json"}, nil},
@@ -257,7 +260,7 @@ var commands = map[string]command{
 	"check":   {"", "", "report admitted words whose files, claim or feature-map sections changed (drift-suspect)", nil, nil},
 }
 
-var order = []string{"run", "plan", "ticket", "words", "claims", "index", "runs", "usage", "cleanup", "new", "onboard", "propose", "admit", "gap", "check"}
+var order = []string{"run", "plan", "stale", "ticket", "words", "claims", "index", "runs", "usage", "cleanup", "new", "onboard", "propose", "admit", "gap", "check"}
 
 func parse(argv []string) (options, bool, error) {
 	cwd, err := os.Getwd()

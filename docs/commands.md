@@ -8,6 +8,7 @@ Every command takes `--project <dir>` before the command name, the product check
 | `verilex run [--claim <claim> ...] [--named <claim> ...] [--changed <change> ...] [--fresh] [--no-chain] [--json]` | Runs the chain from the claim plan. The verdict names any touched claim the run did not prove |
 | `verilex plan '<chain>' [--continue <run>] [--ticket <file>] [--json]` | Runs nothing; prints whether the chain would be skipped or run live, the run each skipped step relies on, and the first reason it must run live |
 | `verilex plan [--claim <claim> ...] [--named <claim> ...] [--changed <change> ...] [--no-chain] [--json]` | Plans claims and a diff: skip (with the fingerprints that prove it), run, chain order, and touched claims not picked. No `--claim` means prove nothing the diff touched broke |
+| `verilex stale` | Lists claims whose planned proof chain would not be skipped now, one line per claim with the reason. Runs nothing and changes no state |
 | `verilex run --continue <run> '<chain>' [--keep] [--json]` | Takes over the instance `<run>` kept: `refresh`, doctor, then runs only the words that instance does not already prove |
 | `verilex ticket <file> [--json]` | Validates a run ticket and prints each field with the level it came from |
 | `verilex words` | Lists the dictionary with each word's promise, claim, `requires`, `provides` and lifecycle status |
@@ -32,4 +33,6 @@ Every command takes `--project <dir>` before the command name, the product check
 
 ## Exit codes
 
-Exit codes: `0` green, `1` red, `2` inconclusive or refused.
+For `run`: `0` green, `1` red, `2` inconclusive or refused.
+
+For `stale`: `0` nothing stale (no output), `1` some claims are unproven, `2` could not decide for at least one claim or refused. Exit `1` is not a red product verdict. Each line starts with `unproven` or `inconclusive`, then the claim and the first reason its planned chain cannot be skipped. An inconclusive claim does not hide other claims. See [the stale sweep](skipping.md#list-unproven-claims).

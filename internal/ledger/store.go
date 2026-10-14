@@ -81,26 +81,29 @@ const damaged = "a pass on record is damaged: its content does not match its dig
 // drift-suspect). Otherwise it returns why the chain has to run.
 // Reuse is all or nothing: every run launches a fresh instance, so a step that runs needs the
 // effects of every step before it, and every step after it depends on its new result.
-func (s Store) Reuse(labels, claims []string, stamps []stamp.Stamp) ([]Entry, string) {
+// An unreadable ledger also returns an error: a run can fall back to live execution, while a
+// read-only caller can distinguish missing proof from an inability to read the proof.
+func (s Store) Reuse(labels, claims []string, stamps []stamp.Stamp) ([]Entry, string, error) {
 	now := time.Now()
 	entries := make([]Entry, 0, len(stamps))
 	for i, st := range stamps {
 		if st.Unclear != "" {
-			return nil, labels[i] + ": " + st.Unclear
+			return nil, labels[i] + ": " + st.Unclear, nil
 		}
 		entry, why, err := s.find(st, claims[i], now)
 		if err != nil {
-			return nil, "the ledger is unreadable: " + err.Error()
+			err = fmt.Errorf("the ledger is unreadable: %w", err)
+			return nil, err.Error(), err
 		}
 		if why == "" {
 			why = st.Hold
 		}
 		if why != "" {
-			return nil, labels[i] + ": " + why
+			return nil, labels[i] + ": " + why, nil
 		}
 		entries = append(entries, entry)
 	}
-	return entries, ""
+	return entries, "", nil
 }
 
 // Proof returns the newest pass that stands for a step stamped st which proved claim, or why

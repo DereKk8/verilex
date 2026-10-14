@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "summary": "Word drift now hashes file permissions and names records from before that change as the reason, and every frame step and word runs Python with a per-run bytecode directory, so no cache in the checkout ever runs.",
+  "files": [
+    {
+      "path": "internal/lifecycle/lifecycle.go",
+      "summary": "Adds each file permission bits to the word digest that drift compares, and names a pre-permission record as the drift reason.",
+      "annotations": [
+        {
+          "newRange": [
+            350,
+            358
+          ],
+          "summary": "wordDigest writes each file permission bits, in octal, between its name and its length; WordDigest always asks for them.",
+          "rationale": "The proof stamp and the binding digest already hash permissions, so a chmod on a word file changed the stamp but left the word admitted. The format change makes every existing onboarding record drift-suspect, which is the safe direction. TestChangingWordFilePermissionsMarksWordDriftSuspect fails on main and passes here.",
+          "author": "fm/verilex-word-mode-drift"
+        },
+        {
+          "newRange": [
+            399,
+            402
+          ],
+          "summary": "EachFile reads the mode with os.Stat, which follows symlinks the way fingerprint.Tree does.",
+          "rationale": "DirEntry.Info would report a symlink's own 0777 mode, so the digest would disagree with the stamp for a linked file. Directory permissions stay outside the word digest; only file bits were in scope.",
+          "author": "fm/verilex-word-mode-drift"
+        },
+        {
+          "newRange": [
+            363,
+            381
+          ],
+          "summary": "filesDrift reports a stored digest that equals the permission-free digest as a record from before permission hashing, not as changed files.",
+          "rationale": "Zero-trust review D1: after an upgrade every word read as changed files although nothing changed, which points operators to a file change that does not exist. The word stays drift-suspect, so it still always runs and no stale proof is reused. If the contents also changed, the permission-free digest differs and the reason stays changed files. TestRecordWithoutPermissionDigestIsDriftSuspect fails on 4cded50 and passes here; verilex check on this repository now prints the new reason for all 13 words.",
+          "author": "fm/verilex-word-mode-drift"
+        },
+        {
+          "newRange": [
+            160,
+            160
+          ],
+          "summary": "StatusOf and onboarded share filesDrift, each with its own reason text and its own re-admission step.",
+          "rationale": "A word without a claim is re-admitted with propose, a word with a claim with onboard, so each caller passes the matching instruction.",
+          "author": "fm/verilex-word-mode-drift"
+        }
+      ]
+    },
+    {
+      "path": "internal/runner/runner.go",
+      "summary": "Sets PYTHONPYCACHEPREFIX for every frame step and word to the run's own pycache directory and removes it when the run or cleanup ends.",
+      "annotations": [
+        {
+          "newRange": [
+            502,
+            505
+          ],
+          "summary": "environment forces PYTHONPYCACHEPREFIX to <run dir>/pycache, after the caller's Env changes, like the VERILEX_* values.",
+          "rationale": "Drift and stamps skip __pycache__, and Python loaded a planted unchecked-hash .pyc from the checkout, so a planted cache could turn a defect green. A cache prefix makes Python ignore in-tree caches. Chosen over hashing caches because Python writes them on every run, which would make words drift after each run. A fresh directory per run also avoids stale bytecode from a same-second, same-size edit. Limit: python -E or -I ignores the variable; docs/adding-verilex.md forbids both. Cost: Python code recompiles on every run.",
+          "author": "fm/verilex-word-mode-drift"
+        },
+        {
+          "newRange": [
+            141,
+            141
+          ],
+          "summary": "Execute removes the run's pycache directory when it returns.",
+          "rationale": "Run directories are never pruned, so per-run bytecode would grow without bound. A kept instance's own processes may recreate the directory while they live; Python treats a missing prefix as a cache miss, so that only leaves files, never wrong code. proof.sh in the task data showed 0 pycache directories left after a bytecode-writing word.",
+          "author": "fm/verilex-word-mode-drift"
+        }
+      ]
+    },
+    {
+      "path": "tests/rules_test.go",
+      "summary": "Adds the planted-cache scenario and re-admits the word in the 'word permissions' stamp case.",
+      "annotations": [
+        {
+          "newRange": [
+            305,
+            336
+          ],
+          "summary": "TestPlantedInterpreterCacheNeverRuns plants an always-pass tally_word cache and expects the drop-adds defect to stay red.",
+          "rationale": "On main the run exits 0 (false green) because Python loads the unchecked-hash cache; here it exits 1 with item-stored red. The test needs python3, which the tally fixture already needs.",
+          "author": "fm/verilex-word-mode-drift"
+        },
+        {
+          "newRange": [
+            215,
+            215
+          ],
+          "summary": "The 'word permissions' case now re-admits item-stored after the chmod, like the other word-file cases.",
+          "rationale": "A chmod is now drift, so without re-admission the second identical run would run live instead of skipping.",
+          "author": "fm/verilex-word-mode-drift"
+        }
+      ]
+    },
+    {
+      "path": "tests/curation_test.go",
+      "summary": "Proves permission drift and the older-record reason through verilex check.",
+      "annotations": [
+        {
+          "newRange": [
+            361,
+            427
+          ],
+          "summary": "TestRecordWithoutPermissionDigestIsDriftSuspect rewrites one decision and one admission to the permission-free digest an earlier build stored.",
+          "rationale": "digestWithoutPermissions reimplements the old format in the test, so the test does not trust the product code it checks. A later content edit must still read as changed files, which the second check proves.",
+          "author": "fm/verilex-word-mode-drift"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/features/check.md",
+      "summary": "Adds vx recipes for permission drift, a planted Python cache and records from an older build.",
+      "annotations": [
+        {
+          "newRange": [
+            34,
+            36
+          ],
+          "summary": "Three recipes drive permission drift, a planted unchecked-hash cache and an older-build onboarding through the CLI on tally.",
+          "rationale": "Zero-trust review ZT-ATTACK-7 asked for them. Each recipe ran on a verify-verilex session built from this tree, in this order after the baseline; evidence is in the task data directory (vv-evidence-round2). The older-build recipe pins 45bb4fc, the last main commit before permission hashing.",
+          "author": "fm/verilex-word-mode-drift"
+        }
+      ]
+    }
+  ]
+}

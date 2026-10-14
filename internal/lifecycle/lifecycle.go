@@ -157,12 +157,8 @@ func StatusOf(p dictionary.Project, w dictionary.Word) (Status, error) {
 		return Status{Word: w.Name, State: Provisional}, err
 	}
 	s := Status{Word: w.Name, State: Admitted}
-	digest, err := WordDigest(w)
-	if err != nil {
+	if err = s.filesDrift(w, a.WordDigest, "the word's files changed since admission", "admitted before verilex hashed word permissions; propose it again"); err != nil {
 		return s, err
-	}
-	if digest != a.WordDigest {
-		s.Drift = append(s.Drift, "the word's files changed since admission")
 	}
 	if err = s.bindingDrift(p, a.Binding, "admission", "propose it again"); err != nil {
 		return s, err
@@ -188,12 +184,8 @@ func onboarded(p dictionary.Project, w dictionary.Word) (Status, error) {
 		s.Drift = append(s.Drift, why+"; onboard it again")
 		return s, nil
 	}
-	digest, err := WordDigest(w)
-	if err != nil {
+	if err = s.filesDrift(w, d.Digest, "the word's files changed since onboarding", "onboarded before verilex hashed word permissions; onboard it again"); err != nil {
 		return s, err
-	}
-	if digest != d.Digest {
-		s.Drift = append(s.Drift, "the word's files changed since onboarding")
 	}
 	if err = s.bindingDrift(p, d.Binding, "onboarding", "onboard it again"); err != nil {
 		return s, err
@@ -350,12 +342,41 @@ func SourceRoot(p dictionary.Project, source dictionary.ClaimSource) (string, []
 // WordDigest hashes every file of a word's directory except its admission record: its name,
 // permissions and contents, as a proof stamp does.
 func WordDigest(w dictionary.Word) (string, error) {
+	return wordDigest(w, true)
+}
+
+// wordDigest hashes a word's files, with their permissions or, as verilex did before it hashed
+// them, without.
+func wordDigest(w dictionary.Word, perms bool) (string, error) {
 	h := sha256.New()
 	err := EachFile(w, func(rel string, perm fs.FileMode, data []byte) {
-		fmt.Fprintf(h, "%s\x00%o\x00%d\x00", rel, perm, len(data))
+		if perms {
+			fmt.Fprintf(h, "%s\x00%o\x00%d\x00", rel, perm, len(data))
+		} else {
+			fmt.Fprintf(h, "%s\x00%d\x00", rel, len(data))
+		}
 		h.Write(data)
 	})
 	return hex.EncodeToString(h.Sum(nil)), err
+}
+
+// filesDrift adds changed when w's files no longer match the digest a record stored. A digest an
+// earlier verilex stored without permissions adds older instead: the files may be unchanged, but
+// the record cannot show that their permissions are the ones judged.
+func (s *Status) filesDrift(w dictionary.Word, stored, changed, older string) error {
+	digest, err := WordDigest(w)
+	if err != nil || digest == stored {
+		return err
+	}
+	contents, err := wordDigest(w, false)
+	if err != nil {
+		return err
+	}
+	if contents == stored {
+		changed = older
+	}
+	s.Drift = append(s.Drift, changed)
+	return nil
 }
 
 // EachFile visits a word's files in lexical order, skipping its admission record and

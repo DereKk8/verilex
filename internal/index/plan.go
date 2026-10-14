@@ -287,7 +287,11 @@ func (ix Index) order(b binding, selected []string) (string, []string, error) {
 	claims := []string{}
 	seen := map[string]bool{}
 	for _, step := range ordered {
-		parts = append(parts, step.label())
+		part, err := dictionary.ChainStep(step.word.Name, step.argv)
+		if err != nil {
+			return "", nil, err
+		}
+		parts = append(parts, part)
 		if name := ix.claimName(step.word); name != "" && !seen[name] && b.proves(step.word.Name, step.argv) {
 			seen[name] = true
 			claims = append(claims, name)
@@ -302,7 +306,14 @@ type planned struct {
 	argv []string
 }
 
-func (s planned) label() string { return strings.Join(append([]string{s.word.Name}, s.argv...), " ") }
+// label is the step as a chain writes it, quoted, so steps whose arguments differ never share one.
+func (s planned) label() string {
+	tokens := []string{dictionary.ChainWord(s.word.Name)}
+	for _, arg := range s.argv {
+		tokens = append(tokens, dictionary.ChainWord(arg))
+	}
+	return strings.Join(tokens, " ")
+}
 
 func (ix Index) wordFor(claim string) (dictionary.Word, error) {
 	var found *dictionary.Word

@@ -143,3 +143,29 @@ exec "$REAL_GIT" "$@"
 	equal(t, hashed, false)
 	equal(t, entry["revision"] != nil, true)
 }
+
+func TestUsageCaptureRunsNoRepositoryFsmonitor(t *testing.T) {
+	root := product(t)
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root, "-c", "user.name=verilex", "-c", "user.email=verilex@example.com"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	write(t, filepath.Join(root, "tracked.txt"), "before\n", 0600)
+	git("add", ".")
+	git("commit", "-q", "-m", "fixture")
+	marker := filepath.Join(t.TempDir(), "fsmonitor-ran")
+	hook := filepath.Join(t.TempDir(), "fsmonitor")
+	write(t, hook, "#!/bin/sh\ntouch '"+marker+"'\nexit 1\n", 0700)
+	git("config", "core.fsmonitor", hook)
+	write(t, filepath.Join(root, "tracked.txt"), "after\n", 0600)
+	// A covered chain run and an uncovered request both capture usage; neither may run product git config.
+	equal(t, verilex(t, root, nil, "run", chain).code, 0)
+	equal(t, verilex(t, root, nil, "run", "--changed", "README.md").code, 2)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("usage capture ran the repository's core.fsmonitor")
+	}
+}

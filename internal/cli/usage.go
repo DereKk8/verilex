@@ -68,10 +68,12 @@ func usageCommand(args options, out io.Writer, refuse func(error) int) int {
 	return 0
 }
 
-// readGit runs a Git command that only reads the product's repository. On timeout it asks Git to
-// stop, so Git's own handlers remove any lock it holds, and kills it only if it does not exit.
+// readGit runs a Git command that only reads the product's repository. It turns off the
+// repository's core.fsmonitor, so capturing usage never runs a command the product configured.
+// On timeout it asks Git to stop, so Git's own handlers remove any lock it holds, and kills it
+// only if it does not exit.
 func readGit(ctx context.Context, root string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root, "-c", "core.fsmonitor=false"}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 100 * time.Millisecond

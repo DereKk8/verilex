@@ -30,6 +30,11 @@ Run `scripts/ci canary`. To replay one scenario, use the pinned driver from `scr
 - `self-skill-session`: Expect launch freezes --bin across a source rebuild; doctor accepts the frozen session and refuses tampering with exit 1; cleanup refuses a different worker with exit 2 and unchanged session files, then removes the exact session under its launching identity.
 - `self-ci-main-ref`: Expect with only a tag named refs/remotes/origin/main, scripts/ci canary exits 1 and canary-guards exits 2 naming the absent branch ref; git show-ref independently confirms the branch is absent.
 
+## Attack scenarios
+
+- **A CI checkout without the main branch ref.** A shallow or single-branch checkout has no `refs/remotes/origin/main`, so the canary cannot prove that its driver is on main. Clone the repository outside the checkout with `git clone -q --no-local "$PWD" <dir>`, run `git -C <dir> update-ref -d refs/remotes/origin/main`, then `scripts/ci canary` from `<dir>`. Safe result: `canary: refs/remotes/origin/main is absent (run: git fetch origin main)` and exit `1`, never a pass. Remove `<dir>` by its exact path. Source: #33.
+- **A tag named like the branch, and an empty diff.** Covered by `self-ci-main-ref`. An empty diff under bash 3.2 is macOS-only: `scripts/ci canary` on macOS passes no `--changed` flags. Source: #33, #46.
+
 ## Gotchas
 
 - The outer driver must be the reviewed commit pinned in `scripts/ci`, not the binary under test.

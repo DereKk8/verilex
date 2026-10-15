@@ -29,6 +29,11 @@ Preconditions:
 - **JSON and warning.** Use [verdicts.md](verdicts.md) **What was asked**.
 - **Refused absent.** Run `"$S/vx" runs-refused verilex run 'item-stored apple | store-open'`, then `"$S/vx" runs-after-refused verilex runs`. The list is unchanged.
 
+## Attack scenarios
+
+- **A run killed by a timeout.** CI or an agent harness ends a run with SIGTERM or SIGKILL. Covered by [parallel.md](parallel.md) **A run ended by SIGTERM**: the run shows `died`, never `running` forever, and never green or red.
+- **Run records written by an older verilex.** After an upgrade, `verilex runs` reads records whose verdicts use the old labels (`pass`, `fail`, `blocked`, `unverified`). Save a green run's record, then run `sed -i 's/"verdict": "green"/"verdict": "pass"/g' "$S/home/tally/runs/<RUN>/run.json"` and `"$S/vx" atk-runs-old verilex runs`. Safe result: `<RUN>` still reads `green`. Restore the saved record. Source: #5.
+
 ## Gotchas
 
 - Runs are sorted by run id (`<epoch>-<hex>`). Two runs in the same second are not in time order, so find a run by the id its command printed, never with `tail -1`.

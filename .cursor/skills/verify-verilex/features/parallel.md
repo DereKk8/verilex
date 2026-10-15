@@ -41,6 +41,11 @@ Start background runs with their output in a file, so the calling shell returns 
 - **One taker, second view.** Run `"$S/vx" par-take-runs verilex runs`. Only one run continues `<K>`: `<K>` shows `cleanup=continued`, `<W>` shows `green  cleanup=done`, and no other run was added. `ls "$S/stores"` is empty.
 - **Restore.** Run `.cursor/skills/verify-verilex/scripts/hold-word "$S" --remove`.
 
+## Attack scenarios
+
+- **A run ended by SIGTERM.** A CI job timeout or an agent harness sends SIGTERM to a running verilex. Install the hold word, then run `"$S/vx" atk-term verilex run 'store-open | store-held' > "$S/term.out" 2>&1 &` and wait until `$S/hold` lists its id `<F>`. Send `kill -TERM` to each process whose `/proc/<pid>/exe` is `$S/bin/verilex`, as in **Dead run**, then `touch "$S/hold/<F>.go"`. Run `"$S/vx" atk-term-runs verilex runs`, `"$S/vx" atk-term-cleanup verilex cleanup <F>` and `"$S/vx" atk-term-usage verilex usage`. Safe result: `<F>  died  cleanup=pending` while `tally-<F>` is still in `$S/stores`, then `cleanup: done` and an empty `$S/stores`, and the usage totals count `<F>` as `unfinished`, never green or red. verilex installs no signal handler, so the store outlives the run until `cleanup`.
+- **Several continuing runs race.** Covered by `parallel-one-taker`: exactly one takes the instance, and the others record no run.
+
 ## Gotchas
 
 - Never `wait` for held runs in the call that started them: the call would block until they are released.

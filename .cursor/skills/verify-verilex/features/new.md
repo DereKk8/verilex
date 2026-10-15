@@ -29,6 +29,11 @@ Preconditions:
 - **New project, second view.** Run `"$S/vx" new-project-files find "$S/fresh/.verilex" -type f` and `"$S/vx" new-project-config cat "$S/fresh/.verilex/config.yaml"`. Seven files exist and the config reads `project: fresh`. Run `"$S/vx" new-project-run verilex --project "$S/fresh" run ping-replied`: `inconclusive: 0 green, 1 not run` with `launch: exit 2` and `cleanup: exit 2; the instance may outlive the run`.
 - **Restore.** Run `command rm -rf "$S/tally/.verilex/words/item-renamed"`, then `"$S/vx" new-restored ls "$S/tally/.verilex/words"`: `item-renamed` is gone.
 
+## Attack scenarios
+
+- **A word name that is a path.** An agent passes a name with `/` or `..`, for example copied from a path. Run `"$S/vx" atk-new-traversal verilex new ../escape --implements verify-tally/features/items.md#item-add` and `"$S/vx" atk-new-slash verilex new a/b --implements verify-tally/features/items.md#item-add`. Safe result: each exits `2` with `verilex: refused: "<name>" is not a word name: letters or digits, then '.', '_' or '-'`, and `ls -A "$S/tally/.verilex" "$S/tally/.verilex/words"` shows nothing new.
+- **A reference to a section the map lacks.** Covered by **Refused reference**: the refusal points at `verilex gap`, and no word is written.
+
 ## Gotchas
 
 - A sub-feature id written as inline code (`` `ping-reply` ``) resolves to its whole feature file, even with no heading of that name.

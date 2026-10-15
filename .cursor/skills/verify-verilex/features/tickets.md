@@ -81,6 +81,12 @@ Preconditions:
   Run `"$S/vx" tk-snapshot-before "$PWD/.cursor/skills/verify-verilex/scripts/snapshot" "$S"`. Start both runs together and wait for both: `MET="$S/met" "$S/vx" tk-concurrent-quick verilex run --ticket "$T/quick.yaml" 'store-open | store-met' & MET="$S/met" "$S/vx" tk-concurrent-deep verilex run --ticket "$T/deep.yaml" 'store-open | store-met' & wait`. Each prints `green: 2 green; run <RUN>` (`<Q>` and `<D>`) and exits `0`.
 - **Concurrent, second view.** Run `"$S/vx" tk-met ls -A "$S/met"`: exactly `<Q>` and `<D>`, so each run's word saw the other live. Run `"$S/vx" tk-concurrent-records python3 -c 'import json,sys; [print(json.load(open(p))["ticket"]["profile"], json.load(open(p))["ticket"]["model"]) for p in sys.argv[1:]]' "$S/home/tally/runs/<Q>/run.json" "$S/home/tally/runs/<D>/run.json"`: `quick-verify claude-haiku-4-5` then `deep-verify claude-opus-5-5`. Run `"$S/vx" tk-snapshot-after "$PWD/.cursor/skills/verify-verilex/scripts/snapshot" "$S"`; `diff` of the two `stdout` files is empty. Remove the word with `command rm -rf "$W" "$S/met"`.
 
+## Attack scenarios
+
+- **A broken user profiles file.** An operator's own `~/.config/verilex/profiles.yaml` has a typo, and an agent runs a chain without a ticket. Run `mkdir -p "$S/config/verilex"` and `printf 'defaults: [broken\n' > "$S/config/verilex/profiles.yaml"`, then `"$S/vx" atk-tk-broken-run verilex run 'store-open'` and `"$S/vx" atk-tk-broken-plan verilex plan 'store-open'`. Safe result: both succeed as without the file, because calls without `--ticket` never read profiles. With `--ticket`, the same file is refused with the file and the field named, exit `2`. Remove the file.
+- **Two agents run with different tickets at once.** Covered by **Concurrent**: each run records its own ticket, and no file changes.
+- **A ticket field mistyped by hand.** Covered by **Refused, other fields** (`efort`): the run is refused before anything starts, naming the field.
+
 ## Gotchas
 
 - `verilex ticket` resolves inside a product checkout, because the project default comes from the product's `.verilex/profiles.yaml`.

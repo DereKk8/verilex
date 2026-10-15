@@ -32,6 +32,11 @@ Preconditions:
 - **Admit, second view.** Run `"$S/vx" adm-record cat "$S/tally/.verilex/words/probe-item/admission.json"` and `"$S/vx" adm-words verilex words`. The record names the curator, packet, runs, `word_digest` and `sections` with `verify-tally/features/items.md#item-add`, and `probe-item` shows `status:   admitted`.
 - **Stamp.** Run `"$S/vx" adm-plan verilex plan 'store-open | probe-item apple | item-listed apple'`. It prints `plan: skip 0, run 3; probe-item apple: word changed`.
 
+## Attack scenarios
+
+- **A verdict copied from another word.** A curator, or an agent passing the curator's file along, reuses a verdict written for another word. With `<PACKET>` from the preconditions, write `{"word": "item-stored", "packet": "<PACKET>", "verdict": "admit", "curator": "verify-verilex", "reason": "copied"}` to `$S/verdicts/mismatch.json` and run `"$S/vx" atk-adm-mismatch verilex admit probe-item --verdict "$S/verdicts/mismatch.json"`. Safe result: `verilex: refused: $S/verdicts/mismatch.json: the verdict is for "item-stored", not probe-item`, exit `2`, and `probe-item` has no `admission.json`.
+- **A verdict for an older packet after a retry.** An agent's `propose` times out and is run again, so the curator judged the first packet while a second exists. Run `"$S/vx" atk-prop-again verilex propose probe-item`, then admit with a verdict naming the first `<PACKET>`. Safe result: `admitted probe-item (curator verify-verilex, 2 runs)`, and `admission.json` names the first packet, the one judged. If the word changed in between, **Stale** applies and the admit is refused.
+
 ## Gotchas
 
 - `admission.json` lands in the product checkout (`$S/tally/.verilex/words/<word>/`), not in `VERILEX_HOME`.

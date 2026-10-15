@@ -72,6 +72,12 @@ Preconditions:
 - **Not reused, second view.** Run `"$S/vx" cl-repin-run verilex run 'store-open | item-stored apple | item-listed apple'` (live, run `<R>`), then `"$S/vx" cl-repin-record python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r.get("skipped", False), [(w["word"], w.get("proves"), w.get("entry"), w.get("relies_on", "")) for w in r["words"]])' "$S/home/tally/runs/<R>/run.json"`. It prints `False` and, among the words, `('item-stored', 'item-added@<V2>', 'cli', '')`: the word ran live and proved the new version.
 - **Restore.** Copy `$K` and `item-stored/word.md` back from the fixture, then `"$S/vx" cl-restored verilex check` prints `check: no drift (3 admitted)` and `"$S/vx" cl-restored-claims verilex claims` lists `item-added@<V1>` with `words: item-stored`. `"$S/vx" cl-restored-diff diff -r "$S/tally/.verilex" "$PWD/tests/fixtures/tally/.verilex"` shows only `grouping.yaml`.
 
+## Attack scenarios
+
+- **Files saved with CRLF line endings.** A contributor on Windows, or an editor set to CRLF, saves the claim or the feature file. After `admit-all`, run `sed -i 's/$/\r/' "$K"`, then `"$S/vx" atk-cl-crlf verilex claims` and `"$S/vx" atk-cl-crlf-check verilex check`. Restore `$K`, then run `sed -i 's/$/\r/' "$F"`, `"$S/vx" atk-cl-crlf-map verilex claims` and `"$S/vx" atk-cl-crlf-map-check verilex check`. Safe result: `item-added` keeps `@<V1>`, no `review:` line, and `check: no drift (3 admitted)` in both cases. Restore `$F`.
+- **Run history written inside a sub-feature.** A verifier appends `Verified <date>: ...` under a step. Covered by **Dated rule**: the claim needs review, so the next run is live rather than skipped on old proof.
+- **A remapped claim keeps old proof.** Covered by **Reviewed, runs live**: every admitted word that proves the claim stays drift-suspect until it is onboarded again.
+
 ## Gotchas
 
 - The version is the first 12 hex digits of the fingerprint. Copy it from `verilex claims`; it is not a counter.

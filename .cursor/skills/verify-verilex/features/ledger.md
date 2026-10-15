@@ -51,6 +51,12 @@ The refusal steps each record one new step, so its slot holds a single pass, the
 - **Age out.** With `grape`: reseal both its `item-stored grape` and `item-listed grape` passes with `recorded=$(date -u -d '8 days ago' +%Y-%m-%dT%H:%M:%SZ)`, noting each pass's slot directory `<SLOT>` and evidence id `<OLD>`. Reason: `the green result from run <R> expired (8d old; results stand 7d)`.
 - **Age out, second view.** Run the chain again (live), then `"$S/vx" led-grape-after ls "$S/ledger/tally/passes/<SLOT>"` and `"$S/vx" led-grape-evidence ls "$S/ledger/tally/evidence"`. Each slot holds one pass, recorded by the re-run, and neither `<OLD>` id is listed: recording dropped the expired passes with their evidence.
 
+## Attack scenarios
+
+- **A planted symlink in the passes directory.** Another writer of the shared ledger (the documented trust boundary) plants a symlink to a directory it cannot write itself. Before #38's review, prune followed it and deleted `.tmp-*` entries there. Record one run with `VX_INSTANCE=l1 VERILEX_LEDGER="$S/ledger" "$S/vx" atk-symlink-seed verilex run 'store-open | item-stored apple | item-listed apple'`. Run `mkdir -p "$S/outside/.tmp-victim-dir"`, `echo keep > "$S/outside/.tmp-victim"`, `touch -d '2 days ago' "$S/outside/.tmp-victim" "$S/outside/.tmp-victim-dir"` and `ln -s "$S/outside" "$S/ledger/tally/passes/planted"`. Record another run in that ledger (`atk-symlink-record`, with `pear`), then `"$S/vx" atk-symlink-outside ls -A "$S/outside"`. Safe result: both `.tmp-victim` and `.tmp-victim-dir` remain. Remove the link with `command rm "$S/ledger/tally/passes/planted"`. Source: the review of #38 (S2), fixed in #38.
+- **A clock probe stranded by a killed run.** A run killed during its storage-clock probe leaves an empty file in the ledger root. Run `touch -d '2 days ago' "$S/ledger/tally/.tmp-clock-12345"`, record a run into that ledger, then `"$S/vx" atk-stranded ls -A "$S/ledger/tally"`. Safe result: only `evidence` and `passes` remain. Source: the review of #38 (S3), fixed in #38.
+- **A ledger copied without its file times.** A git clone, `cp -r` without `-p` or an object-store sync gives every pass a fresh file time. Covered by **Age out**: `reseal` writes a fresh file time, and the expired pass is still refused and pruned by its record. Source: the review of #38 (D1).
+
 ## Gotchas
 
 - A slot keeps every pass that stands, so a refusal shows only while the tampered pass is the slot's only pass for that stamp. Tamper with a step that one run recorded, as the steps above do with a new fruit each.

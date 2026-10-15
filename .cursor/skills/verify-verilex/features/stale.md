@@ -25,6 +25,12 @@ Use a fresh session that passes the doctor.
 5. Compare `"$S/vx" stale-runs-before verilex runs` and `"$S/vx" stale-runs-after verilex runs` around another sweep. Compare file names, contents and modes under `$S/tally`, `$S/home`, `$S/config` and `$S/stores` before and after too. Nothing changes. Restore the saved script, then `"$S/vx" stale-restored verilex stale` again prints nothing, exit `0`.
 6. Save `"$S/tally/.verilex/words/item-stored"` outside the product, then remove that exact word directory. `"$S/vx" stale-missing-provider verilex stale` exits `2`: `item-added` has no word, and `item-listed` has no provider for `item:apple`. `"$S/vx" stale-missing-provider-runs verilex runs` shows no new run. Restore the saved directory.
 
+## Attack scenarios
+
+- **An unmounted shared ledger.** An operator runs the sweep while the share behind `VERILEX_LEDGER` is not mounted. Run `VERILEX_LEDGER="$S/unmounted-share" "$S/vx" atk-stale-unmounted verilex stale`, then `"$S/vx" atk-stale-unmounted-dir ls -d "$S/unmounted-share"`. Safe result: never exit `0`. Today every claim is `unproven ... no green result on record`, exit `1`, and the directory is not created. Source: the review of #50 (O2).
+- **A sweep while runs record passes.** Agents sweep in a loop while other agents run chains into the same ledger. After `admit-all`, start `for i in 1 2 3 4; do "$S/vx" atk-stale-busy-$i verilex run --fresh 'store-open | item-stored kiwi | item-listed kiwi' > "$S/busy-$i.out" 2>&1 & done`, then run `for i in $(seq 25); do "$S/vx" atk-stale-sweep-$i verilex stale > /dev/null; done` and `wait`. Safe result: every sweep exits `0` or `1`, none prints `damaged` or `unreadable`, every `stderr` file is empty, and each `busy-$i.out` holds a green. Source: the review of #50 (S7, O1).
+- **Words onboarded by an older verilex.** After an upgrade, every word onboarded before verilex hashed permissions is drift-suspect. Build the old binary as in [check.md](check.md) **Older record**, onboard `store-open` with it, run the default chain once live, then `"$S/vx" atk-stale-old verilex stale`. Safe result: `store-opened` is listed (exit `1`), never a clean exit `0`. Source: #51, #52.
+
 ## Gotchas
 
 - Exit `1` means unproven, not a red product verdict. Exit `0` is not a new live verdict.

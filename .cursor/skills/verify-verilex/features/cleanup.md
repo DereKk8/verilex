@@ -32,6 +32,11 @@ Preconditions:
 - **Running.** Use [parallel.md](parallel.md) `parallel-refuse-running`: `refused: <A> is still running and owns its instance; wait until it finishes`.
 - **Dead run.** Use [parallel.md](parallel.md) `parallel-dead-run`: `cleanup: done` for a run shown as `died`.
 
+## Attack scenarios
+
+- **Cleanup retried at once.** Several agents, or one agent's retry after a timeout, tear down the same kept run together. Run `"$S/vx" atk-clrace-keep verilex run --keep 'store-open | item-stored apple'` (run `<K>`), then `for i in 1 2 3; do "$S/vx" atk-clrace-$i verilex cleanup <K> > "$S/clrace-$i.out" 2>&1 & done; wait`. Safe result: one call prints `cleanup: done`, the others `verilex: <K> was already cleaned up` or the still-running refusal, every exit is `0` or `2`, `verilex runs` shows `<K>  green  cleanup=done`, and `$S/stores` is empty.
+- **Cleanup of a run another run continued, or that is still going.** Covered by **Continued** and **Running**: both refuse before touching the instance.
+
 ## Gotchas
 
 - `verilex cleanup` evidence lands in the run's `frame-cleanup` directory under `VERILEX_HOME`, not in the session evidence. The `vx` transcript is the durable copy.

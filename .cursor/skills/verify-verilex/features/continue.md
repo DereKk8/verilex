@@ -44,6 +44,12 @@ Preconditions:
 
 - **Running and one taker.** Use [parallel.md](parallel.md) `parallel-refuse-running` and `parallel-one-taker`.
 
+## Attack scenarios
+
+- **The kept instance vanished.** A tmp cleaner, a reboot or an operator removed the kept store before an agent continues it. After `admit-all`, run `"$S/vx" atk-cont-keep verilex run --keep 'store-open | item-stored apple'` (run `<K>`), then `command rm -rf "$S/stores/tally-<K>"` and `"$S/vx" atk-cont-gone verilex run --continue <K> 'store-open | item-stored apple | item-listed apple'`. Safe result: `inconclusive: 0 green, 3 not run, continued <K>; run <R>` with `inconclusive  refresh: exit 1`, exit `2`, never red. `verilex runs` shows `<K>` as `cleanup=continued` and `<R>` as `inconclusive  cleanup=done`.
+- **A retry after a refused continue.** An agent retries `--continue` on a run another run already continued. Run `"$S/vx" atk-cont-retry verilex run --continue <K> 'store-open'` twice, then `"$S/vx" atk-cont-retry-usage verilex usage` before and after. Safe result: each exits `2` with `refused: <K> was continued by <R>; continue that run instead`, and neither changes the usage totals: no `unfinished` entry. Source: the review of #40 (D-1).
+- **Several agents continue one kept run.** Covered by [parallel.md](parallel.md) `parallel-one-taker`.
+
 ## Gotchas
 
 - `--continue` with provisional words always refuses, because the kept instance already holds `store-open`'s effects. Admit first.

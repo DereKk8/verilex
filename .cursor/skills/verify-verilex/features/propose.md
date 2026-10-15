@@ -26,6 +26,11 @@ Preconditions:
 - **Packet, second view.** Run `"$S/vx" prop-packet python3 -c 'import json,sys,glob; p=json.load(open(sorted(glob.glob(sys.argv[1] + "/*.json"))[0])); print(sorted(p)); print([(u["run"], u["verdict"]) for u in p["uses"]]); print([s["ref"] for s in p["sections"]])' "$S/home/tally/proposals/probe-item"`. Keys include `curator_instructions`, `dictionary`, `files`, `sections`, `uses`, `word_digest` (no `claim`); `uses` lists the green and the red run, `green` and `red` for `probe-item`; `sections` is `['verify-tally/features/items.md#item-add']`.
 - **Claim refused.** Run `"$S/vx" prop-claim verilex propose item-stored`. Stderr ``verilex: refused: item-stored proves claim item-added, so it joins the vocabulary through `verilex onboard item-stored`, not propose and admit``, exit `2`. Run `"$S/vx" prop-claim-dir ls "$S/home/tally/proposals"`: only `probe-item`.
 
+## Attack scenarios
+
+- **Two uses in one run.** An agent tries to reach the two required uses quickly by using the word twice in one chain. With the probe word from the preconditions, run `"$S/vx" atk-prop-twice verilex run 'store-open | probe-item apple | probe-item pear'`, then `"$S/vx" atk-prop-short verilex propose probe-item`. Safe result: the run is green, and `propose` still refuses with `probe-item has counted uses in 1 run(s)`, exit `2`.
+- **Uses that never counted.** Covered by **Inconclusive does not count**: an inconclusive or skipped run adds no use.
+
 ## Gotchas
 
 - The use count is per run: a word that appears twice in one chain still counts once.

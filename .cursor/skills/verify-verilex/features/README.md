@@ -28,10 +28,22 @@ This directory is the maintained source for verifying the user-facing behavior o
 - Record the feature file and sub-feature id with every evidence directory.
 - Report an unreachable path with the attempted command and the unmet precondition.
 - Do not report a skipped entry point as verified through a different path.
+- Report one attack line per scenario tried; see [Attack scenarios](#attack-scenarios).
 
 ## Feature entry contract
 
-Each feature file starts with an H1 title and one paragraph describing the user-visible behavior. It then uses exactly four H2 sections in this order: `Sub-features`, `How to get to it (user POV)`, `Driving it with vx`, `Gotchas`. Keep implementation details out of the map.
+Each feature file starts with an H1 title and one paragraph describing the user-visible behavior. It then uses exactly five H2 sections in this order: `Sub-features`, `How to get to it (user POV)`, `Driving it with vx`, `Attack scenarios`, `Gotchas`. Keep implementation details out of the map.
+
+## Attack scenarios
+
+`Attack scenarios` is where the verifier tries to break the feature on purpose. List the few scenarios most worth trying, most likely times most damaging first. Each bullet names who triggers it and how it really happens, the exact `vx` commands that try it, the safe expected result, and the past bug it came from (a PR, an issue, or the review that found it) when there is one.
+
+The realism bar: keep a scenario only when a real user, agent, operator or real failure could cause it in normal use. Examples are a retry after a timeout, a double run, two agents at once, a process killed mid-run, old records read by a newer verilex, a copy or checkout that resets file times or modes, a typo in a hand-edited file, and a product error message that echoes a token. Leave out theoretical attacks, except where verilex guards trust: secrets in evidence, a shared ledger that other writers can reach, and the launcher's sandbox. There a realistic attacker counts, such as another writer of the shared ledger or a brain that tries to forge a pass.
+
+- Do not open an attack bullet with a sub-feature id in code: that would make it part of the sub-feature's text, and a canary claim's source.
+- Every real bug in a mapped feature that no scenario would have caught becomes a scenario, citing the bug. Drop a scenario that fails the realism bar.
+- A scenario whose safe result does not hold stays in the map. Its attack line says `safe: broken` until the product is fixed. Name the open issue in the scenario when one tracks it.
+- Report each scenario as [the skill's Report](../SKILL.md#report) says.
 
 ## Features
 
@@ -44,6 +56,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Run tickets](tickets.md) - `verilex ticket`, `run --ticket` and `plan --ticket`: precedence, named profiles, refusals naming the field, and concurrent runs that share no ticket state.
 - [Words](words.md) - `verilex words`: the dictionary with lifecycle status.
 - [Runs](runs.md) - `verilex runs`: every run with verdict and cleanup state.
+- [Usage ledger](usage.md) - `verilex usage`: durable run totals, caller token costs and later misses, kept through cleanup.
 - [Cleanup](cleanup.md) - `verilex cleanup`: tear down a kept instance.
 - [New word](new.md) - `verilex new`: scaffold a provisional word, and a whole `.verilex/` in a new project.
 - [Onboard](onboard.md) - `verilex onboard`: admit a word that proves a claim through the mapping, non-proof, mechanical match, planted-defect gate and behavioral check, and answer an undecided word's decision request.

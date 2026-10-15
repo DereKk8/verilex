@@ -28,6 +28,11 @@ Preconditions:
 - **Kept.** Run `"$S/vx" out-kept verilex run --keep 'store-open'`. The last line is ``kept: tear down with `verilex cleanup <RUN>` ``. Then run `"$S/vx" out-kept-cleanup verilex cleanup <RUN>`; it prints `cleanup: done`.
 - **Skip line.** In an admitted baseline, see [run.md](run.md) `run-skip`: `green: 3 green, skipped: stamps match run <A>; run <B>`.
 
+## Attack scenarios
+
+- **A stack trace in a failure detail.** A product crashes, and its word passes the multi-line traceback on as `detail`. Create a probe word with `"$S/vx" atk-out-new verilex new probe-word --implements verify-tally/features/items.md#item-add` and write its `run` as `#!/bin/sh`, then `python3 -c 'import json; print(json.dumps({"verdict": "fail", "preconditions_held": True, "detail": "Traceback (most recent call last):\n  File x\nValueError: boom"}))'` and `exit 1`. Run `"$S/vx" atk-out-multiline verilex run 'store-open | probe-word'`. Safe result: four lines, `red: 1 green, 1 red; run <RUN>`, one cause line `  red  probe-word: Traceback (most recent call last): File x ValueError: boom`, its `evidence:` line and its `verify skill:` line. Remove the probe word.
+- **A token in a failure detail.** See [verdicts.md](verdicts.md), **A product error message that echoes a token**: the quiet output must not print it, and `--json` must not either.
+
 ## Gotchas
 
 - A skipped chain can cite several runs, as `stamps match runs <A>, <B>`, when different prefixes were last proven by different runs.

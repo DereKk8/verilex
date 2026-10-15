@@ -25,6 +25,10 @@ Preconditions:
 - **Refused.** Run `"$S/vx" gap-empty verilex gap ''`. Stderr `verilex: refused: describe the product moment the feature map lacks`, exit `2`.
 - **No stamp change.** In an admitted baseline where `verilex plan` skips the default chain, record a gap, then run `"$S/vx" gap-plan verilex plan 'store-open | item-stored apple | item-listed apple'`. It still prints `plan: skip 3, run 0`.
 
+## Attack scenarios
+
+- **The same gap noted by several agents at once.** Agents that hit the same missing section note it in the same second. Run `for i in 1 2 3 4; do "$S/vx" atk-gap-race-$i verilex gap 'A user renames an item' > "$S/gap-$i.out" 2>&1 & done; wait`, then `"$S/vx" atk-gap-race-list ls "$S/tally/.verilex/gaps"`. Safe result: every call exits `0`, and four notes exist (`...-a-user-renames-an-item.md`, then `-2.md` to `-4.md`): no note overwrote another.
+
 ## Gotchas
 
 - Gap notes land in the product checkout, not in `VERILEX_HOME`. Session cleanup removes them with `$S`.

@@ -24,6 +24,11 @@ Preconditions:
 - **Status after drift.** Run ``sed -i 's/Expect exit 0 and `opened`/Expect exit 0 and `created`/' "$S/tally/.cursor/skills/verify-tally/features/store.md"``, then `"$S/vx" words-drift verilex words`. `store-open` shows `status:   drift-suspect`: its claim `store-opened` needs review. Restore with ``sed -i 's/Expect exit 0 and `created`/Expect exit 0 and `opened`/' "$S/tally/.cursor/skills/verify-tally/features/store.md"``; `verilex words` shows `admitted` again.
 - **Refused.** Run `"$S/vx" words-no-project verilex --project "$S/stores" words`. Stderr `verilex: refused: no .verilex/config.yaml in <dir> or its parents`, exit `2`.
 
+## Attack scenarios
+
+- **A hand-edited word file with a YAML error.** An agent edits `word.md` by hand and drops a bracket. Run `command cp "$S/tally/.verilex/words/item-listed/word.md" "$S/word.saved"` and `sed -i 's/^args: \[name\]$/args: [name/' "$S/tally/.verilex/words/item-listed/word.md"`. Run `"$S/vx" atk-words-broken verilex words` and `"$S/vx" atk-words-broken-run verilex run 'store-open'`. Safe result: each exits `2` with `verilex: refused: <path>/item-listed/word.md: malformed YAML frontmatter: ...`, naming the file, and no run is added. Restore the saved file.
+- **A word directory name with a `|` or a path.** See [new.md](new.md) **A word name that is a path**. A hand-made directory with `|` in its name is refused as an argument (issue #49).
+
 ## Gotchas
 
 - Words are listed in name order, not chain order.

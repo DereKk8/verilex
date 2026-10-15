@@ -1,6 +1,6 @@
 ---
 name: verify-verilex
-description: "Drive the verilex CLI as its users do, against a disposable copy of the tally sample product with an isolated VERILEX_HOME; use when proving verilex behavior (run, plan, claim plans, --continue, run tickets and profiles, words, claims, onboard, index, runs, cleanup, new, propose, admit, gap, check, the three verdicts, missed-claim warnings, quiet output, parallel runs, the shared ledger across stateless instances, and the verilex-agent launcher) on a fresh or a given verilex build."
+description: "Drive the verilex CLI as its users do, against a disposable copy of the tally sample product with an isolated VERILEX_HOME; use when proving verilex behavior (run, plan, claim plans, --continue, run tickets and profiles, words, claims, onboard, index, runs, usage, cleanup, new, propose, admit, gap, check, the three verdicts, missed-claim warnings, quiet output, parallel runs, the shared ledger across stateless instances, and the verilex-agent launcher) on a fresh or a given verilex build."
 ---
 
 # Verify verilex
@@ -49,7 +49,7 @@ Read-only. It prints `doctor: ok` and the binary source, sha256, `vcs.revision` 
 "$S/vx" <label> <any read-only command>      # a second observation
 ```
 
-`vx` runs the command from `$S/tally` with `VERILEX_HOME=$S/home`, `TALLY_STORES=$S/stores`, `XDG_CONFIG_HOME=$S/config` and `$S/bin` first on `PATH`, so `verilex` is the pinned binary. `VX_INSTANCE=<name> "$S/vx" ...` plays a stateless instance instead: its `VERILEX_HOME` is `$S/instances/<name>`. Concurrent `vx` calls never share an evidence directory, so a recipe may start several with `&`. Calls started at once may carry the same number under different labels, so cite evidence as `NNN-<label>`. Extra environment passes through: `TALLY_DEFECT=drop-adds "$S/vx" ...`. It prints the command, stdout, stderr (prefixed `stderr| `) and `exit N  evidence: <dir>`, and exits with the command's code. Labels are short kebab-case names for the proof step. Relative paths resolve in `$S/tally`, so pass absolute paths for anything else: verdict files, `--project`, and repository files as `"$PWD/tests/..."`. `vx` adds `$ command` and `exit N` lines to its stdout, so read `<evidence>/NNN-<label>/stdout` when a step needs to parse JSON. Write file commands in recipes as `command rm`, `command cp` and `command mv`: some interactive shells alias them to prompting forms (`rm -I`), which silently skip the change in a non-interactive call. The feature files hold the exact commands per feature.
+`vx` runs the command from `$S/tally` with `VERILEX_HOME=$S/home`, `TALLY_STORES=$S/stores`, `XDG_CONFIG_HOME=$S/config` and `$S/bin` first on `PATH`, so `verilex` is the pinned binary. `VX_INSTANCE=<name> "$S/vx" ...` plays a stateless instance instead: its `VERILEX_HOME` is `$S/instances/<name>`. Concurrent `vx` calls never share an evidence directory, so a recipe may start several with `&`. Calls started at once may carry the same number under different labels, so cite evidence as `NNN-<label>`. Extra environment passes through: `TALLY_DEFECT=drop-adds "$S/vx" ...`. It prints the command, stdout, stderr (prefixed `stderr| `) and `exit N  evidence: <dir>`, and exits with the command's code. `vx` refuses, exit `2`, when `VERILEX_LEDGER` or `VERILEX_USAGE_LEDGER` points outside `$S`, so an operator's own shared ledger or usage ledger never gets session runs. Labels are short kebab-case names for the proof step. Relative paths resolve in `$S/tally`, so pass absolute paths for anything else: verdict files, `--project`, and repository files as `"$PWD/tests/..."`. `vx` adds `$ command` and `exit N` lines to its stdout, so read `<evidence>/NNN-<label>/stdout` when a step needs to parse JSON. Write file commands in recipes as `command rm`, `command cp` and `command mv`: some interactive shells alias them to prompting forms (`rm -I`), which silently skip the change in a non-interactive call. The feature files hold the exact commands per feature.
 
 ## Evidence
 
@@ -63,6 +63,18 @@ Proof standards:
 - A refusal is proved by its stderr, exit `2`, and an unchanged second view (no new run in `verilex runs`, an unchanged store).
 - verilex's own evidence paths (`$S/home/tally/runs/...`) vanish at cleanup. Copy what the proof needs first: `"$S/vx" <label> cat <path>`.
 - Record the feature file and sub-feature id with each proof. Report a path you could not reach with its attempted command and unmet precondition; never report it as verified through another path.
+
+## Report
+
+Every verification run ends with one report, in this order:
+
+1. The binary under test: the `binary:` line of `launch` and the doctor's `vcs.revision`.
+2. One line per proof: the feature file and sub-feature id, the `NNN-<label>` evidence directories of the action and of its second observation, and the observed result.
+3. One attack line per scenario tried, for every feature exercised: `attack: <feature>/<scenario> | how: <exact command> | result: <observed> | safe: held` or `safe: broken`. Try at least the top-ranked scenario of each feature the run exercises.
+4. Paths not reached, each with the attempted command and the unmet precondition, and scenarios not tried, each with why.
+5. The evidence directory, checked after cleanup.
+
+A report with no attack lines is not a pass: a verifier that only watched the happy path did not try to break anything. A `safe: broken` line is a found product bug for the user, with its reproduction. Never soften it or report it as skipped. A scenario the harness cannot try is a harness gap, not a pass.
 
 ## Cleanup
 

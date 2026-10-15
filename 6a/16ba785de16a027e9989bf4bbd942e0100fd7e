@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "summary": "Adds ranked attack scenarios from past bugs to every verify-verilex feature file, a Report contract, a usage feature file, and a vx guard against outside ledgers.",
+  "files": [
+    {
+      "path": ".cursor/skills/verify-verilex/scripts/capture",
+      "summary": "Refuses to run a session command that would write to a ledger outside the session.",
+      "annotations": [
+        {
+          "newRange": [9, 16],
+          "summary": "capture exits 2 when VERILEX_LEDGER or VERILEX_USAGE_LEDGER is set to a path outside the session directory.",
+          "rationale": "docs/usage-ledger.md tells operators to export VERILEX_USAGE_LEDGER, so before this guard every session run landed in the operator's evaluation data while the doctor still passed. Reproduced live, then re-driven with the guard: an outside path is refused, a path under the session is accepted. scripts/ci smoke and canary pass with it.",
+          "author": "fm/verilex-verify-skill-attack-report"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/SKILL.md",
+      "summary": "Defines what every verification run reports, including one attack line per scenario tried.",
+      "annotations": [
+        {
+          "newRange": [67, 78],
+          "summary": "The Report section fixes the report order and the attack line format with safe: held or safe: broken.",
+          "rationale": "The zero-trust review contract (ZT-ATTACK-7) points missing scenarios back at this skill, so the skill must say what a run reports. A report without attack lines is not a pass, because watching only the happy path breaks nothing.",
+          "author": "fm/verilex-verify-skill-attack-report"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/features/README.md",
+      "summary": "States the five-section contract and the realism bar the verifier and the maintenance pass read cold.",
+      "annotations": [
+        {
+          "newRange": [35, 46],
+          "summary": "The realism bar keeps only scenarios a real user, agent, operator or failure causes, with trust-guarding exceptions.",
+          "rationale": "Attack bullets must not open with a sub-feature id in code, because such a bullet would join a canary claim's source text. scripts/ci canary reports no drift (13 admitted) after the change.",
+          "author": "fm/verilex-verify-skill-attack-report"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/features/check.md",
+      "summary": "Adds attack scenarios for drift, including a known false drift.",
+      "annotations": [
+        {
+          "newRange": [40, 46],
+          "summary": "The umask scenario is expected to report safe: broken until verilex stops hashing non-executable permission bits.",
+          "rationale": "chmod -R g+w on .verilex made all three admitted words drift-suspect in a live session, so a checkout under umask 002 drifts every word. This is a product gap reported to the owner, not fixed in this skill-only change.",
+          "author": "fm/verilex-verify-skill-attack-report"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/features/verdicts.md",
+      "summary": "Adds attack scenarios for verdicts, including a secret kept in JSON output.",
+      "annotations": [
+        {
+          "newRange": [60, 65],
+          "summary": "The token-in-detail scenario is expected to report safe: broken: --json, run.json and the usage ledger keep the token.",
+          "rationale": "A live probe word printing a ghp_ token in its fail detail was inconclusive with a hidden quiet line, but run --json printed the token and both records stored it. Reported as a product gap; no product code changes here.",
+          "author": "fm/verilex-verify-skill-attack-report"
+        }
+      ]
+    }
+  ]
+}

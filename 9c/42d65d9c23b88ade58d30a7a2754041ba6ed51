@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "summary": "Instructs writers to keep Why paragraph sentences in Author prompts short and literal, with one idea each and at most about 25 words.",
+  "files": [
+    {
+      "path": ".agents/skills/pr-author-prompts/SKILL.md",
+      "summary": "Adds sentence length and single-idea guidance to step 3 of the Author prompts skill.",
+      "annotations": [
+        {
+          "newRange": [52, 52],
+          "summary": "Step 3 now instructs agents to keep each Why sentence short and literal, with one idea, at about 25 words at most.",
+          "rationale": "In previous smoke runs, models emitted 60-word sentences combining multiple distinct points into one run-on sentence, so this constraint ensures cold readers can parse each fact quickly. Verified with scripts/ci and a live smoke test using Gemini 3.8 Flash High where all sentences measured 22 words or fewer. Other model behaviors remain unverified.",
+          "author": "fm/verilex-author-prompts-short-sentences"
+        }
+      ]
+    }
+  ]
+}

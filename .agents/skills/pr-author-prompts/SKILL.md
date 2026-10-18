@@ -49,6 +49,7 @@ When the latest prompt alone fails the test:
 - Trace back through the author's own words: the earlier prompts in the conversation, and the author's words quoted in the task instructions. Find the prompt where the author first said what they want and why.
 - Write the **Why this PR exists** paragraph from that. Start it with the author as the subject ("The author wants ...", "The author asked ..."), then say what they want, why they want it in their terms, and what that means for this change. Write it in your own words and never present it as a quote.
 - Put every fact a cold reader needs into that Why paragraph as plain prose. Agents are the main readers; humans read it to learn intent. Lead with the point. Use short literal sentences, one idea each, active voice, and common words. Do not use jargon, noun stacks, or em dashes (use "-").
+- Keep each Why sentence short and literal, with one idea, at about 25 words at most.
 - The comment has no separate context section. Do not add a line or paragraph labeled `Context:`, `Background:`, or similar between the Why paragraph and the quotes. Never paste orchestrator briefing there as a pointer; fold the needed facts into the Why paragraph instead.
 - Technical sources (the linked issue, a review report, the PR description) may add facts a reader needs, after the author's motive. They never replace it.
 - Keep a fragment quote only when it adds the author's voice on top of that paragraph; drop answer lists that only make sense next to their questions.

@@ -57,6 +57,32 @@ expect ok prose-bare-letter 'B'
 expect ok redacted-in-resolution "option B [option B: [redacted: internal url] holds the old parser, so rebuild the importer on it and ship one pull request]"
 expect ok wrapped-resolution "option B [option B: rebuild the importer on the existing parser,"$'\n> '"keep the old file format readable, and ship it as one pull request]"
 expect refused wrapped-short-resolution "option B [option B: rebuild the importer"$'\n> '"on the parser]"
+expect refused context-quote 'Context: weekly sync of the fork with upstream before validation.'
+expect ok prose-context-in-quote 'keep the demo sharp with no context bloat for reviewers'
+cat >"$work/c.md" <<EOF
+## Author prompts
+
+$why
+
+Context: weekly sync of the fork with upstream before validation.
+
+> make the importer faster
+EOF
+if "$check" "$work/c.md" 2>"$work/err"; then echo "FAIL context-paragraph: wanted refused"; fails=$((fails + 1)); else
+  grep -q 'Context or Background label' "$work/err" || { echo "FAIL context-paragraph: wrong reason"; cat "$work/err"; fails=$((fails + 1)); }
+fi
+cat >"$work/c.md" <<EOF
+## Author prompts
+
+$why
+
+**Background:** orchestrator briefing the author never wrote.
+
+> make the importer faster
+EOF
+if "$check" "$work/c.md" 2>"$work/err"; then echo "FAIL background-label: wanted refused"; fails=$((fails + 1)); else
+  grep -q 'Context or Background label' "$work/err" || { echo "FAIL background-label: wrong reason"; cat "$work/err"; fails=$((fails + 1)); }
+fi
 
 # The unresolved label after a wrapped resolution is reported on its own line.
 comment "option B [option B: rebuild the importer on the existing parser,"$'\n> '"keep the old file format readable, and ship it as one pull request]"$'\n> '"then option C"

@@ -55,10 +55,15 @@ awk '
     delete need; delete res; blk = ""
   }
   NR == 1 && $0 != "## Author prompts" { fail("first line must be exactly: ## Author prompts") }
+  /^[[:space:]]*(\*\*)?(Context|Background)(\*\*)?[[:space:]]*:/ { fail("do not add a Context or Background label or paragraph; put facts the reader needs into the Why this PR exists paragraph") }
+  /^> [[:space:]]*(\*\*)?(Context|Background)(\*\*)?[[:space:]]*:/ { fail("do not quote a Context or Background pointer; put orchestrator briefing into the Why paragraph and quote only the author") }
   /^\*\*Why this PR exists:\*\*/ { inwhy = 1; seenwhy = 1; if (nq) fail("the Why this PR exists paragraph must come before the quotes") }
-  inwhy && /^[[:space:]]*$/ { inwhy = 0 }
+  inwhy && /^[[:space:]]*$/ { inwhy = 0; if (seenwhy) between = 1 }
   inwhy { sub(/^\*\*Why this PR exists:\*\*/, ""); why = why " " $0 }
-  !/^> / && inq { endquote(); inq = 0 }
+  between && /^> / { between = 0 }
+  between && !/^[[:space:]]*$/ { fail("only the Why paragraph and author quotes belong in the comment; put background into the Why paragraph, not a separate block") }
+  !/^> / && inq { endquote(); inq = 0; pastq = 1 }
+  pastq && !/^> / && !/^[[:space:]]*$/ && !inwhy { fail("only the Why paragraph and author quotes belong in the comment") }
   /^> / {
     nq++; inq = 1
     if (blk == "") blkstart = NR

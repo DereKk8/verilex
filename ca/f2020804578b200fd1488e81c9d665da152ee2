@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "summary": "Author prompts comments must fold orchestrator briefing into the Why paragraph, not Context pointer blocks.",
+  "files": [
+    {
+      "path": ".agents/skills/pr-author-prompts/SKILL.md",
+      "summary": "Skill text forbids Context labels and orchestrator quotes, with wrong vs right examples.",
+      "annotations": [
+        {
+          "newRange": [36, 36],
+          "summary": "Step 2 refuses orchestrator briefing pasted as author prompt quotes.",
+          "rationale": "Captain feedback on a refit PR showed orchestrator Context paragraphs in Author prompts. Smoke tests on three models confirmed they follow the new prose-only Why rule.",
+          "author": "fm/verilex-author-prompts-no-context-pointer"
+        },
+        {
+          "newRange": [61, 80],
+          "summary": "Wrong and right markdown examples show pointer paragraphs vs folded Why prose.",
+          "rationale": "Agents are the main readers; the example mirrors the forbidden firstmate PR body shape without naming that product.",
+          "author": "fm/verilex-author-prompts-no-context-pointer"
+        }
+      ]
+    },
+    {
+      "path": ".agents/skills/pr-author-prompts/check.sh",
+      "summary": "Mechanical refusal for Context or Background labels and extra paragraphs.",
+      "annotations": [
+        {
+          "newRange": [58, 66],
+          "summary": "awk rules refuse labeled Context blocks and stray paragraphs between Why and quotes.",
+          "rationale": "scripts/author-prompts-check adds refused and passing cases; scripts/ci author-prompts step passes and the twelve fixtures stay label-clean.",
+          "author": "fm/verilex-author-prompts-no-context-pointer"
+        }
+      ]
+    }
+  ]
+}

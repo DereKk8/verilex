@@ -380,7 +380,8 @@ func (s *Status) filesDrift(w dictionary.Word, stored, changed, older string) er
 }
 
 // EachFile visits a word's files in lexical order, skipping its admission record and
-// interpreter caches, which are not the word.
+// interpreter caches, which are not the word. The permission it reports is the one
+// fingerprint.RecordedPerm stores, so admission and the proof stamp agree.
 func EachFile(w dictionary.Word, visit func(rel string, perm fs.FileMode, data []byte)) error {
 	return filepath.WalkDir(w.Path, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -402,7 +403,7 @@ func EachFile(w dictionary.Word, visit func(rel string, perm fs.FileMode, data [
 		}
 		data, err := os.ReadFile(path)
 		if err == nil {
-			visit(filepath.ToSlash(rel), info.Mode().Perm(), data)
+			visit(filepath.ToSlash(rel), fingerprint.RecordedPerm(info), data)
 		}
 		return err
 	})

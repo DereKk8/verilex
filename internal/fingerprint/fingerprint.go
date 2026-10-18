@@ -121,7 +121,7 @@ func tree(root string, skipCaches bool) (string, error) {
 			if entry.Type()&fs.ModeSymlink != 0 {
 				return fmt.Errorf("%s links to a directory", path)
 			}
-			fmt.Fprintf(&lines, "%q dir %o\n", rel, info.Mode().Perm())
+			fmt.Fprintf(&lines, "%q dir %o\n", rel, RecordedPerm(info))
 			return nil
 		}
 		digest, err := file(path, info)
@@ -147,11 +147,26 @@ func file(path string, info fs.FileInfo) (string, error) {
 	}
 	defer f.Close()
 	sum := sha256.New()
-	fmt.Fprintf(sum, "file %o\n", info.Mode().Perm())
+	fmt.Fprintf(sum, "file %o\n", RecordedPerm(info))
 	if _, err = io.Copy(sum, f); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(sum.Sum(nil)), nil
+}
+
+// RecordedPerm is the permission a fingerprint stores.
+// Git stores a regular file as 0755 when the owner execute bit is set, and as
+// 0644 otherwise. Group and other execute bits, and every write bit, are not
+// stored. Git stores no directory mode, so a directory is always 0755, the
+// mode already written for a canonical tree.
+func RecordedPerm(info fs.FileInfo) fs.FileMode {
+	if info.IsDir() {
+		return 0o755
+	}
+	if info.Mode().Perm()&0o100 != 0 {
+		return 0o755
+	}
+	return 0o644
 }
 
 // Of is the sha256 of a text, in hex.

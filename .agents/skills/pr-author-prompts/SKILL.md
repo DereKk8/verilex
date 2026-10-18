@@ -33,6 +33,7 @@ Tell the author once, when you save the answer, that they change it by editing o
 - Take only the author's own prompts that led to this change. Put the most relevant first.
 - Keep the author's words. Never include the full conversation, agent replies, tool output or your summary as a quote.
 - When an orchestrator's instructions quote the author (for example a section that quotes the author's request), those quoted words are the author prompts.
+- Never quote orchestrator-written briefing as an author prompt. Task instructions often add paragraphs the author did not write (for example a weekly sync summary). Use those facts only to write the Why paragraph in step 3; do not paste them under the quotes.
 - Leave out prompts about unrelated work.
 
 ## 3. Pass the cold-read test
@@ -47,6 +48,8 @@ When the latest prompt alone fails the test:
 
 - Trace back through the author's own words: the earlier prompts in the conversation, and the author's words quoted in the task instructions. Find the prompt where the author first said what they want and why.
 - Write the **Why this PR exists** paragraph from that. Start it with the author as the subject ("The author wants ...", "The author asked ..."), then say what they want, why they want it in their terms, and what that means for this change. Write it in your own words and never present it as a quote.
+- Put every fact a cold reader needs into that Why paragraph as plain prose. Agents are the main readers; humans read it to learn intent. Lead with the point. Use short literal sentences, one idea each, active voice, and common words. Do not use jargon, noun stacks, or em dashes (use "-").
+- The comment has no separate context section. Do not add a line or paragraph labeled `Context:`, `Background:`, or similar between the Why paragraph and the quotes. Never paste orchestrator briefing there as a pointer; fold the needed facts into the Why paragraph instead.
 - Technical sources (the linked issue, a review report, the PR description) may add facts a reader needs, after the author's motive. They never replace it.
 - Keep a fragment quote only when it adds the author's voice on top of that paragraph; drop answer lists that only make sense next to their questions.
 - When the author's own words never say why, write only what they asked for and say plainly that they gave no reason. Do not invent one.
@@ -54,6 +57,26 @@ When the latest prompt alone fails the test:
 A quote that names an option or item label ("option B", "Item 43, approved") means nothing to a reader who never saw the question. Find what the label meant in the author's earlier words or the task instructions, and append the resolution to that quote as `[option B: <self-contained sentence>]` or `[item 43: <self-contained sentence>]`, with at least 8 words. The label must match, and the author's words stay unchanged, as with `[redacted: kind]`. The checker catches only the explicit shapes "option X" (X one uppercase letter) and "item N" (N a number), and the labels listed right after them ("option B or C"). It does not catch other ways to point at a choice, so resolve each of those by hand too. Example: `> lets go with B [option B: rebuild the importer on the existing parser, keep the old file format readable, and ship it as one pull request]`.
 
 Always write the paragraph, even when the quotes are clear. Rewrite it on a later push when the PR's purpose has grown.
+
+Wrong (pointer paragraph and orchestrator text in quotes):
+
+```markdown
+**Why this PR exists:** The author asked to start the weekly refit.
+
+Context: this is the weekly refit full sync of the fork with upstream ...
+
+> Context: this is the weekly refit full sync ...
+```
+
+Right (facts in the Why paragraph; quotes are only the author's words):
+
+```markdown
+**Why this PR exists:** The author asked to start the weekly refit and merge reconciliation, then run validation on Opus. They want the fork brought up to date with upstream before the usual pipeline checks.
+
+> Hey mate let's start with our weekly /refit send a sol worker on the merge reconciliation then validation on opus
+```
+
+A quote may still use the word "context" in a normal sentence (for example "no context bloat"); only a labeled pointer paragraph or block is forbidden.
 
 ## 4. Sanitize
 
@@ -87,6 +110,6 @@ Post it only through this skill's script, run from the repository root. It runs 
 .agents/skills/pr-author-prompts/post.sh "$PR" prompts.md
 ```
 
-The checker refuses a missing or thin Why paragraph, one that does not start from the author, one that points at context the reader lacks, quotes that are numbered answers to unseen questions, and quotes that name an "option X" or "item N" label without a matching resolution. It cannot judge meaning, so passing it does not replace step 3. The script keeps one comment per PR: it edits the existing `## Author prompts` comment in place and creates one only when none exists. Never post or edit the comment with `gh` directly.
+The checker refuses a missing or thin Why paragraph, one that does not start from the author, one that points at context the reader lacks, a `Context:` or `Background:` label or extra paragraph between the Why block and the quotes, quotes that are numbered answers to unseen questions, and quotes that name an "option X" or "item N" label without a matching resolution. It cannot judge meaning, so passing it does not replace step 3. The script keeps one comment per PR: it edits the existing `## Author prompts` comment in place and creates one only when none exists. Never post or edit the comment with `gh` directly.
 
 On a later push, add any new author prompts for that push, redo step 3, and edit the same comment.

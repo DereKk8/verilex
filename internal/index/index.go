@@ -189,7 +189,8 @@ func (ix Index) Details(claim, word string) (dictionary.Word, Word, error) {
 // name, sentence, evidence, aliases, sources and words; a term counts double in its name or
 // sentence, and a rarer term counts more. A claim must also cover at least half of what the
 // intent says, share a term that sets it apart, and, for a two-term intent, match both terms or
-// name the claim (see covers).
+// be named by it (see covers). When the claims found leave an intent term uncovered, the intent
+// must name one of them, or nothing is found.
 func (ix Index) Intent(text string, limit int) []Claim {
 	want := terms.Of(text)
 	primary, secondary := make([][]string, len(ix.Claims)), make([][]string, len(ix.Claims))
@@ -201,14 +202,19 @@ func (ix Index) Intent(text string, limit int) []Claim {
 		}
 	}
 	type scored struct {
-		claim Claim
-		score float64
+		claim  Claim
+		at     int
+		anchor bool
+		score  float64
 	}
-	// A term every claim holds sets no claim apart; with one claim, every term does.
+	// A term every claim holds sets no claim apart; with one claim, every term does. A term at most
+	// half the claims hold is rare.
 	common := func(term string) bool { return len(ix.Claims) > 1 && frequency[term] >= len(ix.Claims) }
+	rare := func(term string) bool { return 2*frequency[term] <= len(ix.Claims) }
+	never := func(string) bool { return false }
 	found := []scored{}
 	for i, c := range ix.Claims {
-		if !covers(want, primary[i], secondary[i], distinct(c, common), common) {
+		if !covers(want, primary[i], secondary[i], names(c, want, common, never), common) {
 			continue
 		}
 		score := 0.0
@@ -221,7 +227,7 @@ func (ix Index) Intent(text string, limit int) []Claim {
 			}
 		}
 		if score > 0 {
-			found = append(found, scored{c, score})
+			found = append(found, scored{c, i, names(c, want, common, rare), score})
 		}
 	}
 	slices.SortStableFunc(found, func(a, b scored) int {
@@ -240,9 +246,20 @@ func (ix Index) Intent(text string, limit int) []Claim {
 		return strings.Compare(a.claim.Claim, b.claim.Claim)
 	})
 	// A claim that scores less than half the best one is noise next to it.
-	result := []Claim{}
+	result, held, anchored := []Claim{}, map[string]bool{}, false
 	for i := 0; i < len(found) && i < limit && 2*found[i].score >= found[0].score; i++ {
 		result = append(result, found[i].claim)
+		for _, term := range append(slices.Clone(primary[found[i].at]), secondary[found[i].at]...) {
+			held[term] = true
+		}
+		anchored = anchored || found[i].anchor
+	}
+	// A term no claim found holds is either a filler word (works in `list works`) or the subject of
+	// a weak intent (refunds in `store item refunds`). Only a found claim the intent names, by all of
+	// a name's terms that are not common or by one rare name term, tells them apart: proving claims
+	// that miss the subject would be a false green.
+	if !anchored && slices.ContainsFunc(want, func(term string) bool { return !held[term] }) {
+		return []Claim{}
 	}
 	return result
 }
@@ -250,11 +267,12 @@ func (ix Index) Intent(text string, limit int) []Claim {
 // covers is the relevance floor: a claim covers an intent when it matches at least half of the
 // intent's terms. A term in the claim's name or sentence counts whole, one only in the rest of
 // the claim counts half. A term every claim holds (common) says nothing about which claim is
-// meant, so at least one shared term must be rarer: `store item refunds` shares only store and
-// item, and finds nothing. A two-term intent that shares only one term with the claim passes only
-// when that term names the claim: it is all of a name's distinct terms, so `list works` finds
-// item-listed but `store refunds` finds nothing. Longer intents need two shared terms anyway.
-func covers(want, primary, secondary []string, names [][]string, common func(string) bool) bool {
+// meant, so at least one shared term must be rarer: `store items` shares only store and item,
+// and finds nothing. A two-term intent that shares only one term with the claim passes only when
+// it holds all of one of the claim's names that is not common (named), so `list works` finds
+// item-listed but `store refunds` and `refused payment` find nothing. Longer intents need two
+// shared terms anyway.
+func covers(want, primary, secondary []string, named bool, common func(string) bool) bool {
 	matched, shared, telling := 0.0, 0, false
 	for _, term := range want {
 		switch {
@@ -267,19 +285,24 @@ func covers(want, primary, secondary []string, names [][]string, common func(str
 		}
 		telling = telling || !common(term)
 	}
-	return telling && 2*matched >= float64(len(want)) && (len(want) == 1 || shared > 1 || slices.ContainsFunc(names, func(name []string) bool {
-		return len(name) > 0 && !slices.ContainsFunc(name, func(term string) bool { return !slices.Contains(want, term) })
-	}))
+	return telling && 2*matched >= float64(len(want)) && (len(want) == 1 || shared > 1 || named)
 }
 
-// distinct lists, for each name a claim goes by (its own and its aliases'), the name's terms
-// that are not common: what sets the name apart from the other claims.
-func distinct(c Claim, common func(string) bool) [][]string {
-	result := [][]string{}
+// names reports whether an intent names a claim by one of the names it goes by (its own and its
+// aliases'): the intent holds every term of the name that is not common, or one term of the name
+// that is rare. So `list works` names item-listed, and `store item refunds` names no tally claim.
+func names(c Claim, want []string, common, rare func(string) bool) bool {
 	for _, name := range append([]string{c.Claim}, c.aliases...) {
-		result = append(result, slices.DeleteFunc(terms.Of(name), common))
+		parts := terms.Of(name)
+		apart := slices.DeleteFunc(slices.Clone(parts), common)
+		if len(apart) > 0 && !slices.ContainsFunc(apart, func(term string) bool { return !slices.Contains(want, term) }) {
+			return true
+		}
+		if slices.ContainsFunc(parts, func(term string) bool { return rare(term) && slices.Contains(want, term) }) {
+			return true
+		}
 	}
-	return result
+	return false
 }
 
 // doc gathers the terms a claim is found by: its name and sentence and those of its aliases

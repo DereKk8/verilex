@@ -350,6 +350,9 @@ func parse(argv []string) (options, bool, error) {
 			case "--named":
 				o.named = append(o.named, value)
 			case "--intent":
+				if strings.TrimSpace(value) == "" {
+					return o, false, fmt.Errorf("--intent needs text that says what to prove")
+				}
 				o.intent = value
 			case "--same-as":
 				o.sameAs = value

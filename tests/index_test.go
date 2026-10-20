@@ -112,6 +112,12 @@ func TestIntentLookupReturnsTheRightClaim(t *testing.T) {
 	done := verilex(t, root, nil, "index", "--intent", "x", "item-added")
 	equal(t, done.code, 2)
 	contains(t, done.stderr, "look up one thing at a time")
+	for _, empty := range []string{"", "  "} {
+		done = verilex(t, root, nil, "index", "--intent", empty)
+		equal(t, done.code, 2)
+		equal(t, done.stdout, "")
+		contains(t, done.stderr, "--intent needs text that says what to prove")
+	}
 }
 
 // An intent that shares one or two terms with a claim but is about something no claim describes
@@ -190,6 +196,51 @@ func TestShortIntentRejectsOneSharedTerm(t *testing.T) {
 			found = append(found, strings.SplitN(line, "  ", 2)[0])
 		}
 		equal(t, found, claims)
+	}
+}
+
+// A weak intent finds no claim whatever shape the product has (issue #49): in a product with one
+// claim, where every term sets the claim apart, and in one where a claim lacks the shared nouns, so
+// they no longer sit in every claim. Its subject (refunds, deleting) is a term no claim found
+// holds, and the intent names none of them. Intents that name their claim still find it.
+func TestWeakIntentFindsNoClaimInAnyProduct(t *testing.T) {
+	one := product(t)
+	for _, path := range []string{claimFile(one, "item-added"), claimFile(one, "item-listed"),
+		filepath.Join(one, ".verilex", "words", "item-stored"), filepath.Join(one, ".verilex", "words", "item-listed")} {
+		if err := os.RemoveAll(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	four := product(t)
+	report := strings.NewReplacer("claim: store-opened", "claim: report-printed", "sentence: A new, empty store is open and ready for items.", "sentence: A printed report shows the totals.",
+		"provides: [store]", "provides: []", "action: \"`tally open` exits 0 and prints `opened`.\"", "action: \"`tally report` exits 0.\"",
+		"observation: store.json holds no items.", "observation: the report lists totals.").Replace(read(t, claimFile(four, "store-opened")))
+	write(t, claimFile(four, "report-printed"), report, 0644)
+	for _, c := range []struct {
+		root   string
+		intent string
+		claims []string
+	}{
+		{one, "store item refunds", nil},
+		{one, "store items refunds", nil},
+		{one, "delete an item from the store", nil},
+		{one, "make sure an item gets added to the store", nil},
+		{one, "prove the store opens", []string{"store-opened"}},
+		{one, "open a new empty store", []string{"store-opened"}},
+		{four, "store item refunds", nil},
+		{four, "store items refunds", nil},
+		{four, "delete an item from the store", nil},
+		{four, "a user lists the store", []string{"item-listed"}},
+		{four, "item added refund payment", []string{"item-added"}},
+		{four, "make sure an item gets added to the store", []string{"item-added"}},
+	} {
+		done := verilex(t, c.root, nil, "index", "--intent", c.intent)
+		equal(t, done.code, 0)
+		lines := strings.Split(strings.TrimSuffix(done.stdout, "\n"), "\n")
+		equal(t, lines[0], fmt.Sprintf("intent: %d claim(s) for '%s'", len(c.claims), c.intent))
+		for i, claim := range c.claims {
+			equal(t, strings.SplitN(lines[i+1], "  ", 2)[0], claim)
+		}
 	}
 }
 

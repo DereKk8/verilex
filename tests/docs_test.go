@@ -75,15 +75,21 @@ func TestChangeLookupRefusesABrokenDocAnchor(t *testing.T) {
 	equal(t, done.stderr, "verilex: refused: docs/guide.md:2: write an anchor as `<!-- claims: <claim> ... -->`, naming at least one claim\n")
 
 	// A near-miss anchor is refused, not silently ignored (issue #49 S8).
-	for _, anchor := range []string{"<!-- claim: item-listed -->", "<!-- Claims: item-listed -->", "<!-- claims item-listed -->", "<!--claims=item-listed-->"} {
+	for _, anchor := range []string{"<!-- claim: item-listed -->", "<!-- Claims: item-listed -->", "<!-- claims item-listed -->", "<!--claims=item-listed-->",
+		"<!-- claims; item-listed -->", "<!-- claims, item-listed -->", "<!-- claims- item-listed -->", "<!-- claims -->"} {
 		writeDoc(t, filepath.Join(root, "docs", "guide.md"), "# Guide\n\n## Listing\n"+anchor+"\n")
 		done = verilex(t, root, nil, "index", "--changed", "docs/guide.md")
 		equal(t, done.code, 2)
 		equal(t, done.stdout, "")
 		equal(t, done.stderr, "verilex: refused: docs/guide.md:4: write an anchor as `<!-- claims: <claim> ... -->`, naming at least one claim\n")
 	}
-	writeDoc(t, filepath.Join(root, "docs", "guide.md"), "# Guide\n\n## Listing\n<!-- claimed by nobody -->\n")
-	equal(t, verilex(t, root, nil, "index", "--changed", "docs/guide.md").code, 0)
+	// A note that opens with the word but goes on with a plain word is no anchor.
+	for _, comment := range []string{"<!-- claimed by nobody -->", "<!-- Claims below were reviewed in Q3 -->", "<!-- claim numbers come from the audit -->"} {
+		writeDoc(t, filepath.Join(root, "docs", "guide.md"), "# Guide\n\n## Listing\n"+comment+"\n")
+		done = verilex(t, root, nil, "index", "--changed", "bin/tally")
+		equal(t, done.stderr, "")
+		equal(t, done.code, 0)
+	}
 }
 
 // An anchor shown as an example in an indented code block (four spaces or a tab) ties nothing, as

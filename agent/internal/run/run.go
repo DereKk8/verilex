@@ -84,6 +84,14 @@ func ended(ctx context.Context) *budgetError {
 	return &budgetError{interrupted: errors.Is(context.Cause(ctx), errInterrupted)}
 }
 
+// endedReason says why ctx ended: the launcher was interrupted, or the time budget ended.
+func endedReason(ctx context.Context) string {
+	if errors.Is(context.Cause(ctx), errInterrupted) {
+		return "the launcher was interrupted"
+	}
+	return "the time budget ended"
+}
+
 func isInterrupted(err error) bool {
 	var target *budgetError
 	return errors.As(err, &target) && target.interrupted
@@ -572,7 +580,14 @@ func resolve(verilex, project, work string, opts Options) (ticket, string, error
 		return ticket{}, "", err
 	}
 	var spec ticket
-	err = verilexJSON(context.Background(), verilex, project, &spec, "ticket", "--json", path)
+	ctx := context.Background()
+	if opts.Interrupt != nil {
+		ctx = opts.Interrupt
+	}
+	err = verilexJSON(ctx, verilex, project, &spec, "ticket", "--json", path)
+	if ctx.Err() != nil {
+		return ticket{}, "", inconclusive("the launcher was interrupted before verilex ticket answered")
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return ticket{}, "", inconclusive("verilex ticket did not answer within %s", lookupTimeout)
 	}
@@ -611,7 +626,7 @@ func floor(ctx context.Context, verilex, project, intent string, claims, changed
 	err := verilexJSON(ctx, verilex, project, &rows, "index", "--intent", intent, "--json")
 	switch {
 	case ctx.Err() != nil:
-		return nil, inconclusive("the time budget ended before verilex index --intent answered")
+		return nil, inconclusive("%v before verilex index --intent answered", endedReason(ctx))
 	case errors.Is(err, context.DeadlineExceeded):
 		return nil, inconclusive("verilex index --intent did not answer within %s", lookupTimeout)
 	case err != nil:
@@ -650,7 +665,7 @@ func touchedClaims(ctx context.Context, verilex, project string, changed []strin
 	err := verilexJSON(ctx, verilex, project, &found, args...)
 	switch {
 	case ctx.Err() != nil:
-		return nil, inconclusive("the time budget ended before verilex index --changed answered")
+		return nil, inconclusive("%v before verilex index --changed answered", endedReason(ctx))
 	case errors.Is(err, context.DeadlineExceeded):
 		return nil, inconclusive("verilex index --changed did not answer within %s", lookupTimeout)
 	case err != nil:

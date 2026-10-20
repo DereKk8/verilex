@@ -68,7 +68,7 @@ verilex-agent-*/
   ticket.yaml        the run spec
 ```
 
-The launcher removes the directory at the end, also when SIGTERM, SIGINT or SIGHUP ends the run: it stops the brain, removes the directory, prints nothing on stdout and exits `2` (inconclusive). With `--keep-work`, it keeps the directory and prints `verilex-agent: run files kept in <dir>`. `log/verilex.log` lists each verilex command the brain sent to the launcher, with its exit code or the refusal. `log/egress.log` lists each network request and whether the proxy refused it.
+The launcher removes the directory at the end, also when SIGTERM, SIGINT or SIGHUP ends the run: it stops the brain, removes the directory, prints nothing on stdout and exits `2` (inconclusive). A second SIGTERM or SIGINT ends the launcher at once, but SIGHUP stays ignored after the first, because a closed terminal sends it twice. With `--keep-work`, it keeps the directory and prints `verilex-agent: run files kept in <dir>`. `log/verilex.log` lists each verilex command the brain sent to the launcher, with its exit code or the refusal. `log/egress.log` lists each network request and whether the proxy refused it.
 
 ## Harness credentials
 

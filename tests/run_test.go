@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -372,6 +374,67 @@ func TestCleanupEvidenceSecretLeakMakesRunInconclusive(t *testing.T) {
 	equal(t, *record.Reason, "secret pattern in evidence key.pem")
 	equal(t, record.Cleanup, "done")
 	contains(t, done.stdout, "  inconclusive  cleanup: secret pattern in evidence key.pem\n")
+}
+
+// A product error that echoes a token keeps the run inconclusive, and the token reaches none of
+// what verilex writes or prints: the output, the run record, the usage ledger or the evidence.
+func TestSecretInWordDetailIsRedactedEverywhere(t *testing.T) {
+	root := product(t)
+	token := "ghp_" + strings.Repeat("A", 36)
+	addWord(t, root, "store-glanced", `tok="ghp_$(printf 'A%.0s' $(seq 36))"`+"\n"+`printf '{"verdict": "fail", "preconditions_held": true, "detail": "auth failed for token %s"}\n' "$tok"`+"\nexit 1\n")
+	done := verilex(t, root, nil, "run", "--json", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, *record.Verdict, "inconclusive")
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence stdout"))
+	equal(t, record.Words[1].Detail, any("auth failed for token [redacted]"))
+	contains(t, done.stdout, "auth failed for token [redacted]")
+	state := filepath.Join(filepath.Dir(root), "state")
+	written := map[string]string{"--json": done.stdout + done.stderr}
+	err := filepath.WalkDir(state, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			written[path] = read(t, path)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, strings.Join(slices.Collect(maps.Keys(written)), "\n"), filepath.Join(state, "usage", record.Run, "run.json"))
+	for path, text := range written {
+		if strings.Contains(text, token) {
+			t.Fatalf("%s keeps the token: %q", path, text)
+		}
+	}
+}
+
+// Redaction replaces only the secret in a file, a whole private key block included, and never
+// writes through a link to a file outside the evidence.
+func TestEvidenceRedactionKeepsTheRestOfEachFile(t *testing.T) {
+	root := product(t)
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	write(t, filepath.Join(root, ".verilex", "config.yaml"), "project: tally\nsecret_patterns: ['(?=PROBE-)']\n", 0644)
+	addWord(t, root, "store-glanced", `tok="ghp_$(printf 'A%.0s' $(seq 36))"
+printf 'before\377%s\377after\n' "$tok" > "$VERILEX_EVIDENCE/bytes.bin"
+printf -- '-----BEGIN PRIVATE KEY-----\nMIIBODY\n-----END PRIVATE KEY-----\nkept\n' > "$VERILEX_EVIDENCE/key.pem"
+printf -- '-----BEGIN RSA PRIVATE KEY-----\nMIIBODY\n' > "$VERILEX_EVIDENCE/cut.pem"
+printf 'note PROBE-1\n' > "$VERILEX_EVIDENCE/note.txt"
+printf '%s\n' "$tok" > "$OUTSIDE"
+ln -s "$OUTSIDE" "$VERILEX_EVIDENCE/linked.txt"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done := verilex(t, root, map[string]string{"OUTSIDE": outside}, "run", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence bytes.bin"))
+	evidence := record.Words[1].Evidence
+	equal(t, read(t, filepath.Join(evidence, "bytes.bin")), "before\377[redacted]\377after\n")
+	equal(t, read(t, filepath.Join(evidence, "key.pem")), "[redacted]\nkept\n")
+	equal(t, read(t, filepath.Join(evidence, "cut.pem")), "[redacted]")
+	equal(t, read(t, filepath.Join(evidence, "note.txt")), "[redacted]\n")
+	equal(t, read(t, filepath.Join(evidence, "linked.txt")), "[redacted]\n")
+	equal(t, read(t, outside), "ghp_"+strings.Repeat("A", 36)+"\n")
+	equal(t, read(t, filepath.Join(evidence, "stdout")), `{"verdict": "pass", "observation": "fine"}`+"\n")
 }
 
 func TestWordFailureWithoutDetailDoesNotFormatNone(t *testing.T) {

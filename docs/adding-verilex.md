@@ -4,7 +4,7 @@
 
 ```tree
 .verilex/
-  config.yaml        `project: <name>`; optional `secret_patterns: [<regex>, ...]`; optional `skills: [<dir>, ...]` (default `.cursor/skills`, `.claude/skills`, `.agents/skills`)
+  config.yaml        `project: <name>`; optional `secret_patterns: [<regex>, ...]`, each matching a whole secret, which verilex replaces with `[redacted]` (a match of no text blanks the file); optional `skills: [<dir>, ...]` (default `.cursor/skills`, `.claude/skills`, `.agents/skills`)
   frame/
     launch           prints `{"instance": <anything>}` on stdout
     doctor           exits 0 when the instance is this run's and healthy

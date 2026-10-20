@@ -20,10 +20,17 @@ const docsDir = "docs"
 // An anchor is a line of its own, outside code blocks, that ties the passage it sits in to
 // claim ids: <!-- claims: chain-skipped chain-runs-live -->. The passage is the file's section
 // under the nearest heading above the anchor, up to the next heading. An HTML comment renders as
-// nothing, and a claim id survives a refactor where a line number would not.
+// nothing, and a claim id survives a refactor where a line number would not. A comment that opens
+// with the word claim or claims in any case, then a space, one of : ; , =, a dash before a space
+// or a dash, or the end (<!-- claim: chain-red -->, <!-- claims; chain-red -->), is meant as an
+// anchor, so it is read as one and refused unless written exactly or read as a note.
+// A note goes on with a plain word of letters and digits that is no claim id (<!-- Claims below
+// were reviewed -->, matched by note), and is not an anchor; nor is <!-- claim-free section -->.
+// A mistyped anchor that reads as a note (<!-- claims item listed -->) ties nothing.
 var (
-	anchorStart = regexp.MustCompile(`^<!--\s*claims:`)
+	anchorStart = regexp.MustCompile(`(?i)^<!--\s*claims?(?:[\s:;,=]|-[\s-]|$)`)
 	anchorLine  = regexp.MustCompile(`^<!--\s*claims:(.*)-->$`)
+	note        = regexp.MustCompile(`(?i)^<!--\s*claims?\s+([\pL\pN]+)(?:\s|-->|$)`)
 )
 
 // Passage is a doc section and the claims its anchors name.
@@ -73,6 +80,11 @@ func (ix Index) passages(p dictionary.Project) ([]Passage, error) {
 				continue
 			}
 			m := anchorLine.FindStringSubmatch(line)
+			if word := note.FindStringSubmatch(line); m == nil && word != nil {
+				if _, ok := ix.claims[word[1]]; !ok {
+					continue
+				}
+			}
 			if m == nil || len(strings.Fields(m[1])) == 0 {
 				return fmt.Errorf("%s:%d: write an anchor as `<!-- claims: <claim> ... -->`, naming at least one claim", file, i+1)
 			}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -118,6 +119,10 @@ func scan(dir string, patterns []*regexp2.Regexp) (leak string, err error) {
 			return leak, err
 		}
 		target, err := rename(path, string(name))
+		if errors.Is(err, fs.ErrPermission) {
+			// A name in a directory another user owns cannot change: the leak is still named.
+			continue
+		}
 		if err != nil {
 			return leak, err
 		}
@@ -270,7 +275,9 @@ func redactValue(v any, patterns []*regexp2.Regexp) (any, bool, error) {
 		return result, found, nil
 	case map[string]any:
 		result, found := make(map[string]any, len(v)), false
-		for key, item := range v {
+		// Sorted keys number alike keys the same way on every run.
+		for _, key := range slices.Sorted(maps.Keys(v)) {
+			item := v[key]
 			cleanKey, keyHit, err := redactValue(key, patterns)
 			if err != nil {
 				return v, false, err

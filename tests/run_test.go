@@ -723,6 +723,31 @@ echo '{"verdict": "pass", "observation": "fine"}'
 	}
 }
 
+// A secret name in a directory another user owns cannot be renamed: the run still ends
+// inconclusive and names the leak.
+func TestSecretNameInDirectoryAnotherUserOwns(t *testing.T) {
+	if err := exec.Command("unshare", "--map-auto", "--map-root-user", "true").Run(); err != nil {
+		t.Skipf("unshare cannot map a subordinate uid here (%v), so no file can belong to another user", err)
+	}
+	root := product(t)
+	t.Cleanup(func() {
+		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+	})
+	addWord(t, root, "store-glanced", `mkdir "$VERILEX_EVIDENCE/d"
+touch "$VERILEX_EVIDENCE/d/ghp_$(printf 'A%.0s' $(seq 36))"
+unshare --map-auto --map-root-user chown -R 1:1 "$VERILEX_EVIDENCE/d"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done := verilex(t, root, nil, "run", "--json", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, verdicts(record), []string{"green", "inconclusive"})
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence [redacted]"))
+	if strings.Contains(done.stdout+done.stderr, "ghp_"+strings.Repeat("A", 36)) {
+		t.Fatalf("a token reached the output: %q", done.stdout+done.stderr)
+	}
+}
+
 func TestWordFailureWithoutDetailDoesNotFormatNone(t *testing.T) {
 	root := product(t)
 	addWord(t, root, "store-flaked", `echo '{"verdict": "fail", "preconditions_held": true}'`+"\nexit 1\n")

@@ -23,13 +23,14 @@ const docsDir = "docs"
 // nothing, and a claim id survives a refactor where a line number would not. A comment that opens
 // with the word claim or claims in any case, then a space, one of : ; , =, a dash before a space
 // or a dash, or the end (<!-- claim: chain-red -->, <!-- claims; chain-red -->), is meant as an
-// anchor, so it is read as one and refused unless written exactly; it is never silently ignored.
+// anchor, so it is read as one and refused unless written exactly or read as a note.
 // A note goes on with a plain word of letters and digits that is no claim id (<!-- Claims below
 // were reviewed -->, matched by note), and is not an anchor; nor is <!-- claim-free section -->.
+// A mistyped anchor that reads as a note (<!-- claims item listed -->) ties nothing.
 var (
 	anchorStart = regexp.MustCompile(`(?i)^<!--\s*claims?(?:[\s:;,=]|-[\s-]|$)`)
 	anchorLine  = regexp.MustCompile(`^<!--\s*claims:(.*)-->$`)
-	note        = regexp.MustCompile(`(?i)^<!--\s*claims?\s+([\pL\pN_]+)(?:\s|-->|$)`)
+	note        = regexp.MustCompile(`(?i)^<!--\s*claims?\s+([\pL\pN]+)(?:\s|-->|$)`)
 )
 
 // Passage is a doc section and the claims its anchors name.

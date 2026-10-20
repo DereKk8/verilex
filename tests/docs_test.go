@@ -76,15 +76,17 @@ func TestChangeLookupRefusesABrokenDocAnchor(t *testing.T) {
 
 	// A near-miss anchor is refused, not silently ignored (issue #49 S8).
 	for _, anchor := range []string{"<!-- claim: item-listed -->", "<!-- Claims: item-listed -->", "<!-- claims item-listed -->", "<!--claims=item-listed-->",
-		"<!-- claims; item-listed -->", "<!-- claims, item-listed -->", "<!-- claims- item-listed -->", "<!-- claims -->"} {
+		"<!-- claims; item-listed -->", "<!-- claims, item-listed -->", "<!-- claims- item-listed -->", "<!-- claims -->", "<!-- claims item_listed -->", "<!-- Claims Item_listed -->"} {
 		writeDoc(t, filepath.Join(root, "docs", "guide.md"), "# Guide\n\n## Listing\n"+anchor+"\n")
 		done = verilex(t, root, nil, "index", "--changed", "docs/guide.md")
 		equal(t, done.code, 2)
 		equal(t, done.stdout, "")
 		equal(t, done.stderr, "verilex: refused: docs/guide.md:4: write an anchor as `<!-- claims: <claim> ... -->`, naming at least one claim\n")
 	}
-	// A note that opens with the word but goes on with a plain word is no anchor.
-	for _, comment := range []string{"<!-- claimed by nobody -->", "<!-- Claims below were reviewed in Q3 -->", "<!-- claim numbers come from the audit -->",
+	// A note that opens with the word but goes on with a plain word is no anchor. So is a mistyped
+	// anchor that reads as one, such as <!-- claims item listed -->: it ties nothing (documented).
+	for _, comment := range []string{"<!-- claims item listed -->", "<!-- claims for item-listed -->",
+		"<!-- claimed by nobody -->", "<!-- Claims below were reviewed in Q3 -->", "<!-- claim numbers come from the audit -->",
 		"<!-- claim-free section -->", "<!-- claim/owner map in README -->", "<!-- claims.md lists them -->"} {
 		writeDoc(t, filepath.Join(root, "docs", "guide.md"), "# Guide\n\n## Listing\n"+comment+"\n")
 		done = verilex(t, root, nil, "index", "--changed", "bin/tally")

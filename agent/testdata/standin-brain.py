@@ -60,7 +60,8 @@ probe("write tmp lookalike outside", lambda: write_marker(os.environ["STANDIN_OU
 probe("write brain executable", lambda: write_marker(__file__))
 
 for label, variable in [("ledger", "STANDIN_LEDGER"), ("verilex home", "STANDIN_STATE"),
-                        ("caller home", "VERILEX_HOME"), ("caller ledger", "VERILEX_LEDGER")]:
+                        ("caller home", "VERILEX_HOME"), ("caller ledger", "VERILEX_LEDGER"),
+                        ("judgments", "STANDIN_JUDGMENTS")]:
     # The last two paths were supplied under separate names: the sandbox drops
     # VERILEX_HOME and VERILEX_LEDGER themselves.
     target = Path(os.environ["STANDIN_" + variable] if variable.startswith("VERILEX_") else os.environ[variable])

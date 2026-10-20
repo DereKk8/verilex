@@ -1,0 +1,1 @@
+{"type":"object","additionalProperties":false,"properties":{"coverage":{"type":"string","enum":["full","partial","none"]},"claims":{"type":"array","items":{"type":"string"}},"confidence":{"type":"number","minimum":0,"maximum":1},"reason":{"type":"string"}},"required":["coverage","claims","confidence","reason"]}

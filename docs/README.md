@@ -31,6 +31,7 @@ This index is also the navigation of the docs site: each `##` heading is a secti
 
 - [Run tickets](tickets.md): what a run proves and which brain drives it, with profiles and precedence.
 - [Companion launcher](launcher.md): `verilex-agent`, which returns verilex's own verdict for a brain's runs.
+- [The intent judge](intent-judge.md): how the launcher decides by meaning whether the claims prove an intent, and when it judges again.
 - [Verdict rule](verdict-rule.md): how the launcher turns the brain's runs into one result, row by row.
 - [Sandbox](sandbox.md): what the brain can read, write and reach, and what the sandbox does not cover.
 

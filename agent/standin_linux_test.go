@@ -49,7 +49,9 @@ func TestScriptedStandinBrain(t *testing.T) {
 			}
 			home := filepath.Join(dir, "state")
 			callerHome, callerLedger := filepath.Join(dir, "caller-home"), filepath.Join(dir, "caller-ledger")
-			for _, target := range []string{home, ledger, callerHome, callerLedger} {
+			// launcherArgs gives the launcher this judgments store.
+			judgments := filepath.Join(dir, "judgments")
+			for _, target := range []string{home, ledger, callerHome, callerLedger, judgments} {
 				put(filepath.Join(target, "standin-marker"), marker)
 			}
 			credential := filepath.Join(os.Getenv("HOME"), ".standin", "auth")
@@ -108,7 +110,7 @@ func TestScriptedStandinBrain(t *testing.T) {
 				"STANDIN_NAMESPACES": string(data),
 				"STANDIN_LAUNCHER":   agentBin, "STANDIN_COMMANDS": commands,
 				"STANDIN_LEDGER": ledger, "STANDIN_STATE": home,
-				"STANDIN_VERILEX_HOME": callerHome, "STANDIN_VERILEX_LEDGER": callerLedger,
+				"STANDIN_VERILEX_HOME": callerHome, "STANDIN_VERILEX_LEDGER": callerLedger, "STANDIN_JUDGMENTS": judgments,
 				"VERILEX_HOME": callerHome, "VERILEX_LEDGER": callerLedger,
 				"STANDIN_OTHER_HOME": otherHome, "STANDIN_OUTSIDE": outside,
 				"STANDIN_HOST_PID": strconv.Itoa(os.Getpid()), "STANDIN_HOST_PORT": port,
@@ -174,7 +176,7 @@ func TestScriptedStandinBrain(t *testing.T) {
 					t.Fatalf("brain scratch write reached the host: %s", path)
 				}
 			}
-			for _, target := range []string{home, ledger, callerHome, callerLedger} {
+			for _, target := range []string{home, ledger, callerHome, callerLedger, judgments} {
 				if _, err := os.Stat(filepath.Join(target, "escaped")); !os.IsNotExist(err) {
 					t.Fatalf("the brain wrote outside its sandbox: %s", target)
 				}
@@ -264,7 +266,7 @@ func standinProbes() map[string]any {
 	for _, label := range []string{"write project", "create project file", "mkdir project", "rename project file", "unlink project file", "chmod project file", "symlink in project", "hardlink from project", "write credential", "read other home file", "write system", "write brain executable", "read logs", "write logs", "open terminal", "see host process", "host loopback", "host unix socket", "host abstract socket"} {
 		want[label] = false
 	}
-	for _, label := range []string{"ledger", "verilex home", "caller home", "caller ledger"} {
+	for _, label := range []string{"ledger", "verilex home", "caller home", "caller ledger", "judgments"} {
 		for _, op := range []string{"read ", "write ", "symlink read "} {
 			want[op+label] = false
 		}

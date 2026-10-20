@@ -1,12 +1,12 @@
 # Companion launcher
 
-`verilex-agent` is a separate module in `agent/`. The core does not import it and does not start a harness. The launcher reads the run spec through `verilex ticket`, starts the brain that spec names with the verilex skill and the intent, and prints the JSON of one `verilex run` the brain made, chosen by the [verdict rule](verdict-rule.md). That JSON is verilex's own verdict, byte for byte, including its missed-claim warning (`warning`, `uncovered`, `unmapped`, `unclaimed`, `unrun`). On a diff, the floor holds every claim that `verilex index --changed` says the diff touches, so a green that skips one is inconclusive and names it. The brain's message is not the verdict. A real harness starts only with `--allow-harness`. A named executable (`--brain`) is how tests and bots supply a brain without one.
+`verilex-agent` is a separate module in `agent/`. The core does not import it and does not start a harness. The launcher reads the run spec through `verilex ticket`, starts the brain that spec names with the verilex skill and the intent, and prints the JSON of one `verilex run` the brain made, chosen by the [verdict rule](verdict-rule.md). That JSON is verilex's own verdict, byte for byte, including its missed-claim warning (`warning`, `uncovered`, `unmapped`, `unclaimed`, `unrun`). On a diff, the floor holds every claim that `verilex index --changed` says the diff touches, so a green that skips one is inconclusive and names it. The brain's message is not the verdict. Before the brain starts, [the intent judge](intent-judge.md) decides by meaning whether the product's claims prove the intent: only a sure `full` can go green, and its claims join the floor. A real harness, and the built-in judge, start only with `--allow-harness`. A named executable (`--brain`, `--judge`) is how tests and bots supply a brain or a judge without one.
 
 ## Usage
 
 ```
 go build -o verilex-agent ./agent/cmd/verilex-agent
-verilex-agent --ticket deep.yaml --project . --skill skills/verilex/SKILL.md
+verilex-agent --ticket deep.yaml --project . --skill skills/verilex/SKILL.md --allow-harness
 verilex-agent --diff main...HEAD --claim item-listed --harness claude-code --model <model> --allow-harness
 ```
 

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/DereKk8/verilex/agent/internal/harness"
+	"github.com/DereKk8/verilex/agent/internal/judge"
 	"github.com/DereKk8/verilex/agent/internal/prompt"
 	"github.com/DereKk8/verilex/agent/internal/proxy"
 	"github.com/DereKk8/verilex/agent/internal/sandbox"
@@ -29,7 +30,10 @@ type Options struct {
 	Claims                                 []string
 	Harness, Model, Effort, Profile        string
 	Ledger, Home, Skill, Brain, Harnesses  string
-	Suggest, AllowHarness, JSON, KeepWork  bool
+	// Judge is an executable that judges the intent instead of the built-in judge, JudgeModel the
+	// model the judge asks, and Judgments the store of judgments, judge.DefaultDir when empty.
+	Judge, JudgeModel, Judgments          string
+	Suggest, AllowHarness, JSON, KeepWork bool
 	// Interrupt, when it ends, stops the run like a ended budget does, but the run is
 	// inconclusive and prints no verdict. The launcher ends it on SIGTERM, SIGINT and SIGHUP.
 	Interrupt context.Context
@@ -109,6 +113,7 @@ type ticket struct {
 	Model      string `json:"model"`
 	Effort     string `json:"effort"`
 	TimeBudget string `json:"time_budget"`
+	JudgeModel string `json:"judge_model"`
 }
 
 // dirs is one run's directory. Everything the run creates lives under root, so one removal
@@ -117,6 +122,7 @@ type ticket struct {
 type dirs struct {
 	root    string
 	share   string // prompt, the brain's verilex command
+	judge   string // the judge's prompt files and its empty working directory
 	brain   string // the brain's home and temporary files
 	log     string // the brain's output, its verilex commands and its network requests
 	sock    string // the launcher's verilex socket
@@ -130,11 +136,11 @@ func newDirs() (dirs, error) {
 		return dirs{}, err
 	}
 	d := dirs{
-		root: root, share: filepath.Join(root, "share"), brain: filepath.Join(root, "brain"),
+		root: root, share: filepath.Join(root, "share"), judge: filepath.Join(root, "judge"), brain: filepath.Join(root, "brain"),
 		log: filepath.Join(root, "log"), sock: filepath.Join(root, "sock"),
 		sandbox: filepath.Join(root, "sandbox"), home: filepath.Join(root, "home"),
 	}
-	for _, dir := range []string{d.share, d.brain, d.log, d.sock, d.sandbox} {
+	for _, dir := range []string{d.share, filepath.Join(d.judge, "cwd"), d.brain, d.log, d.sock, d.sandbox} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return d, err
 		}
@@ -179,6 +185,24 @@ func Run(opts Options, timer Timer) (result Result, err error) {
 	if err != nil {
 		return Result{}, err
 	}
+	// The store exists before the brain starts, so the sandbox can hide it: a judgment the brain
+	// could write would decide a later run.
+	judgments := or(opts.Judgments, judge.DefaultDir())
+	if err = os.MkdirAll(judgments, 0o700); err != nil {
+		return Result{}, err
+	}
+	if judgments, err = abs(judgments); err != nil {
+		return Result{}, err
+	}
+	// The judge resolves before anything starts, so a run spec it cannot serve is refused at once.
+	var judging *intentJudge
+	if spec.Intent != "" {
+		jd, err := judge.Resolve(opts.Judge, spec.JudgeModel, opts.AllowHarness)
+		if err != nil {
+			return Result{}, err
+		}
+		judging = &intentJudge{judge: jd, store: judge.At(judgments), dir: d.judge, log: d.log}
+	}
 	intent := spec.Intent
 	if intent == "" {
 		intent = prompt.DefaultIntent
@@ -203,7 +227,7 @@ func Run(opts Options, timer Timer) (result Result, err error) {
 		defer cancelCause(nil)
 		defer context.AfterFunc(opts.Interrupt, func() { cancelCause(errInterrupted) })()
 	}
-	named, err := floor(ctx, verilex, project, spec.Intent, opts.Claims, changed)
+	named, err := floor(ctx, verilex, project, judging, spec.Intent, opts.Claims, changed)
 	if err != nil {
 		return Result{}, err
 	}
@@ -221,7 +245,7 @@ func Run(opts Options, timer Timer) (result Result, err error) {
 	if err != nil {
 		return Result{}, err
 	}
-	l, err := newLaunch(d, opts, brain, verilex, home, named)
+	l, err := newLaunch(d, opts, brain, verilex, home, judgments, named)
 	if err != nil {
 		return Result{}, err
 	}
@@ -388,7 +412,7 @@ type launch struct {
 	egressLog  *os.File
 }
 
-func newLaunch(d dirs, opts Options, brain harness.Brain, verilex, home string, named []string) (*launch, error) {
+func newLaunch(d dirs, opts Options, brain harness.Brain, verilex, home, judgments string, named []string) (*launch, error) {
 	l := &launch{d: d, argv: brain.Argv, project: opts.Project, files: map[string]string{}, named: named, suggestOn: opts.Suggest}
 	l.read = []string{d.share}
 	if opts.Brain != "" {
@@ -407,8 +431,8 @@ func newLaunch(d dirs, opts Options, brain harness.Brain, verilex, home string, 
 		}
 	}
 	// The brain must not reach what decides a verdict: the verilex home and ledger of this run
-	// and the caller's, the real verilex binary, and this run's own records.
-	l.hide = []string{home, opts.Ledger, verilex, os.Getenv("VERILEX_HOME"), os.Getenv("VERILEX_LEDGER"), d.log, d.home}
+	// and the caller's, the real verilex binary, the judgments, and this run's own records.
+	l.hide = []string{home, opts.Ledger, verilex, os.Getenv("VERILEX_HOME"), os.Getenv("VERILEX_LEDGER"), judgments, d.log, d.home, d.judge}
 	var err error
 	if l.verilexLog, err = os.Create(filepath.Join(d.log, "verilex.log")); err != nil {
 		return nil, err
@@ -600,11 +624,12 @@ func resolve(verilex, project, work string, opts Options) (ticket, string, error
 	return spec, path, nil
 }
 
-// floor is the claims a green must prove: each --claim, each claim verilex index finds for the
-// intent, and each claim the diff touches (verilex index --changed), found by verilex, not by the
-// brain. An intent that names no claim has no intent floor, so only --claim can stand for it. The
-// lookups run within ctx, the run's time budget.
-func floor(ctx context.Context, verilex, project, intent string, claims, changed []string) ([]string, error) {
+// floor is the claims a green must prove: each --claim, each claim the judge found for the
+// intent, and each claim the diff touches (verilex index --changed), found by verilex and the
+// judge, not by the brain. An intent stands only on a "full" the judge is sure of: otherwise no
+// green can prove it, and a --claim cannot stand for it either. The lookups and the judge run
+// within ctx, the run's time budget.
+func floor(ctx context.Context, verilex, project string, judging *intentJudge, intent string, claims, changed []string) ([]string, error) {
 	named := slices.Clone(claims)
 	if len(changed) > 0 {
 		touched, err := touchedClaims(ctx, verilex, project, changed)
@@ -620,32 +645,98 @@ func floor(ctx context.Context, verilex, project, intent string, claims, changed
 	if intent == "" {
 		return named, nil
 	}
-	var rows []struct {
-		Claim string `json:"claim"`
+	judged, err := judging.intent(ctx, verilex, project, intent)
+	if err != nil {
+		return nil, err
 	}
-	err := verilexJSON(ctx, verilex, project, &rows, "index", "--intent", intent, "--json")
-	switch {
-	case ctx.Err() != nil:
-		return nil, inconclusive("%v before verilex index --intent answered", endedReason(ctx))
-	case errors.Is(err, context.DeadlineExceeded):
-		return nil, inconclusive("verilex index --intent did not answer within %s", lookupTimeout)
-	case err != nil:
-		// The launcher made this call itself, so a failure is the environment's, not the caller's.
-		return nil, inconclusive("verilex index --intent failed, so the intent's claims are unknown: %v", err)
+	if !judged.Stands() {
+		return nil, unproven(intent, judged)
 	}
-	found := 0
-	for _, row := range rows {
-		if row.Claim != "" {
-			found++
-			if !slices.Contains(named, row.Claim) {
-				named = append(named, row.Claim)
-			}
+	for _, claim := range judged.Claims {
+		if !slices.Contains(named, claim) {
+			named = append(named, claim)
 		}
 	}
-	if found == 0 && len(claims) == 0 {
-		return nil, inconclusive("intent %q names no claim (verilex index --intent found none), so no verilex run can prove it; name the claims with --claim", intent)
-	}
 	return named, nil
+}
+
+// unproven is the answer for an intent the judge did not find fully proven with confidence.
+func unproven(intent string, j judge.Judgment) error {
+	why := fmt.Sprintf("the judge (%s) answered %s with confidence %.2f: %s", j.Model, j.Coverage, j.Confidence, strings.TrimRight(oneLine(j.Reason), "."))
+	switch {
+	case j.Coverage == judge.None:
+		return inconclusive("intent %q names no claim: %s; so no verilex run can prove it", intent, why)
+	case j.Coverage == judge.Partial:
+		return inconclusive("intent %q is only partly proven by %s: %s; so no green can prove all of it", intent, strings.Join(j.Claims, ", "), why)
+	}
+	return inconclusive("intent %q may be proven by %s, but the judge is not sure: %s, below %.2f; so no green can rest on it", intent, strings.Join(j.Claims, ", "), why, judge.MinConfidence)
+}
+
+// intentJudge is the intent's judge, the store it reuses judgments from, and where it writes its
+// prompt and output.
+type intentJudge struct {
+	judge    judge.Judge
+	store    judge.Store
+	dir, log string
+}
+
+// judgeTimeout bounds one judgment. A model answers in seconds, so one that takes longer is stuck.
+const judgeTimeout = 2 * time.Minute
+
+// intent returns the judgment of intent over the product's claims: the stored one while its
+// stamp holds, else a new one, which it stores. A judge that fails, hangs or answers outside the
+// schema leaves the claims unknown: that is the environment's failure, never a verdict.
+func (j *intentJudge) intent(ctx context.Context, verilex, project, intent string) (judge.Judgment, error) {
+	var raw json.RawMessage
+	err := verilexJSON(ctx, verilex, project, &raw, "claims", "--json")
+	switch {
+	case ctx.Err() != nil:
+		return judge.Judgment{}, inconclusive("%v before verilex claims answered", endedReason(ctx))
+	case errors.Is(err, context.DeadlineExceeded):
+		return judge.Judgment{}, inconclusive("verilex claims did not answer within %s", lookupTimeout)
+	case err != nil:
+		// The launcher made this call itself, so a failure is the environment's, not the caller's.
+		return judge.Judgment{}, inconclusive("verilex claims failed, so the intent's claims are unknown: %v", err)
+	}
+	catalog, err := judge.Catalog(raw)
+	if err != nil {
+		return judge.Judgment{}, inconclusive("%v", err)
+	}
+	if found, ok := j.store.Find(intent, j.judge, catalog); ok {
+		return found, nil
+	}
+	system := filepath.Join(j.dir, "system.txt")
+	request := filepath.Join(j.dir, "request.txt")
+	for path, text := range map[string]string{system: judge.System, request: judge.Request(intent, catalog)} {
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			return judge.Judgment{}, err
+		}
+	}
+	stdin, err := os.Open(request)
+	if err != nil {
+		return judge.Judgment{}, err
+	}
+	defer stdin.Close()
+	env := append(os.Environ(), "VERILEX_JUDGE_MODEL="+j.judge.Model, "VERILEX_JUDGE_SYSTEM="+system)
+	stdout, stderr, err := command(ctx, judgeTimeout, j.judge.Command(system), filepath.Join(j.dir, "cwd"), env, stdin)
+	os.WriteFile(filepath.Join(j.log, "judge.out"), stdout, 0o600)
+	os.WriteFile(filepath.Join(j.log, "judge.err"), stderr, 0o600)
+	switch {
+	case ctx.Err() != nil:
+		return judge.Judgment{}, inconclusive("%v before the judge answered", endedReason(ctx))
+	case errors.Is(err, context.DeadlineExceeded):
+		return judge.Judgment{}, inconclusive("the judge did not answer within %s, so the intent's claims are unknown", judgeTimeout)
+	case err != nil:
+		return judge.Judgment{}, inconclusive("the judge failed, so the intent's claims are unknown: %s", or(oneLine(string(stderr)), err.Error()))
+	}
+	answer, err := judge.Parse(stdout, catalog)
+	if err != nil {
+		return judge.Judgment{}, inconclusive("%v, so the intent's claims are unknown", err)
+	}
+	judged := judge.New(intent, j.judge, answer, catalog, time.Now())
+	// A judgment the store cannot keep is still this run's judgment; the next run makes it again.
+	_ = j.store.Record(judged)
+	return judged, nil
 }
 
 // touchedClaims is the claims verilex says the changed paths touch. A failed lookup leaves the
@@ -689,32 +780,46 @@ const lookupTimeout = 30 * time.Second
 // not from --project). A refusal comes back as verilex worded it, and a deadline as
 // context.DeadlineExceeded.
 func verilexJSON(ctx context.Context, verilex, project string, out any, args ...string) error {
-	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	stdout, stderr, err := command(ctx, lookupTimeout, append([]string{verilex, "--project", project}, args...), project, os.Environ(), nil)
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return err
+	}
+	if err != nil {
+		detail := oneLine(string(stderr))
+		if detail == "" {
+			detail = err.Error()
+		}
+		return errors.New(strings.TrimPrefix(detail, "verilex: refused: "))
+	}
+	if err := json.Unmarshal(stdout, out); err != nil {
+		return fmt.Errorf("verilex %s JSON: %v", args[0], err)
+	}
+	return nil
+}
+
+// command runs argv in dir until it exits, ctx ends or timeout passes, and returns its output.
+// It runs in a process group of its own, so the deadline ends every process it started; a
+// deadline comes back as ctx's error or context.DeadlineExceeded.
+func command(ctx context.Context, timeout time.Duration, argv []string, dir string, env []string, stdin *os.File) ([]byte, []byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, verilex, append([]string{"--project", project}, args...)...)
-	cmd.Dir = project
-	cmd.Env = os.Environ()
-	// A process group of its own, so the deadline ends every process it started.
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = dir
+	cmd.Env = env
+	if stdin != nil {
+		cmd.Stdin = stdin
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		detail := oneLine(stderr.String())
-		if detail == "" {
-			detail = err.Error()
-		}
-		return errors.New(strings.TrimPrefix(detail, "verilex: refused: "))
+	err := cmd.Run()
+	if err != nil && ctx.Err() != nil {
+		return stdout.Bytes(), stderr.Bytes(), ctx.Err()
 	}
-	if err := json.Unmarshal(stdout.Bytes(), out); err != nil {
-		return fmt.Errorf("verilex %s JSON: %v", args[0], err)
-	}
-	return nil
+	return stdout.Bytes(), stderr.Bytes(), err
 }
 
 func ticketYAML(opts Options) string {
@@ -730,6 +835,7 @@ func ticketYAML(opts Options) string {
 	write("harness", opts.Harness)
 	write("model", opts.Model)
 	write("effort", opts.Effort)
+	write("judge_model", opts.JudgeModel)
 	return b.String()
 }
 

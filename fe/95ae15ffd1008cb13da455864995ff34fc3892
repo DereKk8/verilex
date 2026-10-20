@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "summary": "verilex redacts every secret it detects in evidence before it reads that evidence, and verify-verilex capture keeps only safe reproduction controls from the inherited environment.",
+  "files": [
+    {
+      "path": "internal/runner/evidence.go",
+      "summary": "Owns secret detection and now also redaction of word and frame evidence.",
+      "annotations": [
+        {
+          "newRange": [
+            17,
+            17
+          ],
+          "summary": "The built-in private key pattern now spans the block to its END line, or to the end of the file.",
+          "rationale": "Redaction replaces only what a pattern matches, so a header-only match would leave the key body in evidence. Detection is unchanged because the alternation always matches once the header is present. TestEvidenceRedactionKeepsTheRestOfEachFile checks a full block and a block with no END line.",
+          "author": "fm/verilex-secret-evidence"
+        },
+        {
+          "newRange": [
+            64,
+            73
+          ],
+          "summary": "scan now walks every file, redacts each one that matches, and still names the first leaking file as the reason.",
+          "rationale": "The old scan stopped at the first match, so later files kept their secrets. The reason text stays 'secret pattern in evidence <file>', so verdicts and reasons do not change. The verify-verilex honesty secret row and the project-pattern recipe still print the same cause.",
+          "author": "fm/verilex-secret-evidence"
+        },
+        {
+          "newRange": [
+            75,
+            139
+          ],
+          "summary": "redact maps regexp2 rune matches back to byte offsets, and replace renames a temporary file over the path.",
+          "rationale": "Byte offsets keep non-UTF-8 bytes outside a match intact, so binary evidence is not rewritten. A zero-width match gives no secret extent, so the whole file is replaced. The rename replaces a symlink itself, so verilex never writes through a word's link to a file outside the evidence. A verify-verilex attack confirmed the outside target stayed unchanged.",
+          "author": "fm/verilex-secret-evidence"
+        }
+      ]
+    },
+    {
+      "path": "internal/runner/runner.go",
+      "summary": "Run.word scans and redacts evidence before it reads the word's stdout.",
+      "annotations": [
+        {
+          "newRange": [
+            393,
+            397
+          ],
+          "summary": "The scan moved ahead of the stdout read and verdict.Judge.",
+          "rationale": "Detail, observation and reported values come from the redacted stdout, so run.json, the usage ledger, --json output and the launcher JSON hold no detected secret. On main the token from the verdicts.md attack reached all four. Frames already read stdout only after scan, and a leaking frame never has its stdout parsed.",
+          "author": "fm/verilex-secret-evidence"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/scripts/capture",
+      "summary": "Writes the env evidence file with values for reproduction controls only.",
+      "annotations": [
+        {
+          "newRange": [
+            27,
+            36
+          ],
+          "summary": "capture lists exported names with compgen -e and withholds every value outside the control allowlist.",
+          "rationale": "Evidence is meant to be shared, so an inherited secret with a TALLY_, VERILEX_ or VX_ name must not be saved (issue 59). compgen -e avoids parsing env output, where a value with a newline could forge a line. The ledger variables are safe to record because capture refuses them unless they point inside the session.",
+          "author": "fm/verilex-secret-evidence"
+        }
+      ]
+    },
+    {
+      "path": "scripts/smoke",
+      "summary": "Adds the regression for issue 59 through the public vx entry point.",
+      "annotations": [
+        {
+          "newRange": [
+            13,
+            19
+          ],
+          "summary": "smoke runs vx with a public canary variable and fails if the canary value appears anywhere in the evidence.",
+          "rationale": "This check failed on main with 'smoke: capture evidence kept an inherited value' and passes on this branch. It also checks that TALLY_DEFECT keeps its value, so the allowlist still records reproduction controls.",
+          "author": "fm/verilex-secret-evidence"
+        }
+      ]
+    }
+  ]
+}

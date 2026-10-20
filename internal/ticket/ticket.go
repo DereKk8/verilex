@@ -24,7 +24,7 @@ import (
 var Efforts = []string{"minimal", "low", "medium", "high", "xhigh", "max"}
 
 // brain lists the fields every level may set, in output order.
-var brain = []string{"harness", "model", "effort", "token_budget", "time_budget"}
+var brain = []string{"harness", "model", "effort", "token_budget", "time_budget", "judge_model"}
 
 // builtIn is the lowest level. It names no harness or model: verilex stays harness-agnostic.
 var builtIn = map[string]any{"effort": "medium"}
@@ -36,15 +36,17 @@ var (
 
 // Ticket is one run's resolved ticket. From names the level that set each resolved field.
 type Ticket struct {
-	Intent      string            `json:"intent,omitempty"`
-	Diff        string            `json:"diff,omitempty"`
-	Profile     string            `json:"profile,omitempty"`
-	Harness     string            `json:"harness"`
-	Model       string            `json:"model"`
-	Effort      string            `json:"effort"`
-	TokenBudget int               `json:"token_budget,omitempty"`
-	TimeBudget  string            `json:"time_budget,omitempty"`
-	From        map[string]string `json:"from"`
+	Intent      string `json:"intent,omitempty"`
+	Diff        string `json:"diff,omitempty"`
+	Profile     string `json:"profile,omitempty"`
+	Harness     string `json:"harness"`
+	Model       string `json:"model"`
+	Effort      string `json:"effort"`
+	TokenBudget int    `json:"token_budget,omitempty"`
+	TimeBudget  string `json:"time_budget,omitempty"`
+	// JudgeModel is the model the launcher's intent judge asks; empty leaves the launcher's default.
+	JudgeModel string            `json:"judge_model,omitempty"`
+	From       map[string]string `json:"from"`
 }
 
 // Sources are the profiles files below the ticket: the project's and the user's. A missing
@@ -138,6 +140,8 @@ func Resolve(path string, src Sources) (Ticket, error) {
 				t.TokenBudget = value.(int)
 			case "time_budget":
 				t.TimeBudget = value.(string)
+			case "judge_model":
+				t.JudgeModel = value.(string)
 			}
 			break
 		}
@@ -259,7 +263,7 @@ func check(field string, value any) (any, error) {
 		if !profileName.MatchString(s) {
 			return nil, fmt.Errorf("a profile name is letters, digits, '.', '_' or '-', not %s", shown(value))
 		}
-	case "harness", "model":
+	case "harness", "model", "judge_model":
 		if !plainName.MatchString(s) {
 			return nil, fmt.Errorf("must be a plain name without spaces, not %s", shown(value))
 		}

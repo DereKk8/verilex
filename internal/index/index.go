@@ -188,7 +188,8 @@ func (ix Index) Details(claim, word string) (dictionary.Word, Word, error) {
 // Intent finds the claims an intent names, best first and at most limit. A claim is found by its
 // name, sentence, evidence, aliases, sources and words; a term counts double in its name or
 // sentence, and a rarer term counts more. A claim must also cover at least half of what the
-// intent says, and a two-term intent must match both terms or name the claim (see covers).
+// intent says, share a term that sets it apart, and, for a two-term intent, match both terms or
+// name the claim (see covers).
 func (ix Index) Intent(text string, limit int) []Claim {
 	want := terms.Of(text)
 	primary, secondary := make([][]string, len(ix.Claims)), make([][]string, len(ix.Claims))
@@ -203,9 +204,11 @@ func (ix Index) Intent(text string, limit int) []Claim {
 		claim Claim
 		score float64
 	}
+	// A term every claim holds sets no claim apart; with one claim, every term does.
+	common := func(term string) bool { return len(ix.Claims) > 1 && frequency[term] >= len(ix.Claims) }
 	found := []scored{}
 	for i, c := range ix.Claims {
-		if !covers(want, primary[i], secondary[i], distinct(c, frequency, len(ix.Claims))) {
+		if !covers(want, primary[i], secondary[i], distinct(c, common), common) {
 			continue
 		}
 		score := 0.0
@@ -246,30 +249,35 @@ func (ix Index) Intent(text string, limit int) []Claim {
 
 // covers is the relevance floor: a claim covers an intent when it matches at least half of the
 // intent's terms. A term in the claim's name or sentence counts whole, one only in the rest of
-// the claim counts half. A two-term intent that shares only one term with the claim passes only
+// the claim counts half. A term every claim holds (common) says nothing about which claim is
+// meant, so at least one shared term must be rarer: `store item refunds` shares only store and
+// item, and finds nothing. A two-term intent that shares only one term with the claim passes only
 // when that term names the claim: it is all of a name's distinct terms, so `list works` finds
 // item-listed but `store refunds` finds nothing. Longer intents need two shared terms anyway.
-func covers(want, primary, secondary []string, names [][]string) bool {
-	matched, shared := 0.0, 0
+func covers(want, primary, secondary []string, names [][]string, common func(string) bool) bool {
+	matched, shared, telling := 0.0, 0, false
 	for _, term := range want {
 		switch {
 		case slices.Contains(primary, term):
 			matched, shared = matched+1, shared+1
 		case slices.Contains(secondary, term):
 			matched, shared = matched+0.5, shared+1
+		default:
+			continue
 		}
+		telling = telling || !common(term)
 	}
-	return 2*matched >= float64(len(want)) && (len(want) == 1 || shared > 1 || slices.ContainsFunc(names, func(name []string) bool {
+	return telling && 2*matched >= float64(len(want)) && (len(want) == 1 || shared > 1 || slices.ContainsFunc(names, func(name []string) bool {
 		return len(name) > 0 && !slices.ContainsFunc(name, func(term string) bool { return !slices.Contains(want, term) })
 	}))
 }
 
 // distinct lists, for each name a claim goes by (its own and its aliases'), the name's terms
-// found in fewer than all claims: what sets the name apart from the other claims.
-func distinct(c Claim, frequency map[string]int, claims int) [][]string {
+// that are not common: what sets the name apart from the other claims.
+func distinct(c Claim, common func(string) bool) [][]string {
 	result := [][]string{}
 	for _, name := range append([]string{c.Claim}, c.aliases...) {
-		result = append(result, slices.DeleteFunc(terms.Of(name), func(term string) bool { return frequency[term] >= claims }))
+		result = append(result, slices.DeleteFunc(terms.Of(name), common))
 	}
 	return result
 }

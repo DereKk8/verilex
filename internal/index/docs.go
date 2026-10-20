@@ -20,9 +20,11 @@ const docsDir = "docs"
 // An anchor is a line of its own, outside code blocks, that ties the passage it sits in to
 // claim ids: <!-- claims: chain-skipped chain-runs-live -->. The passage is the file's section
 // under the nearest heading above the anchor, up to the next heading. An HTML comment renders as
-// nothing, and a claim id survives a refactor where a line number would not.
+// nothing, and a claim id survives a refactor where a line number would not. A comment that opens
+// with claim or claims in any case (<!-- claim: chain-red -->) is meant as an anchor, so it is
+// read as one and refused unless written exactly; it is never silently ignored.
 var (
-	anchorStart = regexp.MustCompile(`^<!--\s*claims:`)
+	anchorStart = regexp.MustCompile(`(?i)^<!--\s*claims?(?:[\s:=]|-->)`)
 	anchorLine  = regexp.MustCompile(`^<!--\s*claims:(.*)-->$`)
 )
 

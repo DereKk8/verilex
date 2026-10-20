@@ -73,6 +73,17 @@ func TestChangeLookupRefusesABrokenDocAnchor(t *testing.T) {
 	done = verilex(t, root, nil, "index", "--changed", "bin/tally")
 	equal(t, done.code, 2)
 	equal(t, done.stderr, "verilex: refused: docs/guide.md:2: write an anchor as `<!-- claims: <claim> ... -->`, naming at least one claim\n")
+
+	// A near-miss anchor is refused, not silently ignored (issue #49 S8).
+	for _, anchor := range []string{"<!-- claim: item-listed -->", "<!-- Claims: item-listed -->", "<!-- claims item-listed -->", "<!--claims=item-listed-->"} {
+		writeDoc(t, filepath.Join(root, "docs", "guide.md"), "# Guide\n\n## Listing\n"+anchor+"\n")
+		done = verilex(t, root, nil, "index", "--changed", "docs/guide.md")
+		equal(t, done.code, 2)
+		equal(t, done.stdout, "")
+		equal(t, done.stderr, "verilex: refused: docs/guide.md:4: write an anchor as `<!-- claims: <claim> ... -->`, naming at least one claim\n")
+	}
+	writeDoc(t, filepath.Join(root, "docs", "guide.md"), "# Guide\n\n## Listing\n<!-- claimed by nobody -->\n")
+	equal(t, verilex(t, root, nil, "index", "--changed", "docs/guide.md").code, 0)
 }
 
 // An anchor shown as an example in an indented code block (four spaces or a tab) ties nothing, as

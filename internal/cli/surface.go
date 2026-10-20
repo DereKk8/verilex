@@ -105,7 +105,9 @@ func coverChain(project dictionary.Project, chain string, steps []dictionary.Ste
 
 // attachCoverage reports one verdict per claim the run proved or failed. proves, when set, says
 // which steps prove their claim; a claim plan's step that only provides a state proves none, and
-// is marked ProvidesOnly so its failure is still reported as a step's.
+// is marked ProvidesOnly so its failure is still reported as a step's. A selected claim that no
+// step proved is not run, and a run that would be green without it is inconclusive: green
+// means every selected claim was proven.
 func attachCoverage(record *runner.Record, ix index.Index, proves func(word string, argv []string) bool, selected, missed []string, changed []string) error {
 	words := map[string]dictionary.Word{}
 	for _, word := range ix.Words() {
@@ -137,14 +139,20 @@ func attachCoverage(record *runner.Record, ix index.Index, proves func(word stri
 		}
 		record.Claims = append(record.Claims, item)
 	}
+	var unrun []string
 	for _, name := range selected {
 		if seen[name] {
 			continue
 		}
 		seen[name] = true
+		unrun = append(unrun, name)
 		record.Claims = append(record.Claims, runner.ClaimReport{
 			Claim: name, Verdict: verdict.Inconclusive, Got: "not run", Next: nextCommand(name, changed, true),
 		})
+	}
+	if len(unrun) > 0 && (record.Verdict == nil || *record.Verdict == verdict.Green) {
+		inconclusive, reason := verdict.Inconclusive, "selected claim "+strings.Join(unrun, ", ")+" was not run"
+		record.Verdict, record.Reason = &inconclusive, &reason
 	}
 	record.Uncovered = nil
 	for _, name := range missed {

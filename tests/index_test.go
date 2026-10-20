@@ -158,11 +158,13 @@ func TestWeakIntentMatchFindsNoClaim(t *testing.T) {
 
 // A two-term intent that shares one term with a claim finds it only when that term names the
 // claim: it is what sets the claim's name apart from the other claims. `store` and `item` are in
-// every claim, so `store refunds` finds nothing; `list works` names item-listed. Intents that
-// share both terms, and longer intents the floor accepts, still return.
+// every claim, so `store refunds` finds nothing, and neither does a longer intent whose only
+// shared terms are those (issue #49); `list works` names item-listed. Intents that share both
+// terms, and longer intents the floor accepts, still return.
 func TestShortIntentRejectsOneSharedTerm(t *testing.T) {
 	root := product(t)
-	for _, intent := range []string{"store refunds", "store store store refund", "item refunds", "store backup"} {
+	for _, intent := range []string{"store refunds", "store store store refund", "item refunds", "store backup",
+		"store item refunds", "delete an item from the store", "store items"} {
 		done := verilex(t, root, nil, "index", "--intent", intent)
 		equal(t, done.code, 0)
 		equal(t, done.stdout, "intent: 0 claim(s) for '"+intent+"'\n")

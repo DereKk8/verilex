@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,16 +16,18 @@ import (
 )
 
 // Each pattern matches the whole secret, because redact replaces what it matches: a private key
-// block runs to its END line, or to the end of the file when that line is missing. A token
-// starts after any character but an ASCII letter or digit: `\b` would miss one after `_` or a
-// non-ASCII letter, as in MY_ghp_... or éghp_....
+// block runs to its END line, or to the end of the file when that line is missing. A token starts
+// where an identifier cannot go on: `\b` would miss one after `_` or a non-ASCII letter, as in
+// MY_ghp_... or éghp_..., and an encoded byte such as %3D or \n ends in a letter or digit.
+const tokenStart = `(?:(?<![A-Za-z0-9])|(?<=%[0-9A-Fa-f]{2})|(?<=\\[nrt]))`
+
 var secretPatterns = []string{
 	`-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----|[\s\S]*)`,
-	`(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{36,}`,
-	`(?<![A-Za-z0-9])github_pat_[A-Za-z0-9_]{22,}`,
-	`(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![A-Za-z0-9])`,
-	`(?<![A-Za-z0-9])xox[abprs]-[A-Za-z0-9-]{10,}`,
-	`(?<![A-Za-z0-9])sk-ant-[A-Za-z0-9_-]{20,}`,
+	tokenStart + `gh[pousr]_[A-Za-z0-9]{36,}`,
+	tokenStart + `github_pat_[A-Za-z0-9_]{22,}`,
+	tokenStart + `AKIA[0-9A-Z]{16}(?![A-Za-z0-9])`,
+	tokenStart + `xox[abprs]-[A-Za-z0-9-]{10,}`,
+	tokenStart + `sk-ant-[A-Za-z0-9_-]{20,}`,
 }
 
 // redacted stands in for every secret verilex finds in evidence.
@@ -45,11 +48,22 @@ func patterns(project dictionary.Project) ([]*regexp2.Regexp, error) {
 // scan redacts every secret pattern match in the names and files under dir and names, redacted,
 // the first entry that held one. It runs before verilex reads anything from the evidence, so no
 // secret it finds reaches a run record, the usage ledger or a command's output, and the evidence
-// itself keeps none.
-func scan(dir string, patterns []*regexp2.Regexp) (string, error) {
-	var leak string
+// itself keeps none. A directory the word left closed is opened for the scan and closed again.
+func scan(dir string, patterns []*regexp2.Regexp) (leak string, err error) {
 	renames := []string{}
-	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+	type opened struct {
+		path string
+		mode fs.FileMode
+	}
+	closed := []opened{}
+	defer func() {
+		for _, d := range slices.Backward(closed) {
+			if restoreErr := os.Chmod(d.path, d.mode); err == nil {
+				err = restoreErr
+			}
+		}
+	}()
+	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -66,27 +80,18 @@ func scan(dir string, patterns []*regexp2.Regexp) (string, error) {
 			}
 		}
 		if entry.IsDir() {
-			return nil
+			info, err := entry.Info()
+			if err != nil || info.Mode().Perm()&0o500 == 0o500 {
+				return err
+			}
+			closed = append(closed, opened{path, info.Mode()})
+			return os.Chmod(path, info.Mode()|0o500)
 		}
-		info, err := os.Stat(path)
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		clean, err := redact(data, patterns)
-		if err != nil || clean == nil {
-			return err
-		}
-		if leak == "" {
+		found, err := scanFile(path, entry, patterns)
+		if found && leak == "" {
 			leak = entry.Name()
 		}
-		return replace(path, clean, info.Mode().Perm())
+		return err
 	})
 	if err != nil {
 		return leak, err
@@ -98,15 +103,75 @@ func scan(dir string, patterns []*regexp2.Regexp) (string, error) {
 		if err != nil {
 			return leak, err
 		}
-		if err = rename(path, string(name)); err != nil {
+		target, err := rename(path, string(name))
+		if err != nil {
 			return leak, err
+		}
+		for i, d := range closed {
+			if rel, err := filepath.Rel(path, d.path); err == nil && filepath.IsLocal(rel) {
+				closed[i].path = filepath.Join(target, rel)
+			}
 		}
 	}
 	return leak, nil
 }
 
-// rename gives the entry at path a new name in its directory, numbered when the name is taken.
-func rename(path, name string) error {
+// scanFile redacts the secrets in one file the walk found and reports whether it held any. A
+// link stays a link unless its target path or content holds a secret: then it becomes a file
+// holding only the marker, because the target lies outside what the word wrote and none of it
+// is copied into the evidence. A link verilex cannot follow holds nothing it could read.
+func scanFile(path string, entry fs.DirEntry, patterns []*regexp2.Regexp) (bool, error) {
+	link := entry.Type()&fs.ModeSymlink != 0
+	if link {
+		target, err := os.Readlink(path)
+		if err != nil {
+			return false, err
+		}
+		named, err := redact([]byte(target), patterns)
+		if err != nil || named != nil {
+			return named != nil, replaceLink(path, err)
+		}
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		if link {
+			return false, nil
+		}
+		return false, err
+	}
+	var data []byte
+	read := func() (err error) {
+		data, err = os.ReadFile(path)
+		return err
+	}
+	if link {
+		if read() != nil {
+			return false, nil
+		}
+	} else if err = withBits(path, 0o400, read); err != nil {
+		return false, err
+	}
+	clean, err := redact(data, patterns)
+	if err != nil || clean == nil {
+		return false, err
+	}
+	if link {
+		return true, replaceLink(path, nil)
+	}
+	return true, replace(path, clean, info.Mode().Perm())
+}
+
+// replaceLink turns a link into a file that holds only the marker, unless err is already set.
+func replaceLink(path string, err error) error {
+	if err != nil {
+		return err
+	}
+	return replace(path, []byte(redacted), 0o600)
+}
+
+// rename gives the entry at path a new name in its directory, numbered when the name is taken,
+// and returns its new path.
+func rename(path, name string) (string, error) {
 	target := filepath.Join(filepath.Dir(path), name)
 	for n := 2; ; n++ {
 		if _, err := os.Lstat(target); errors.Is(err, fs.ErrNotExist) {
@@ -114,14 +179,20 @@ func rename(path, name string) error {
 		}
 		target = filepath.Join(filepath.Dir(path), fmt.Sprintf("%s-%d", name, n))
 	}
-	return writable(filepath.Dir(path), func() error { return os.Rename(path, target) })
+	return target, withBits(filepath.Dir(path), 0o300, func() error { return os.Rename(path, target) })
 }
 
 // redactJudgment redacts the values a word reported once decoded, which the scan of the raw bytes
 // can miss, as with a JSON-escaped token. Where such a secret sits in stdout is unknown, so the
 // whole file is replaced. It reports whether anything matched.
-func redactJudgment(j *verdict.Judgment, evidence string, patterns []*regexp2.Regexp) (bool, error) {
-	found := false
+func redactJudgment(j *verdict.Judgment, stdout []byte, evidence string, patterns []*regexp2.Regexp) (bool, error) {
+	// Every field counts, not only those verilex records: a secret in any of them stays in stdout.
+	var report any
+	_ = json.Unmarshal(stdout, &report)
+	_, found, err := redactValue(report, patterns)
+	if err != nil {
+		return false, err
+	}
 	for _, value := range []*any{&j.Reason, &j.Observation, &j.Detail} {
 		clean, hit, err := redactValue(*value, patterns)
 		if err != nil {
@@ -175,7 +246,15 @@ func redactValue(v any, patterns []*regexp2.Regexp) (any, bool, error) {
 			if err != nil {
 				return v, false, err
 			}
-			result[cleanKey.(string)], found = clean, found || keyHit || hit
+			// Keys that redact alike keep every value under a numbered name.
+			name := cleanKey.(string)
+			for n := 2; ; n++ {
+				if _, taken := result[name]; !taken {
+					break
+				}
+				name = fmt.Sprintf("%s-%d", cleanKey, n)
+			}
+			result[name], found = clean, found || keyHit || hit
 		}
 		return result, found, nil
 	}
@@ -227,26 +306,26 @@ func redact(data []byte, patterns []*regexp2.Regexp) ([]byte, error) {
 // replace swaps the file at path for one holding data. The rename replaces a symlink itself, so
 // a word that links outside its evidence never gets verilex to write there.
 func replace(path string, data []byte, mode fs.FileMode) error {
-	return writable(filepath.Dir(path), func() error { return swap(path, data, mode) })
+	return withBits(filepath.Dir(path), 0o300, func() error { return swap(path, data, mode) })
 }
 
-// writable runs change, and when dir refuses it, makes dir writable for the retry and then
-// restores its mode. A word may leave a read-only directory in its evidence, and verilex runs as
-// the same user as the word.
-func writable(dir string, change func() error) error {
+// withBits runs change, and when path refuses it, adds the owner bits for the retry and then
+// restores its mode. A word may leave a read-only directory or an unreadable file in its
+// evidence, and verilex runs as the same user as the word.
+func withBits(path string, bits fs.FileMode, change func() error) error {
 	err := change()
 	if !errors.Is(err, fs.ErrPermission) {
 		return err
 	}
-	info, statErr := os.Stat(dir)
-	if statErr != nil || info.Mode().Perm()&0o300 == 0o300 {
+	info, statErr := os.Stat(path)
+	if statErr != nil || info.Mode().Perm()&bits == bits {
 		return err
 	}
-	if err = os.Chmod(dir, info.Mode()|0o300); err != nil {
+	if err = os.Chmod(path, info.Mode()|bits); err != nil {
 		return err
 	}
 	err = change()
-	if restoreErr := os.Chmod(dir, info.Mode()); err == nil {
+	if restoreErr := os.Chmod(path, info.Mode()); err == nil {
 		err = restoreErr
 	}
 	return err

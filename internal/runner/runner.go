@@ -293,7 +293,7 @@ func (r *Run) drive(p Plan) error {
 	}
 	// A secret the scan of the raw bytes missed, such as a JSON-escaped token, ends the launch as
 	// a raw one does: the instance is not recorded, and cleanup finds it by the run's label.
-	_, hidden, err := redactValue(instance, r.patterns)
+	_, hidden, err := redactValue(launched, r.patterns)
 	if err != nil {
 		return err
 	}
@@ -417,7 +417,7 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 		}
 	}
 	judged := verdict.Judge(code, stdout, step.Word.Timeout)
-	hidden, err := redactJudgment(&judged, evidence, r.patterns)
+	hidden, err := redactJudgment(&judged, stdout, evidence, r.patterns)
 	if err != nil {
 		return WordRecord{}, err
 	}

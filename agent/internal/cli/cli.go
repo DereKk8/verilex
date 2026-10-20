@@ -42,11 +42,23 @@ func Main(argv []string, stdout, stderr io.Writer, timer run.Timer) int {
 		return 2
 	}
 	// SIGTERM, SIGINT and SIGHUP end the run through Run, so its deferred cleanup removes the
-	// run directory. A second SIGTERM or SIGINT ends the launcher at once.
-	interrupt, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt, syscall.SIGHUP)
+	// run directory. A second SIGTERM or SIGINT ends the launcher at once. SIGHUP stays ignored
+	// when the launcher started with it ignored, as under nohup.
+	caught := []os.Signal{syscall.SIGTERM, os.Interrupt}
+	if !signal.Ignored(syscall.SIGHUP) {
+		caught = append(caught, syscall.SIGHUP)
+	}
+	interrupt, stop := signal.NotifyContext(context.Background(), caught...)
 	defer stop()
-	// A closed terminal sends SIGHUP twice (the kernel, then the shell), so SIGHUP stays ignored.
-	go func() { <-interrupt.Done(); signal.Ignore(syscall.SIGHUP); stop() }()
+	go func() {
+		<-interrupt.Done()
+		// A closed terminal sends SIGHUP twice (the kernel, then the shell), so SIGHUP stays
+		// ignored after a signal. The deferred stop ends interrupt too, with no signal.
+		if context.Cause(interrupt) != context.Canceled {
+			signal.Ignore(syscall.SIGHUP)
+		}
+		stop()
+	}()
 	opts.Interrupt = interrupt
 	result, err := run.Run(opts, timer)
 	if result.Work != "" {

@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "summary": "Closes false-green paths: an unrun selected claim in a green claim run, weak intents in every product shape, and near-miss doc anchors; refuses an empty intent.",
+  "files": [
+    {
+      "path": "internal/cli/surface.go",
+      "summary": "attachCoverage owns the rule that a green claim run proved every selected claim.",
+      "annotations": [
+        {
+          "newRange": [153, 156],
+          "summary": "attachCoverage turns a green or unset run verdict into inconclusive when a selected claim has no proving step.",
+          "rationale": "Issue #48: a planner bug made run --claim exit 0 green while its claim line said not run. A red stays red because a red is backed by evidence. The run record is saved after this, and the usage entry reads the record in a deferred call, so every view says inconclusive. No CLI route reaches the state since #47, so TestAClaimRunWithAnUnrunSelectedClaimIsNotGreen forces it in package cli; with the guard off it prints exit 0 green.",
+          "author": "fm/verilex-false-greens"
+        }
+      ]
+    },
+    {
+      "path": "internal/index/index.go",
+      "summary": "The intent lookup now blocks weak intents in a one-claim product and where a claim lacks the shared nouns.",
+      "annotations": [
+        {
+          "newRange": [269, 276],
+          "summary": "Intent returns nothing when the claims found leave an intent term uncovered and the intent names none of them.",
+          "rationale": "The zero-trust review (D3, D4) showed store item refunds still went green with one claim or with a fourth claim that lacks item, because the common-term rule only works when a noun is in every claim. An uncovered term is a filler word or the weak intent's subject, and only a named claim tells them apart. Measured over 56 intents on 4 product shapes: every test, docs and verify-verilex intent keeps its claims in its real product; the scratch fourth-claim product loses two apple intents (a false red).",
+          "author": "fm/verilex-false-greens"
+        },
+        {
+          "newRange": [296, 303],
+          "summary": "names accepts all non-common name terms, or one name term that at most half the claims hold.",
+          "rationale": "The rare-term clause keeps long intents such as CI scripts resolve origin/main from the branch ref only, where the placeholder rule drops CI and origin/main is one token. The two-term rule in covers still uses only the full-name clause, so refused payment keeps finding nothing.",
+          "author": "fm/verilex-false-greens"
+        }
+      ]
+    },
+    {
+      "path": "internal/index/docs.go",
+      "summary": "A comment that opens with the word claim or claims is an anchor unless it goes on with a plain word that is no claim id.",
+      "annotations": [
+        {
+          "newRange": [81, 85],
+          "summary": "passages skips a malformed comment whose first word after claim or claims is a plain word and not a claim id.",
+          "rationale": "The zero-trust review (D1) showed a note such as <!-- Claims below were reviewed in Q3 --> made index --changed refuse and every launcher --diff run inconclusive. The \\b start (D2) now also refuses ;, , and - near misses. tests/docs_test.go checks both lists.",
+          "author": "fm/verilex-false-greens"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/cli.go",
+      "summary": "parse refuses an empty or blank --intent.",
+      "annotations": [
+        {
+          "newRange": [353, 355],
+          "summary": "An empty --intent value is refused instead of printing the tier-1 index.",
+          "rationale": "The zero-trust review (F1): verilex index --intent '' printed the claim list, exit 0. TestIntentLookupReturnsTheRightClaim now checks '' and blanks.",
+          "author": "fm/verilex-false-greens"
+        }
+      ]
+    }
+  ]
+}

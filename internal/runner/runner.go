@@ -291,6 +291,21 @@ func (r *Run) drive(p Plan) error {
 		r.stop(verdict.Inconclusive, "launch printed no JSON object with an 'instance'")
 		return nil
 	}
+	// A secret the scan of the raw bytes missed, such as a JSON-escaped token, ends the launch as
+	// a raw one does: the instance is not recorded, and cleanup finds it by the run's label.
+	_, hidden, err := redactValue(instance, r.patterns)
+	if err != nil {
+		return err
+	}
+	if hidden {
+		if err = replaceWhole(filepath.Join(frame.Evidence, "stdout")); err != nil {
+			return err
+		}
+		last := &r.record.Frame[len(r.record.Frame)-1]
+		last.Leak, last.Exit = "stdout", ptr(2)
+		r.stop(verdict.Inconclusive, "launch exited 2")
+		return r.save()
+	}
 	r.record.Instance = instance
 	if r.keep {
 		r.record.History = []ledger.Entry{}
@@ -402,6 +417,13 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 		}
 	}
 	judged := verdict.Judge(code, stdout, step.Word.Timeout)
+	hidden, err := redactJudgment(&judged, evidence, r.patterns)
+	if err != nil {
+		return WordRecord{}, err
+	}
+	if hidden && leak == "" {
+		leak = "stdout"
+	}
 	if leak != "" {
 		judged.Verdict = verdict.Inconclusive
 		judged.Reason = "secret pattern in evidence " + leak

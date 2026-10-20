@@ -12,7 +12,7 @@ Every run goes through the project's frame, and no word can opt out of it.
    - `pass` without a second observation;
    - `fail` without stating that its preconditions held;
    - an exit code that disagrees with the verdict, or no result JSON;
-   - a secret pattern (private key block, GitHub, AWS, Slack or Anthropic token, or a project pattern) anywhere in its evidence, file and directory names, links and every field of the decoded report included. verilex replaces each match with `[redacted]` in the evidence before it reads the report, replaces a whole `stdout` whose secret only decoding shows, and turns a link whose target or target path holds a secret into a file holding only `[redacted]`, so no run record, usage ledger or output holds the secret.
+   - a secret pattern (private key block, GitHub, AWS, Slack or Anthropic token, or a project pattern) anywhere in its evidence, file and directory names, links and every field of the decoded report included. verilex replaces each match with `[redacted]` in the evidence before it reads the report, replaces a whole `stdout` whose secret only decoding shows, and turns a link whose target or target path holds a secret into a file holding only `[redacted]`, so no run record, usage ledger or output holds the secret. A file another user owns, such as one a container wrote as root, keeps its secret, because verilex cannot rewrite it; the run still names the leak.
    Workstation and environment trouble is `inconclusive`, never `red`.
 5. **Cleanup** always runs, tears down only what the run started, and verilex then confirms the evidence survived.
 

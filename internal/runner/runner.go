@@ -405,18 +405,24 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 	if err != nil {
 		return WordRecord{}, err
 	}
-	// The scan redacts the evidence before anything is read from it.
+	// The report is judged as the word wrote it, because redacting two secret keys alike would
+	// drop a value; redactJudgment keeps every secret out of what is recorded.
+	var written, stdout []byte
+	if code != nil {
+		if written, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil {
+			return WordRecord{}, err
+		}
+	}
+	judged := verdict.Judge(code, written, step.Word.Timeout)
 	leak, err := scan(evidence, r.patterns)
 	if err != nil {
 		return WordRecord{}, err
 	}
-	var stdout []byte
 	if code != nil {
 		if stdout, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil {
 			return WordRecord{}, err
 		}
 	}
-	judged := verdict.Judge(code, stdout, step.Word.Timeout)
 	hidden, err := redactJudgment(&judged, stdout, evidence, r.patterns)
 	if err != nil {
 		return WordRecord{}, err

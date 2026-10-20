@@ -50,6 +50,12 @@ func patterns(project dictionary.Project) ([]*regexp2.Regexp, error) {
 // secret it finds reaches a run record, the usage ledger or a command's output, and the evidence
 // itself keeps none. A directory the word left closed is opened for the scan and closed again.
 func scan(dir string, patterns []*regexp2.Regexp) (leak string, err error) {
+	// An error names a path, and a path not yet renamed can hold a secret.
+	defer func() {
+		if err != nil {
+			err = redactError(err, patterns)
+		}
+	}()
 	renames := []string{}
 	type opened struct {
 		path string
@@ -77,6 +83,9 @@ func scan(dir string, patterns []*regexp2.Regexp) (leak string, err error) {
 				if leak == "" {
 					leak = string(name)
 				}
+				if len(leak) > nameMax {
+					leak = redacted
+				}
 			}
 		}
 		if entry.IsDir() {
@@ -90,6 +99,11 @@ func scan(dir string, patterns []*regexp2.Regexp) (leak string, err error) {
 		found, err := scanFile(path, entry, patterns)
 		if found && leak == "" {
 			leak = entry.Name()
+		}
+		if found && errors.Is(err, fs.ErrPermission) {
+			// Evidence another user owns, such as a container's root, cannot be rewritten: the
+			// leak is still named, so the run stays inconclusive.
+			return nil
 		}
 		return err
 	})
@@ -169,22 +183,33 @@ func replaceLink(path string, err error) error {
 	return replace(path, []byte(redacted), 0o600)
 }
 
+// nameMax is the longest redacted name kept: NAME_MAX, less room for a numbered suffix.
+const nameMax = 255 - len("-9999")
+
 // rename gives the entry at path a new name in its directory, numbered when the name is taken,
-// and returns its new path.
+// and returns its new path. A redacted name can outgrow the name it replaces; past nameMax the
+// marker alone stands in for it.
 func rename(path, name string) (string, error) {
+	if len(name) > nameMax {
+		name = redacted
+	}
 	target := filepath.Join(filepath.Dir(path), name)
 	for n := 2; ; n++ {
-		if _, err := os.Lstat(target); errors.Is(err, fs.ErrNotExist) {
+		_, err := os.Lstat(target)
+		if errors.Is(err, fs.ErrNotExist) {
 			break
+		}
+		if err != nil {
+			return path, err
 		}
 		target = filepath.Join(filepath.Dir(path), fmt.Sprintf("%s-%d", name, n))
 	}
 	return target, withBits(filepath.Dir(path), 0o300, func() error { return os.Rename(path, target) })
 }
 
-// redactJudgment redacts the values a word reported once decoded, which the scan of the raw bytes
-// can miss, as with a JSON-escaped token. Where such a secret sits in stdout is unknown, so the
-// whole file is replaced. It reports whether anything matched.
+// redactJudgment redacts the values a word reported, judged from stdout as written, and replaces
+// the whole of stdout, redacted by the scan, when decoding it still shows a secret, as with a
+// JSON-escaped token whose place in the file is unknown. It reports whether that happened.
 func redactJudgment(j *verdict.Judgment, stdout []byte, evidence string, patterns []*regexp2.Regexp) (bool, error) {
 	// Every field counts, not only those verilex records: a secret in any of them stays in stdout.
 	var report any
@@ -194,16 +219,24 @@ func redactJudgment(j *verdict.Judgment, stdout []byte, evidence string, pattern
 		return false, err
 	}
 	for _, value := range []*any{&j.Reason, &j.Observation, &j.Detail} {
-		clean, hit, err := redactValue(*value, patterns)
+		clean, _, err := redactValue(*value, patterns)
 		if err != nil {
 			return false, err
 		}
-		*value, found = clean, found || hit
+		*value = clean
 	}
 	if !found {
 		return false, nil
 	}
 	return true, replaceWhole(filepath.Join(evidence, "stdout"))
+}
+
+// redactError returns err with every secret in its text replaced.
+func redactError(err error, patterns []*regexp2.Regexp) error {
+	if clean, redactErr := redact([]byte(err.Error()), patterns); redactErr == nil && clean != nil {
+		return errors.New(string(clean))
+	}
+	return err
 }
 
 // replaceWhole replaces the content of a file whose secret verilex cannot locate.

@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "summary": "verilex redacts every secret it detects in evidence, in names and in decoded reports before it reads them, and verify-verilex capture keeps only safe reproduction controls from the inherited environment.",
+  "files": [
+    {
+      "path": "internal/runner/evidence.go",
+      "summary": "Owns secret detection and redaction of word and frame evidence, names and decoded reports.",
+      "annotations": [
+        {
+          "newRange": [
+            22,
+            27
+          ],
+          "summary": "The private key pattern spans the whole block, and each token pattern starts after any character but an ASCII letter or digit.",
+          "rationale": "Redaction replaces only what a pattern matches, so a header-only key match would leave the key body. regexp2's \\b treats _ and non-ASCII letters as word characters, so MY_ghp_... and \u00e9ghp_... gave a green run with a token in evidence (PX-2). The secret-after-* rows in TestDishonestWordResultsAreInconclusive and the verdicts.md attack 'A token right after a word character' cover this.",
+          "author": "fm/verilex-secret-evidence"
+        },
+        {
+          "newRange": [
+            56,
+            67
+          ],
+          "summary": "scan checks every file and directory name and queues a name that holds a secret for renaming.",
+          "rationale": "A token used as a file name reached the printed cause, run.json and the usage ledger, and a token only in a name was not detected at all (D2). The leak cause now uses the redacted name. TestSecretInEvidenceNameIsRedacted covers a file and a directory name.",
+          "author": "fm/verilex-secret-evidence"
+        },
+        {
+          "newRange": [
+            82,
+            160
+          ],
+          "summary": "After the walk, scan renames queued entries deepest first, and redactJudgment and redactValue redact decoded report values.",
+          "rationale": "Renaming in reverse walk order never moves a path that is still to be renamed. A JSON-escaped token passes the raw-byte scan but decodes into detail, so decoded values are checked too; its raw position is unknown, so the whole stdout is replaced (PX-1). TestEscapedSecretInWordReportIsRedacted covers detail and a map key.",
+          "author": "fm/verilex-secret-evidence"
+        },
+        {
+          "newRange": [
+            180,
+            273
+          ],
+          "summary": "redact maps rune matches to byte offsets, and replace swaps the file by rename, opening a read-only directory for the swap.",
+          "rationale": "Byte offsets keep non-UTF-8 bytes outside a match intact. The rename replaces a symlink itself, so verilex never writes through a link outside the evidence. writable retries once with the directory made writable and restores its mode, because a word may copy a read-only tree into evidence (D1). TestEvidenceRedactionInReadOnlyDirectory checks the redacted file and mode 555 after the run.",
+          "author": "fm/verilex-secret-evidence"
+        }
+      ]
+    },
+    {
+      "path": "internal/runner/runner.go",
+      "summary": "Runs the scan before reading evidence and checks decoded values of the launch and of each word report.",
+      "annotations": [
+        {
+          "newRange": [
+            294,
+            308
+          ],
+          "summary": "drive treats a secret in the decoded launch instance like a raw launch leak: exit 2, no instance recorded.",
+          "rationale": "The raw scan cannot see a JSON-escaped token in instance, which run.json would then store. Without a recorded instance the cleanup frame finds the store by the run label, as it already does for a raw leak. TestEscapedSecretInLaunchInstanceIsNotRecorded checks that no store is left.",
+          "author": "fm/verilex-secret-evidence"
+        },
+        {
+          "newRange": [
+            408,
+            412
+          ],
+          "summary": "The scan moved ahead of the stdout read and verdict.Judge.",
+          "rationale": "Detail, observation and reason come from redacted stdout, so run.json, the usage ledger, --json output and the launcher JSON hold no detected secret. On main the token from the verdicts.md attack reached all four.",
+          "author": "fm/verilex-secret-evidence"
+        },
+        {
+          "newRange": [
+            424,
+            426
+          ],
+          "summary": "A secret that only decoding shows makes the word inconclusive with the cause 'secret pattern in evidence stdout'.",
+          "rationale": "Before, such a report ended red with the token in run.json and the usage ledger. Inconclusive keeps the honesty rule that a report with a secret is never backed.",
+          "author": "fm/verilex-secret-evidence"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/scripts/capture",
+      "summary": "Writes the env evidence file with values for reproduction controls only.",
+      "annotations": [
+        {
+          "newRange": [
+            27,
+            36
+          ],
+          "summary": "capture lists exported names with compgen -e and withholds every value outside the control allowlist.",
+          "rationale": "Evidence is meant to be shared, so an inherited secret with a TALLY_, VERILEX_ or VX_ name must not be saved (issue 59). compgen -e avoids parsing env output, where a value with a newline could forge a line. The ledger variables are safe to record because capture refuses them unless they point inside the session.",
+          "author": "fm/verilex-secret-evidence"
+        }
+      ]
+    },
+    {
+      "path": "scripts/smoke",
+      "summary": "Adds the regression for issue 59 through the public vx entry point.",
+      "annotations": [
+        {
+          "newRange": [
+            13,
+            19
+          ],
+          "summary": "smoke runs vx with a public canary variable and fails if the canary value appears anywhere in the evidence.",
+          "rationale": "This check failed on main with 'smoke: capture evidence kept an inherited value' and passes on this branch. It also checks that TALLY_DEFECT keeps its value, so the allowlist still records reproduction controls.",
+          "author": "fm/verilex-secret-evidence"
+        }
+      ]
+    }
+  ]
+}

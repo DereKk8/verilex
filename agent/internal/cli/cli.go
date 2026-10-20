@@ -2,11 +2,14 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/DereKk8/verilex/agent/internal/proxy"
 	"github.com/DereKk8/verilex/agent/internal/run"
@@ -38,6 +41,25 @@ func Main(argv []string, stdout, stderr io.Writer, timer run.Timer) int {
 		fmt.Fprintf(stderr, "verilex-agent: error: %v\n", err)
 		return 2
 	}
+	// SIGTERM, SIGINT and SIGHUP end the run through Run, so its deferred cleanup removes the
+	// run directory. A second SIGTERM or SIGINT ends the launcher at once. SIGHUP stays ignored
+	// when the launcher started with it ignored, as under nohup.
+	caught := []os.Signal{syscall.SIGTERM, os.Interrupt}
+	if !signal.Ignored(syscall.SIGHUP) {
+		caught = append(caught, syscall.SIGHUP)
+	}
+	interrupt, stop := signal.NotifyContext(context.Background(), caught...)
+	defer stop()
+	go func() {
+		<-interrupt.Done()
+		// A closed terminal sends SIGHUP twice (the kernel, then the shell), so SIGHUP stays
+		// ignored after a signal. The deferred stop ends interrupt too, with no signal.
+		if context.Cause(interrupt) != context.Canceled {
+			signal.Ignore(syscall.SIGHUP)
+		}
+		stop()
+	}()
+	opts.Interrupt = interrupt
 	result, err := run.Run(opts, timer)
 	if result.Work != "" {
 		defer fmt.Fprintf(stderr, "verilex-agent: run files kept in %s\n", result.Work)

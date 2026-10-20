@@ -30,6 +30,9 @@ type Options struct {
 	Harness, Model, Effort, Profile        string
 	Ledger, Home, Skill, Brain, Harnesses  string
 	Suggest, AllowHarness, JSON, KeepWork  bool
+	// Interrupt, when it ends, stops the run like a ended budget does, but the run is
+	// inconclusive and prints no verdict. The launcher ends it on SIGTERM, SIGINT and SIGHUP.
+	Interrupt context.Context
 }
 
 // A Timer starts a run's time budget. The context it returns ends with context.DeadlineExceeded
@@ -62,9 +65,37 @@ func inconclusive(format string, args ...any) error {
 	return &Inconclusive{Reason: fmt.Sprintf(format, args...)}
 }
 
-type budgetError struct{}
+// budgetError is a brain phase that ctx ended before the brain finished: the time budget ended,
+// or the launcher was interrupted.
+type budgetError struct{ interrupted bool }
 
-func (e *budgetError) Error() string { return "the time budget ended before the brain finished" }
+func (e *budgetError) Error() string {
+	if e.interrupted {
+		return "the launcher was interrupted before the brain finished"
+	}
+	return "the time budget ended before the brain finished"
+}
+
+// errInterrupted is the cause of a context that opts.Interrupt ended.
+var errInterrupted = errors.New("interrupted")
+
+// ended is the budgetError for a ctx that has ended.
+func ended(ctx context.Context) *budgetError {
+	return &budgetError{interrupted: errors.Is(context.Cause(ctx), errInterrupted)}
+}
+
+// endedReason says why ctx ended: the launcher was interrupted, or the time budget ended.
+func endedReason(ctx context.Context) string {
+	if errors.Is(context.Cause(ctx), errInterrupted) {
+		return "the launcher was interrupted"
+	}
+	return "the time budget ended"
+}
+
+func isInterrupted(err error) bool {
+	var target *budgetError
+	return errors.As(err, &target) && target.interrupted
+}
 
 func isBudget(err error) bool {
 	var target *budgetError
@@ -166,6 +197,12 @@ func Run(opts Options, timer Timer) (result Result, err error) {
 	// One deadline covers the intent lookup and both brain phases, so none can stretch the budget.
 	ctx, cancel := timer(budget)
 	defer cancel()
+	if opts.Interrupt != nil {
+		var cancelCause context.CancelCauseFunc
+		ctx, cancelCause = context.WithCancelCause(ctx)
+		defer cancelCause(nil)
+		defer context.AfterFunc(opts.Interrupt, func() { cancelCause(errInterrupted) })()
+	}
 	named, err := floor(ctx, verilex, project, spec.Intent, opts.Claims, changed)
 	if err != nil {
 		return Result{}, err
@@ -229,6 +266,10 @@ func Run(opts Options, timer Timer) (result Result, err error) {
 	brainErr := l.brain(ctx, phase{name: "verify", prompt: promptPath, bin: bin, sockets: []string{px.Socket()}})
 	// Stop the proxy first: no verilex run may finish after the checks below.
 	px.Close()
+	if isInterrupted(brainErr) {
+		cleanHome(px)
+		return Result{}, phaseError(brainErr)
+	}
 	var unavailable *sandbox.Unavailable
 	if errors.As(brainErr, &unavailable) {
 		return Result{}, phaseError(brainErr)
@@ -396,7 +437,7 @@ type phase struct {
 // run's log, so a child the brain left running holds no pipe of the launcher's.
 func (l *launch) brain(ctx context.Context, ph phase) error {
 	if ctx.Err() != nil {
-		return &budgetError{}
+		return ended(ctx)
 	}
 	stdout, err := os.Create(filepath.Join(l.d.log, ph.name+".out"))
 	if err != nil {
@@ -420,8 +461,8 @@ func (l *launch) brain(ctx context.Context, ph phase) error {
 		Read: l.read, HomeFiles: l.files, Hide: l.hide, Sockets: ph.sockets,
 		Stdin: stdin, Stdout: stdout, Stderr: stderr, EgressLog: l.egressLog,
 	})
-	if errors.Is(err, context.DeadlineExceeded) {
-		return &budgetError{}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return ended(ctx)
 	}
 	if err != nil {
 		return err
@@ -433,7 +474,7 @@ func (l *launch) brain(ctx context.Context, ph phase) error {
 	case <-ctx.Done():
 		proc.Kill()
 		<-done
-		return &budgetError{}
+		return ended(ctx)
 	}
 	if err != nil {
 		if detail := tail(stderr.Name()); detail != "" {
@@ -539,7 +580,14 @@ func resolve(verilex, project, work string, opts Options) (ticket, string, error
 		return ticket{}, "", err
 	}
 	var spec ticket
-	err = verilexJSON(context.Background(), verilex, project, &spec, "ticket", "--json", path)
+	ctx := context.Background()
+	if opts.Interrupt != nil {
+		ctx = opts.Interrupt
+	}
+	err = verilexJSON(ctx, verilex, project, &spec, "ticket", "--json", path)
+	if ctx.Err() != nil {
+		return ticket{}, "", inconclusive("the launcher was interrupted before verilex ticket answered")
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return ticket{}, "", inconclusive("verilex ticket did not answer within %s", lookupTimeout)
 	}
@@ -578,7 +626,7 @@ func floor(ctx context.Context, verilex, project, intent string, claims, changed
 	err := verilexJSON(ctx, verilex, project, &rows, "index", "--intent", intent, "--json")
 	switch {
 	case ctx.Err() != nil:
-		return nil, inconclusive("the time budget ended before verilex index --intent answered")
+		return nil, inconclusive("%v before verilex index --intent answered", endedReason(ctx))
 	case errors.Is(err, context.DeadlineExceeded):
 		return nil, inconclusive("verilex index --intent did not answer within %s", lookupTimeout)
 	case err != nil:
@@ -617,7 +665,7 @@ func touchedClaims(ctx context.Context, verilex, project string, changed []strin
 	err := verilexJSON(ctx, verilex, project, &found, args...)
 	switch {
 	case ctx.Err() != nil:
-		return nil, inconclusive("the time budget ended before verilex index --changed answered")
+		return nil, inconclusive("%v before verilex index --changed answered", endedReason(ctx))
 	case errors.Is(err, context.DeadlineExceeded):
 		return nil, inconclusive("verilex index --changed did not answer within %s", lookupTimeout)
 	case err != nil:

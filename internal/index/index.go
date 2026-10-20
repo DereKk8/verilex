@@ -202,10 +202,9 @@ func (ix Index) Intent(text string, limit int) []Claim {
 		}
 	}
 	type scored struct {
-		claim  Claim
-		at     int
-		anchor bool
-		score  float64
+		claim Claim
+		at    int
+		score float64
 	}
 	// A term every claim holds sets no claim apart; with one claim, every term does. A term at most
 	// half the claims hold is rare.
@@ -227,7 +226,7 @@ func (ix Index) Intent(text string, limit int) []Claim {
 			}
 		}
 		if score > 0 {
-			found = append(found, scored{c, i, names(c, want, common, rare), score})
+			found = append(found, scored{c, i, score})
 		}
 	}
 	slices.SortStableFunc(found, func(a, b scored) int {
@@ -246,19 +245,20 @@ func (ix Index) Intent(text string, limit int) []Claim {
 		return strings.Compare(a.claim.Claim, b.claim.Claim)
 	})
 	// A claim that scores less than half the best one is noise next to it.
-	result, held, anchored := []Claim{}, map[string]bool{}, false
+	result, held := []Claim{}, map[string]int{}
 	for i := 0; i < len(found) && i < limit && 2*found[i].score >= found[0].score; i++ {
 		result = append(result, found[i].claim)
 		for _, term := range append(slices.Clone(primary[found[i].at]), secondary[found[i].at]...) {
-			held[term] = true
+			held[term]++
 		}
-		anchored = anchored || found[i].anchor
 	}
 	// A term no claim found holds is either a filler word (works in `list works`) or the subject of
 	// a weak intent (refunds in `store item refunds`). Only a found claim the intent names, by all of
-	// a name's terms that are not common or by one rare name term, tells them apart: proving claims
-	// that miss the subject would be a false green.
-	if !anchored && slices.ContainsFunc(want, func(term string) bool { return !held[term] }) {
+	// a name's terms that are not common or by one rare name term no other found claim holds, tells
+	// them apart: proving claims that miss the subject would be a false green.
+	alone := func(term string) bool { return rare(term) && held[term] == 1 }
+	anchored := slices.ContainsFunc(result, func(c Claim) bool { return names(c, want, common, alone) })
+	if !anchored && slices.ContainsFunc(want, func(term string) bool { return held[term] == 0 }) {
 		return []Claim{}
 	}
 	return result
@@ -290,7 +290,8 @@ func covers(want, primary, secondary []string, named bool, common func(string) b
 
 // names reports whether an intent names a claim by one of the names it goes by (its own and its
 // aliases'): the intent holds every term of the name that is not common, or one term of the name
-// that is rare. So `list works` names item-listed, and `store item refunds` names no tally claim.
+// that rare accepts. So `list works` names item-listed, and `store item refunds` names no tally
+// claim.
 func names(c Claim, want []string, common, rare func(string) bool) bool {
 	for _, name := range append([]string{c.Claim}, c.aliases...) {
 		parts := terms.Of(name)

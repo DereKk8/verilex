@@ -244,6 +244,44 @@ func TestWeakIntentFindsNoClaimInAnyProduct(t *testing.T) {
 	}
 }
 
+// A weak intent finds no claim in a larger product where the shared nouns sit in only half of the
+// claims, so each is rare (zero-trust re-check of #62, D5). A rare name term names a claim only when
+// no other claim found holds it; intents that name their claim still find it.
+func TestWeakIntentFindsNoClaimInALargerProduct(t *testing.T) {
+	root := product(t)
+	feature := "# Reports\n\n## Sub-features\n\n- `report-print` prints the totals.\n- `backup-write` writes a backup copy.\n- `user-sign-in` signs a user in.\n\n" +
+		"## Driving it with the tally CLI\n\n- `report-print`: Run `bin/tally report`. Expect exit 0 and a totals line.\n" +
+		"- `backup-write`: Run `bin/tally backup`. Expect exit 0 and a backup file.\n- `user-sign-in`: Run `bin/tally login`. Expect exit 0 and a session file.\n"
+	write(t, filepath.Join(root, ".cursor", "skills", "verify-tally", "features", "reports.md"), feature, 0644)
+	for _, c := range [][4]string{
+		{"report-printed", "report-print", "A printed report shows the totals.", "Expect exit 0 and a totals line."},
+		{"backup-written", "backup-write", "A backup copy of the data file is written.", "Expect exit 0 and a backup file."},
+		{"user-signed-in", "user-sign-in", "A user can sign in with a password.", "Expect exit 0 and a session file."},
+	} {
+		write(t, claimFile(root, c[0]), "claim: "+c[0]+"\nsentence: "+c[2]+"\nentry: [cli]\nevidence:\n  action: run it\n  observation: it works\nsources:\n  - ref: verify-tally/features/reports.md#"+c[1]+"\n    prose: 000000000000\n    requirements:\n      - \""+c[3]+"\"\n", 0644)
+	}
+	for _, c := range []struct {
+		intent string
+		claims []string
+	}{
+		{"store item refunds", nil},
+		{"store items refunds", nil},
+		{"delete an item from the store", nil},
+		{"prove the store opens", []string{"store-opened"}},
+		{"a user lists the store", []string{"item-listed"}},
+		{"make sure an item gets added to the store", []string{"item-added"}},
+		{"print the report", []string{"report-printed"}},
+	} {
+		done := verilex(t, root, nil, "index", "--intent", c.intent)
+		equal(t, done.code, 0)
+		lines := strings.Split(strings.TrimSuffix(done.stdout, "\n"), "\n")
+		equal(t, lines[0], fmt.Sprintf("intent: %d claim(s) for '%s'", len(c.claims), c.intent))
+		for i, claim := range c.claims {
+			equal(t, strings.SplitN(lines[i+1], "  ", 2)[0], claim)
+		}
+	}
+}
+
 // A claim grouped under another as its alias is found by its own name and sentence as strongly
 // as the claim it is grouped under, so an agent that types the alias it saw finds the claim.
 func TestIntentFindsAClaimByItsAlias(t *testing.T) {

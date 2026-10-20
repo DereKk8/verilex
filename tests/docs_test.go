@@ -84,7 +84,8 @@ func TestChangeLookupRefusesABrokenDocAnchor(t *testing.T) {
 		equal(t, done.stderr, "verilex: refused: docs/guide.md:4: write an anchor as `<!-- claims: <claim> ... -->`, naming at least one claim\n")
 	}
 	// A note that opens with the word but goes on with a plain word is no anchor.
-	for _, comment := range []string{"<!-- claimed by nobody -->", "<!-- Claims below were reviewed in Q3 -->", "<!-- claim numbers come from the audit -->"} {
+	for _, comment := range []string{"<!-- claimed by nobody -->", "<!-- Claims below were reviewed in Q3 -->", "<!-- claim numbers come from the audit -->",
+		"<!-- claim-free section -->", "<!-- claim/owner map in README -->", "<!-- claims.md lists them -->"} {
 		writeDoc(t, filepath.Join(root, "docs", "guide.md"), "# Guide\n\n## Listing\n"+comment+"\n")
 		done = verilex(t, root, nil, "index", "--changed", "bin/tally")
 		equal(t, done.stderr, "")

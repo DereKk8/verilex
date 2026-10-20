@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "summary": "Closes three false-green paths: an unrun selected claim in a green claim run, weak intents made of terms every claim holds, and near-miss doc anchors.",
+  "files": [
+    {
+      "path": "internal/cli/surface.go",
+      "summary": "attachCoverage now owns the rule that a green claim run proved every selected claim.",
+      "annotations": [
+        {
+          "newRange": [153, 156],
+          "summary": "attachCoverage turns a green or unset run verdict into inconclusive when a selected claim has no proving step.",
+          "rationale": "Issue #48: a planner bug made run --claim exit 0 green while its own claim line said not run. A red stays red because a red is backed by evidence. The run record is saved again after attachCoverage, so the record, the JSON and the usage entry all carry inconclusive. Word passes already written to the ledger stay, because each one is a real green word result. Verified by TestAClaimRunWithAnUnrunSelectedClaimIsNotGreen, which fails with exit 0 when the guard is disabled.",
+          "author": "fm/verilex-false-greens"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/surface_test.go",
+      "summary": "Forces the unrun-selected-claim state that no CLI route reaches since #47.",
+      "annotations": [
+        {
+          "newRange": [1, 46],
+          "summary": "The test builds a green record whose only step proves store-opened while item-added is also selected.",
+          "rationale": "No product route leaves a selected claim unrun on main: plan Order and the run's coverage share binding.proves, and ChainStep/ParseChain round-trip every normalized argument. So the test is in package cli and calls attachCoverage and writeRun directly instead of going through the binary.",
+          "author": "fm/verilex-false-greens"
+        }
+      ]
+    },
+    {
+      "path": "internal/index/index.go",
+      "summary": "The intent floor now needs one shared term that is not common to every claim.",
+      "annotations": [
+        {
+          "newRange": [207, 211],
+          "summary": "Intent defines common once and passes it to both covers and distinct.",
+          "rationale": "A term every claim holds sets no claim apart, so it alone cannot make a claim match. With one claim, every term is kept as telling, because otherwise a single-claim product could never match an intent. distinct used the same frequency test before, so it now reuses the one owner.",
+          "author": "fm/verilex-false-greens"
+        },
+        {
+          "newRange": [265, 270],
+          "summary": "covers requires at least one matched term that is not common.",
+          "rationale": "store item refunds and delete an item from the store matched all three tally claims through store and item, and the launcher went green. The half-coverage floor from #43 is unchanged, so an intent such as store opens item refunds still finds store-opened. Verified by TestShortIntentRejectsOneSharedTerm, TestWeakIntentMatchFindsNoClaim on verilex's own claims, and verify-verilex atk-idx-weak3/4 and atk-agent-weak3/4.",
+          "author": "fm/verilex-false-greens"
+        }
+      ]
+    },
+    {
+      "path": "internal/index/docs.go",
+      "summary": "A comment that opens with claim or claims is now read as an anchor and refused unless exact.",
+      "annotations": [
+        {
+          "newRange": [27, 27],
+          "summary": "anchorStart now matches claim or claims in any case, followed by whitespace, colon, equals or the comment end.",
+          "rationale": "Issue #49 S8: <!-- claim: item-listed --> was silently ignored, so the passage was never tied to its claim. The existing malformed-anchor refusal now covers near misses. A comment such as <!-- claimed by nobody --> still passes, which the docs test checks.",
+          "author": "fm/verilex-false-greens"
+        }
+      ]
+    }
+  ]
+}

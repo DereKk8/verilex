@@ -2,11 +2,14 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/DereKk8/verilex/agent/internal/proxy"
 	"github.com/DereKk8/verilex/agent/internal/run"
@@ -38,6 +41,12 @@ func Main(argv []string, stdout, stderr io.Writer, timer run.Timer) int {
 		fmt.Fprintf(stderr, "verilex-agent: error: %v\n", err)
 		return 2
 	}
+	// SIGTERM, SIGINT and SIGHUP end the run through Run, so its deferred cleanup removes the
+	// run directory. A second signal ends the launcher at once.
+	interrupt, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt, syscall.SIGHUP)
+	defer stop()
+	go func() { <-interrupt.Done(); stop() }()
+	opts.Interrupt = interrupt
 	result, err := run.Run(opts, timer)
 	if result.Work != "" {
 		defer fmt.Fprintf(stderr, "verilex-agent: run files kept in %s\n", result.Work)

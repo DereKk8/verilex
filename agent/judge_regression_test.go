@@ -290,3 +290,75 @@ func TestLiteralJudgePathCannotPoisonReuse(t *testing.T) {
 		t.Fatalf("covered request: exit %d\nstdout: %s\nstderr: %s", run.code, run.stdout, run.stderr)
 	}
 }
+
+// A judge replaced after the launcher stamped it must not store its answer under the original's
+// identity: the next run with the original restored would reuse that answer without asking it.
+func TestJudgeReplacedWhileTheLauncherRunsIsNotStamped(t *testing.T) {
+	dir := t.TempDir()
+	green := claimRun("green", "r1", []string{"store-opened"}, nil)
+	fake := writeFake(t, dir, fakeFiles{run: green, ticket: intentTicket(trap)})
+	// The launcher's verilex holds `verilex claims`, after the judge is stamped and before it runs.
+	gated := filepath.Join(dir, "gated-verilex")
+	wrapper := "#!/bin/sh\ncase \" $* \" in *\" claims \"*)\n  touch \"$JUDGE_GATE/waiting\"\n  while [ ! -e \"$JUDGE_GATE/release\" ]; do sleep 0.01; done ;;\nesac\nexec " + fake + " \"$@\"\n"
+	if err := os.WriteFile(gated, []byte(wrapper), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	brain := writeBrain(t, dir, "#!/bin/sh\ntouch \"$HOME/started\"\nverilex run --json --claim store-opened\n")
+	original, err := os.ReadFile(standinJudge())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "judge")
+	replacement := []byte("#!/bin/sh\necho '{\"coverage\":\"full\",\"claims\":[\"store-opened\"],\"confidence\":0.9,\"reason\":\"replacement answer\"}'\n")
+	// swap replaces the judge atomically, as a deploy or a rollback would.
+	swap := func(data []byte) {
+		t.Helper()
+		next := path + ".next"
+		if err := os.WriteFile(next, data, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(next, path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	swap(original)
+	args := []string{"--judge", path, "--intent", trap, "--harness", "stub", "--model", "stub"}
+	if _, err := launcherArgs(dir, gated, brain, args...); err != nil {
+		t.Fatal(err)
+	}
+	tmp := runTemp(t)
+	done := make(chan kept, 1)
+	go func() {
+		out, stderr, code, err := launchEnv(dir, gated, brain, []string{"JUDGE_GATE=" + dir, "TMPDIR=" + tmp}, append(args, "--keep-work")...)
+		if err != nil {
+			stderr += err.Error()
+			code = -1
+		}
+		done <- kept{stdout: out, stderr: stderr, code: code}
+	}()
+	defer os.WriteFile(filepath.Join(dir, "release"), nil, 0o600)
+	awaitGate(t, dir)
+	swap(replacement)
+	if err = os.WriteFile(filepath.Join(dir, "release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first := <-done
+	first.root = runRoot(t, tmp)
+	swap(original)
+	if first.code != 2 || first.stdout != "" || !strings.Contains(first.stderr, "inconclusive: the judge "+path+" changed while the launcher ran, so its answer is not stamped") {
+		t.Fatalf("replaced judge: exit %d\nstdout: %s\nstderr: %s", first.code, first.stdout, first.stderr)
+	}
+	if _, err = os.Stat(filepath.Join(first.root, "brain", "home", "started")); !os.IsNotExist(err) {
+		t.Fatalf("replaced judge started the brain: %v", err)
+	}
+	if paths, _ := filepath.Glob(filepath.Join(dir, "judgments", "*", "*.json")); len(paths) != 0 {
+		t.Fatalf("replaced judge's answer stored: %v", paths)
+	}
+	second := launchKeptEnv(t, dir, gated, brain, []string{"JUDGE_GATE=" + dir}, args...)
+	if second.code != 2 || second.stdout != "" || !strings.Contains(second.stderr, `intent "refund an added item" names no claim`) {
+		t.Fatalf("restored judge: exit %d\nstdout: %s\nstderr: %s", second.code, second.stdout, second.stderr)
+	}
+	if _, err = os.Stat(filepath.Join(second.root, "brain", "home", "started")); !os.IsNotExist(err) {
+		t.Fatalf("restored judge started the brain: %v", err)
+	}
+}

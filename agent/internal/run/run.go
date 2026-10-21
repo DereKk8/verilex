@@ -741,6 +741,9 @@ func (j *intentJudge) intent(ctx context.Context, verilex, project, intent strin
 	case err != nil:
 		return judge.Judgment{}, inconclusive("the judge failed, so the intent's claims are unknown: %s", or(oneLine(string(stderr)), err.Error()))
 	}
+	if err := j.judge.Unchanged(); err != nil {
+		return judge.Judgment{}, inconclusive("%v", err)
+	}
 	answer, err := judge.Parse(stdout, catalog)
 	if err != nil {
 		return judge.Judgment{}, inconclusive("%v, so the intent's claims are unknown", err)

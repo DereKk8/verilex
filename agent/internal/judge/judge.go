@@ -137,6 +137,19 @@ func (j Judge) Command(system string) []string {
 	return out
 }
 
+// Unchanged refuses a named executable whose content is no longer the content its identity
+// stamps, so an answer from a judge replaced while the launcher ran is not stored as the original's.
+func (j Judge) Unchanged() error {
+	if !strings.HasPrefix(j.driver, "executable ") {
+		return nil
+	}
+	data, err := os.ReadFile(j.Argv[0])
+	if err != nil || "executable "+digest(string(data)) != j.driver {
+		return fmt.Errorf("the judge %s changed while the launcher ran, so its answer is not stamped", j.Argv[0])
+	}
+	return nil
+}
+
 // Identity names the judge in a stamp: its command, prompt, schema and model. A change to any of
 // them is a new judge, whose judgments are made again.
 func (j Judge) Identity() string {

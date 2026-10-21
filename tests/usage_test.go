@@ -2,9 +2,11 @@ package tests
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func usageJSON(t *testing.T, root string, env map[string]string) map[string]any {
@@ -124,4 +126,34 @@ func TestUsageJSONListsEveryMissOldestFirst(t *testing.T) {
 		equal(t, got[i], note)
 	}
 	equal[any](t, entry["miss"].(map[string]any)["review"], notes[len(notes)-1])
+}
+
+func TestUsageConcurrentMissesKeepRecordedOrder(t *testing.T) {
+	root := product(t)
+	equal(t, verilex(t, root, nil, "run", chain).code, 0)
+	id := lastRun(t, root).Run
+	for round := 0; round < 4; round++ {
+		var pending []*process
+		for i := 0; i < 8; i++ {
+			pending = append(pending, start(t, root, nil, "usage", id, "--miss", fmt.Sprintf("finding %d-%d", round, i)))
+		}
+		for _, p := range pending {
+			equal(t, p.wait(t).code, 0)
+		}
+	}
+	entry := usageJSON(t, root, nil)["entries"].([]any)[0].(map[string]any)
+	misses := entry["misses"].([]any)
+	equal(t, len(misses), 32)
+	var last time.Time
+	for _, raw := range misses {
+		recorded, err := time.Parse(time.RFC3339Nano, raw.(map[string]any)["recorded"].(string))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if recorded.Before(last) {
+			t.Fatalf("miss recorded %s listed after %s", recorded, last)
+		}
+		last = recorded
+	}
+	equal[any](t, entry["miss"], misses[len(misses)-1])
 }

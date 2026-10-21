@@ -62,12 +62,15 @@ type Report struct {
 
 type Store struct{ Dir string }
 
-func ID() (string, error) {
+func ID() (string, error) { return idAt(time.Now()) }
+
+// idAt names something created at t, so file-name order follows t.
+func idAt(t time.Time) (string, error) {
 	var b [12]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
 	}
-	return time.Now().UTC().Format("20060102T150405.000000000") + "-" + hex.EncodeToString(b[:]), nil
+	return t.UTC().Format("20060102T150405.000000000") + "-" + hex.EncodeToString(b[:]), nil
 }
 
 func validID(id string) error {
@@ -122,14 +125,15 @@ func (s Store) Annotate(id string, tokens *Tokens, review string) error {
 	if tokens == nil && strings.TrimSpace(review) == "" {
 		return errors.New("pass --tokens or a nonempty --miss review")
 	}
+	now := time.Now()
 	note := annotation{Tokens: tokens}
 	if strings.TrimSpace(review) != "" {
 		if entry.Record.Verdict == nil || *entry.Record.Verdict != verdict.Green {
 			return errors.New("only a green run can be marked as a Verilex miss")
 		}
-		note.Miss = &Miss{Review: review, Recorded: time.Now().UTC().Format(time.RFC3339Nano)}
+		note.Miss = &Miss{Review: review, Recorded: now.UTC().Format(time.RFC3339Nano)}
 	}
-	name, err := ID()
+	name, err := idAt(now)
 	if err != nil {
 		return err
 	}

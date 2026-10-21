@@ -87,6 +87,9 @@ func TestScriptedStandinBrain(t *testing.T) {
 			}
 			t.Cleanup(func() { os.RemoveAll(sockDir) })
 			hostSock, sockHits := listen(t, "unix", filepath.Join(sockDir, "host.sock"))
+			// The lookalike must sit under /tmp whatever TMPDIR is: the brain's private /tmp is the only writable path there.
+			outside := filepath.Join("/tmp", fmt.Sprintf("vx-standin-escaped-%d-%s", os.Getpid(), port))
+			t.Cleanup(func() { os.Remove(outside) })
 			abstract := fmt.Sprintf("vx-standin-%d-%s", os.Getpid(), port)
 			_, abstractHits := listen(t, "unix", "\x00"+abstract)
 			namespaces := map[string]string{}
@@ -107,7 +110,7 @@ func TestScriptedStandinBrain(t *testing.T) {
 				"STANDIN_LEDGER": ledger, "STANDIN_STATE": home,
 				"STANDIN_VERILEX_HOME": callerHome, "STANDIN_VERILEX_LEDGER": callerLedger,
 				"VERILEX_HOME": callerHome, "VERILEX_LEDGER": callerLedger,
-				"STANDIN_OTHER_HOME": otherHome, "STANDIN_OUTSIDE": filepath.Join(dir, "escaped"),
+				"STANDIN_OTHER_HOME": otherHome, "STANDIN_OUTSIDE": outside,
 				"STANDIN_HOST_PID": strconv.Itoa(os.Getpid()), "STANDIN_HOST_PORT": port,
 				"STANDIN_HOST_SOCKET": hostSock, "STANDIN_HOST_ABSTRACT": abstract,
 				"TALLY_DEFECT": tc.defect, "TALLY_SIMULATE_LOCK": tc.locked,
@@ -166,7 +169,7 @@ func TestScriptedStandinBrain(t *testing.T) {
 			if hits.Load()+sockHits.Load()+abstractHits.Load() != 0 {
 				t.Fatal("the brain reached a host socket")
 			}
-			for _, path := range []string{filepath.Join(dir, "escaped"), filepath.Join(run.root, "sandbox", "verify", "escaped"), filepath.Join(run.root, "log", "escaped")} {
+			for _, path := range []string{outside, filepath.Join(run.root, "sandbox", "verify", "escaped"), filepath.Join(run.root, "log", "escaped")} {
 				if _, err := os.Stat(path); !os.IsNotExist(err) {
 					t.Fatalf("brain scratch write reached the host: %s", path)
 				}

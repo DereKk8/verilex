@@ -299,7 +299,7 @@ func (r *Run) drive(p Plan) error {
 		return err
 	}
 	if hidden {
-		if err = replaceWhole(filepath.Join(frame.Evidence, "stdout")); err != nil && !errors.Is(err, fs.ErrPermission) {
+		if err = replaceWhole(filepath.Join(frame.Evidence, "stdout")); err != nil {
 			return err
 		}
 		last := &r.record.Frame[len(r.record.Frame)-1]

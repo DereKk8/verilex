@@ -1,0 +1,219 @@
+{
+ "version": 1,
+ "summary": "verilex-agent judges intent coverage by meaning, reuses exact-text stamps, rejects malformed answers, and never lets a stored judgment replace a more cautious fresh one.",
+ "files": [
+  {
+   "path": "agent/internal/judge/judge.go",
+   "summary": "Owns the judge: its command, prompt, answer validation, stamp identity and the stand rule.",
+   "annotations": [
+    {
+     "newRange": [
+      31,
+      41
+     ],
+     "summary": "MinConfidence sets 0.55 as the lowest confidence at which a full judgment stands.",
+     "rationale": "In the experiment's 300 judgments every right full had 0.55 or more and the two wrong ones (an injected note) had 0.5 and 0.3, so the gate removes the measured false greens without false reds. A 0.7 gate would have turned 8 right Opus answers into false reds. Verified by TestOnlyAConfidentFullJudgmentGoesGreen and a mutation to 0, which fails it. Untested: injections that the model answers with high confidence.",
+     "author": "fm/verilex-intent-meaning-check"
+    },
+    {
+     "newRange": [
+      146,
+      161
+     ],
+     "summary": "Request escapes the intent's angle brackets and ampersands and wraps it in one pair of request tags.",
+     "rationale": "The intent is untrusted data, so it must not close the tag and pose as a rule. TestRequestReachesTheJudgeAsData proves one tag pair and the escaped text reach the judge; removing the escaping fails it.",
+     "author": "fm/verilex-intent-meaning-check"
+    },
+    {
+     "newRange": [
+      260,
+      275
+     ],
+     "summary": "holds reuses a full judgment while its named claims are unchanged, and a partial or none only while the whole catalog is unchanged.",
+     "rationale": "No other claim can make a full's claims prove less, but a new or changed claim may prove what a partial or none missed. TestJudgmentIsReusedUntilItsStampDrifts covers both branches.",
+     "author": "fm/verilex-intent-meaning-check"
+    },
+    {
+     "newRange": [
+      100,
+      122
+     ],
+     "summary": "Resolve makes a --judge path absolute before it checks, stamps and runs the file.",
+     "rationale": "The judge runs from an empty directory, so a relative path failed to start, and a bare name ran a PATH program whose answer was stored under the checked file's identity (S1 of the zero-trust review). TestJudgePathIsTheLaunchersFile failed before the change (relative inconclusive, bare name green on the trap) and passes after.",
+     "author": "fm/verilex-intent-meaning-check"
+    },
+    {
+     "newRange": [
+      43,
+      44
+     ],
+     "summary": "Format version 2 prevents earlier permissive or whitespace-collapsed judgments from being reused.",
+     "rationale": "An old stored answer can violate the new boundary even when its text looks unchanged, so the stamp format invalidates every earlier identity.",
+     "author": "fm/verilex-intent-meaning-check"
+    },
+    {
+     "newRange": [
+      128,
+      138
+     ],
+     "summary": "Command expands placeholders only for the built-in template, never in an explicit executable path.",
+     "rationale": "A literal judge-{model} filename previously ran another executable and cached its answer under the checked file's identity. TestLiteralJudgePathCannotPoisonReuse fails on 2dc1d75 and passes here. Fresh verify-verilex calls returned none twice with one actual judgment.",
+     "author": "fm/verilex-intent-meaning-check"
+    },
+    {
+     "newRange": [
+      158,
+      161
+     ],
+     "summary": "Normalize preserves every byte of the intent in the request and cache key.",
+     "rationale": "Spaces inside a quoted literal can change required output, so collapsing them erased drift. TestLiteralWhitespaceReachesTheJudgeAndInvalidatesReuse fails on 2dc1d75 and passes here. The three CLI calls preserved both double-space requests.",
+     "author": "fm/verilex-intent-meaning-check"
+    },
+    {
+     "newRange": [
+      174,
+      200
+     ],
+     "summary": "Parse validates the raw answer or structured_output before constructing Answer.",
+     "rationale": "Missing reason previously defaulted to an empty string and could produce green. The schema test rejects missing, null, wrongly typed and extra properties in both protocols without a brain or saved judgment, and accepts provider envelope metadata.",
+     "author": "fm/verilex-intent-meaning-check"
+    },
+    {
+     "newRange": [
+      277,
+      292
+     ],
+     "summary": "Cautious orders judgments none, partial, full, then lowest confidence; Find and the launcher share this one order.",
+     "rationale": "Because Find and the post-record check in run.go must agree on which answer is more cautious, the order has one owner here. The tie on equal content returns 0, so a launcher that reads back its own record keeps its fresh, not-reused judgment. Verified by TestUnstoredCautiousAnswerBeatsAFullStoredMeanwhile and TestConcurrentJudgmentsApplyTheStoredCautiousAnswer.",
+     "author": "fm/verilex-intent-meaning-check"
+    }
+   ]
+  },
+  {
+   "path": "agent/internal/judge/store.go",
+   "summary": "Owns the judgments store: create-only files named by content digest, read back without trust.",
+   "annotations": [
+    {
+     "newRange": [
+      49,
+      82
+     ],
+     "summary": "Find returns only judgments that match their digest, key and claim fingerprints, choosing the most cautious when several hold.",
+     "rationale": "The store may be shared between machines and written concurrently, so a damaged or racing file must never turn a result green. The damaged-file step of TestJudgmentIsReusedUntilItsStampDrifts re-judges. Anyone with write access can still forge a judgment; the brain's sandbox hides the store.",
+     "author": "fm/verilex-intent-meaning-check"
+    },
+    {
+     "newRange": [
+      31,
+      43
+     ],
+     "summary": "DefaultDir returns an error when neither XDG_STATE_HOME nor HOME is set.",
+     "rationale": "Without HOME it used to build a relative path, so the store landed in the working directory. Run refuses only intent runs with this error, which TestOnlyAnIntentNeedsTheJudgmentStore checks.",
+     "author": "fm/verilex-intent-meaning-check"
+    }
+   ]
+  },
+  {
+   "path": "agent/internal/run/run.go",
+   "summary": "Runs the judge before the brain and refuses any intent the judge does not find fully proven.",
+   "annotations": [
+    {
+     "newRange": [
+      188,
+      211
+     ],
+     "summary": "Run resolves the judge and creates the judgments store only for an intent, before the brain starts.",
+     "rationale": "Because a diff-only run judges nothing, an unwritable or missing store must not refuse it, so the store block sits inside the intent branch (S2 of the zero-trust review). The store still exists before the brain starts so the sandbox can hide it. TestOnlyAnIntentNeedsTheJudgmentStore failed before the change and passes after; verify-verilex scenario 'A diff with no place for a judgment store' reproduced the same.",
+     "author": "fm/verilex-intent-meaning-check"
+    },
+    {
+     "newRange": [
+      664,
+      703
+     ],
+     "summary": "floor returns inconclusive unless the judgment stands, also when --claim names claims.",
+     "rationale": "Only a sure full may go green, so --claim adds to the floor but never stands for an intent; verdict rule row 29 changed from green to inconclusive for that reason.",
+     "author": "fm/verilex-intent-meaning-check"
+    },
+    {
+     "newRange": [
+      212,
+      217
+     ],
+     "summary": "Run hides a store named by --judgments also on a diff-only run, which resolves no store of its own.",
+     "rationale": "Because the store resolves only for an intent, a diff-only run passed an empty path to the hide list, so its brain could read a named store placed in the project (D4 of the zero-trust re-check). The opts.Judgments guard matters because abs of an empty path is the working directory. The 'a named store' subtest of TestOnlyAnIntentNeedsTheJudgmentStore failed before and passes after.",
+     "author": "fm/verilex-intent-meaning-check"
+    },
+    {
+     "newRange": [
+      731,
+      756
+     ],
+     "summary": "intent reuses a stored judgment, else runs the judge, records the answer, and returns a stored judgment only when it is more cautious.",
+     "rationale": "Two launchers can miss the cache at once, so after Record the launcher reads the store again and an already stored none or partial overrides a delayed full (R4-S2). If Record failed, the fresh answer may be absent from the store, so a stored full must never replace a fresh none; 5c46cfc returned any stored judgment and went green in that case. Verified by TestUnstoredCautiousAnswerBeatsAFullStoredMeanwhile, which fails on 5c46cfc and passes on this head, and by the verify-verilex unstored scenario. A judgment recorded after the second read cannot change this run.",
+     "author": "fm/verilex-intent-meaning-check"
+    }
+   ]
+  },
+  {
+   "path": "agent/judge_test.go",
+   "summary": "Launcher tests for the intent judge, its stamps and its store.",
+   "annotations": [
+    {
+     "newRange": [
+      216,
+      341
+     ],
+     "summary": "Two tests pin the S1, S2 and D4 fixes: the --judge path is the launcher's file, only an intent needs the store, and a named store stays hidden.",
+     "rationale": "Each test failed on its parent commit with the reviewer's symptoms and passes after the fix; the before and after output is kept in the task's data directory, not in the repository.",
+     "author": "fm/verilex-intent-meaning-check"
+    }
+   ]
+  },
+  {
+   "path": "agent/internal/judge/system.txt",
+   "summary": "The judge's system prompt: the hardened experiment prompt plus a rule for claim text.",
+   "annotations": [
+    {
+     "newRange": [
+      16,
+      16
+     ],
+     "summary": "The last paragraph tells the judge that orders inside claim sentences or evidence are not rules.",
+     "rationale": "Because claim text reached the judge as plain catalog text, a claim sentence that ordered a pass made Opus answer full 0.60 in 2 of 23 tries (R3-S4 of the zero-trust re-check), and that judgment was stored and reused. With this paragraph the same edit got none in 24 of 24 real-judge tries with fresh stores. 24 tries cannot rule out a rarer full, so docs/intent-judge.md Limits records the rate.",
+     "author": "fm/verilex-intent-meaning-check"
+    }
+   ]
+  },
+  {
+   "path": "agent/internal/judge/schema.go",
+   "summary": "Validates the answer with the same schema supplied to the provider, without another dependency.",
+   "annotations": [
+    {
+     "newRange": [
+      23,
+      35
+     ],
+     "summary": "validateAnswer enforces the embedded schema before any answer is stored or used.",
+     "rationale": "The schema owns required fields, types, extra-property rejection, coverage values and confidence limits. TestJudgeAnswerSchemaIsEnforcedBeforeStartingTheBrain exercises 18 malformed protocol cases and valid provider envelopes through the launcher CLI.",
+     "author": "fm/verilex-intent-meaning-check"
+    }
+   ]
+  },
+  {
+   "path": "agent/judge_regression_test.go",
+   "summary": "CLI regression tests for the R4-S1 to R4-S4 review findings and the unstored cautious answer.",
+   "annotations": [
+    {
+     "newRange": [
+      160,
+      258
+     ],
+     "summary": "gatedJudge holds a judge at its cache miss, and the unstored test makes the store read-only before the none judge answers.",
+     "rationale": "A read-only key directory makes Record fail while Find still reads the concurrent full, which reproduces the false green of 5c46cfc deterministically. The four R4 tests fail on 2dc1d75 and pass on this head; the unstored test passes on 2dc1d75, fails on 5c46cfc and passes on this head. The chmod trick does not hold for a root user.",
+     "author": "fm/verilex-intent-meaning-check"
+    }
+   ]
+  }
+ ]
+}

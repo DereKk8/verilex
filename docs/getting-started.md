@@ -8,7 +8,7 @@ This page installs verilex and walks through one session on tally, the sample pr
 go install github.com/DereKk8/verilex/cmd/verilex@latest
 ```
 
-Use Go 1.27.2 or newer on a Unix system. Add `$(go env GOPATH)/bin` to your `PATH`.
+Use Go 1.27.3 or newer on a Unix system. Add `$(go env GOPATH)/bin` to your `PATH`.
 The core is Go; frame steps and words can use any language installed on the product's workstation.
 
 ## Get a product to verify

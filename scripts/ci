@@ -54,6 +54,9 @@ test_() {
   go test -race $(go list ./... | grep -v '/tests$')
   go test -race -c -o "$cover/tests.test" ./tests
   (cd tests && GOFLAGS="${GOFLAGS:-} -cover" GOCOVERDIR="$cover" "$cover/tests.test")
+  # Each instrumented child wrote to its own subdirectory; gather one covmeta (all are identical) and every counter file so covdata reads one directory however many children ran.
+  find "$cover" -mindepth 2 -name 'covmeta.*' -print -quit | while read -r meta; do mv "$meta" "$cover"; done
+  find "$cover" -mindepth 2 -name 'covcounters.*' -exec sh -c 'mv "$@" "$0"' "$cover" {} +
   go tool covdata percent -i="$cover"
   (cd agent && go test -race ./...)
 }

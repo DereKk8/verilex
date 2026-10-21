@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "summary": "The evidence secret scan finds tokens after any encoded byte and JSON-escaped tokens in every file, and names evidence it cannot read instead of stopping.",
+  "files": [
+    {
+      "path": "internal/runner/evidence.go",
+      "summary": "Owns the token boundary rule, the decoded second pattern pass, and the Scan result with its two causes.",
+      "annotations": [
+        {
+          "newRange": [
+            26,
+            29
+          ],
+          "summary": "tokenStart accepts a token after a repeated URL escape, a quoted-printable byte, or any backslash escape form.",
+          "rationale": "Each of these encodings ends in a letter or digit, so the old lookbehind treated the token as glued to an identifier and the run went green (PX-3b). Six cases in TestDishonestWordResultsAreInconclusive fail on main and pass here. A token glued to plain ASCII letters still does not count, by design.",
+          "author": "fm/verilex-secret-scan-followups"
+        },
+        {
+          "newRange": [
+            55,
+            74
+          ],
+          "summary": "Scan holds the first leak and the first unreadable entry; Cause gives the one reason text for words and frames.",
+          "rationale": "Evidence verilex cannot read may hold a secret, so it must never pass as clean, but the word did run, so 'not run' was wrong (PX-12). Frame embeds Scan, so run.json gains an optional 'unread' field beside 'leak' and old records still load.",
+          "author": "fm/verilex-secret-scan-followups"
+        },
+        {
+          "newRange": [
+            122,
+            159
+          ],
+          "summary": "The walk names an entry it cannot open, skips it, and keeps scanning the rest of the evidence.",
+          "rationale": "Before, the first permission error stopped the walk, so a token in a later file stayed in evidence. A directory that cannot be listed is visited a second time with the error, which is why the name and rename logic runs only when err is nil. The chmod of a closed directory is recorded only after it succeeds, because a failed one restored in the defer would turn the scan into an error. Proven by TestUnreadableEvidenceAnotherUserOwns and a verify-verilex drive with unshare.",
+          "author": "fm/verilex-secret-scan-followups"
+        },
+        {
+          "newRange": [
+            369,
+            384
+          ],
+          "summary": "redact runs every pattern a second time on the JSON-decoded text and maps each match back to the escapes it spans.",
+          "rationale": "A token written as ghp\\u005f... was found only in a report that decodes whole, so other files and broken reports kept it (PX-8, PX-11). The decoded text reuses the memory of the raw one, so peak memory stays at main's level; time roughly doubles for files that contain a backslash (50 MB escape-heavy log: 1.2 s to 2.7 s). The raw pass stays because project patterns may match escapes literally.",
+          "author": "fm/verilex-secret-scan-followups"
+        },
+        {
+          "newRange": [
+            404,
+            468
+          ],
+          "summary": "decode and unescapeAt turn JSON escapes into runes exactly as encoding/json does, including UTF-16 pairs and lone surrogates.",
+          "rationale": "A first version had a nine-byte escape table against an eight-rune replacement and panicked on \\t; the verify-verilex perf drive caught it. TestPatternsMatchDecodedJSONEscapes now covers every escape, a pair and a lone surrogate, and two mutations of this code make it fail.",
+          "author": "fm/verilex-secret-scan-followups"
+        }
+      ]
+    },
+    {
+      "path": "internal/runner/runner.go",
+      "summary": "Words, frames and cleanup take their scan reason from Scan.Cause.",
+      "annotations": [
+        {
+          "newRange": [
+            294,
+            296
+          ],
+          "summary": "The launch's decoded-value check now only catches what the raw and decoded scans cannot, such as an anchored project pattern.",
+          "rationale": "The frame scan now finds an escaped token itself, so this branch no longer runs for that case. TestSecretOnlyDecodingShowsReplacesWholeStdout keeps the branch covered with the pattern ^hunter2$.",
+          "author": "fm/verilex-secret-scan-followups"
+        }
+      ]
+    },
+    {
+      "path": "tests/run_test.go",
+      "summary": "Adds a failing-on-main test per defect and one shared probe for files another user owns.",
+      "annotations": [
+        {
+          "newRange": [
+            834,
+            857
+          ],
+          "summary": "otherUser probes a real chown to a subordinate uid and checks the new owner before a foreign-owner test runs.",
+          "rationale": "On Ubuntu 24.04, AppArmor lets unshare start but denies chown inside it, so the old probe (unshare ... true) passed and the tests ran without any foreign file. The GitHub Linux runner fails instead of skipping, so CI cannot pass these tests vacuously. Verified with a fake unshare: skip locally, fail with GITHUB_ACTIONS=true, and fail when chown leaves the owner unchanged.",
+          "author": "fm/verilex-secret-scan-followups"
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "summary": "Grants unshare the user namespace on the Linux runner, as bwrap already had.",
+      "annotations": [
+        {
+          "newRange": [
+            58,
+            61
+          ],
+          "summary": "The sandbox step writes the same unconfined AppArmor profile for unshare as for bwrap.",
+          "rationale": "Without it, chown inside the namespace fails, so the PX-12 tests failed on CI and the older foreign-owner tests passed without testing anything. The test job passed on the PR with this step.",
+          "author": "fm/verilex-secret-scan-followups"
+        }
+      ]
+    }
+  ]
+}

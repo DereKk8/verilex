@@ -1,0 +1,7 @@
+{"version":1,"summary":"verilex usage --json now lists every miss note of a run under misses, oldest first, and keeps miss as the newest.",
+"files":[
+{"path":"internal/usage/store.go","summary":"Read collects each miss annotation into a new Entry.Misses list.","annotations":[
+{"newRange":[174,174],"summary":"Read appends every miss annotation to entry.Misses in addition to setting entry.Miss.","rationale":"Annotation files have timestamped names and Glob sorts them, so the list is oldest first. Before, each note overwrote the last, so JSON showed one note. Verified by TestUsageJSONListsEveryMissOldestFirst. Totals count still one missed run per entry.","author":"fm/verilex-usage-misses"}]},
+{"path":"docs/usage-ledger.md","summary":"States the misses and miss fields for repeated misses.","annotations":[]},
+{"path":"tests/usage_test.go","summary":"Adds a test that marks four misses on one run.","annotations":[
+{"newRange":[105,127],"summary":"The test marks four misses and checks misses order, the miss field, and one missed run in totals.","rationale":"It fails on main with got 0, want 4, because misses did not exist. It passes with the change.","author":"fm/verilex-usage-misses"}]}]}

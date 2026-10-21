@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "summary": "verilex-agent asks a judge model whether the claims prove an intent, lets only a sure full go green, and reuses stamped judgments until drift.",
+  "files": [
+    {
+      "path": "agent/internal/judge/judge.go",
+      "summary": "Owns the judge: its command, prompt, answer validation, stamp identity and the stand rule.",
+      "annotations": [
+        {"newRange": [30, 40], "summary": "MinConfidence sets 0.55 as the lowest confidence at which a full judgment stands.", "rationale": "In the experiment's 300 judgments every right full had 0.55 or more and the two wrong ones (an injected note) had 0.5 and 0.3, so the gate removes the measured false greens without false reds. A 0.7 gate would have turned 8 right Opus answers into false reds. Verified by TestOnlyAConfidentFullJudgmentGoesGreen and a mutation to 0, which fails it. Untested: injections that the model answers with high confidence.", "author": "fm/verilex-intent-meaning-check"},
+        {"newRange": [134, 148], "summary": "Request escapes the intent's angle brackets and ampersands and wraps it in one pair of request tags.", "rationale": "The intent is untrusted data, so it must not close the tag and pose as a rule. TestRequestReachesTheJudgeAsData proves one tag pair and the escaped text reach the judge; removing the escaping fails it.", "author": "fm/verilex-intent-meaning-check"},
+        {"newRange": [240, 257], "summary": "holds reuses a full judgment while its named claims are unchanged, and a partial or none only while the whole catalog is unchanged.", "rationale": "No other claim can make a full's claims prove less, but a new or changed claim may prove what a partial or none missed. TestJudgmentIsReusedUntilItsStampDrifts covers both branches.", "author": "fm/verilex-intent-meaning-check"}
+      ]
+    },
+    {
+      "path": "agent/internal/judge/store.go",
+      "summary": "Owns the judgments store: create-only files named by content digest, read back without trust.",
+      "annotations": [
+        {"newRange": [44, 95], "summary": "Find returns only judgments that match their digest, key and claim fingerprints, choosing the most cautious when several hold.", "rationale": "The store may be shared between machines and written concurrently, so a damaged or racing file must never turn a result green. The damaged-file step of TestJudgmentIsReusedUntilItsStampDrifts re-judges. Anyone with write access can still forge a judgment; the brain's sandbox hides the store.", "author": "fm/verilex-intent-meaning-check"}
+      ]
+    },
+    {
+      "path": "agent/internal/run/run.go",
+      "summary": "Runs the judge before the brain and refuses any intent the judge does not find fully proven.",
+      "annotations": [
+        {"newRange": [188, 205], "summary": "Run creates the judgments store before the brain starts and resolves the judge only for a spec with an intent.", "rationale": "The sandbox can hide only a path that exists, and a diff-only spec needs no judge, so it is never refused for lacking one. The sandbox probe test proves the brain cannot read or write the store.", "author": "fm/verilex-intent-meaning-check"},
+        {"newRange": [627, 682], "summary": "floor returns inconclusive unless the judgment stands, also when --claim names claims.", "rationale": "Only a sure full may go green, so --claim adds to the floor but never stands for an intent; verdict rule row 29 changed from green to inconclusive for that reason.", "author": "fm/verilex-intent-meaning-check"},
+        {"newRange": [689, 738], "summary": "intent reads the catalog, reuses a stored judgment, or runs the judge with a 2-minute bound and stores the new one.", "rationale": "Every judge failure is the environment's, so it is inconclusive and never red. A failed store write is ignored because the judgment still decides this run; the next run judges again. Live: a reused judgment answered in 37 ms, a new Opus one in about 3 s.", "author": "fm/verilex-intent-meaning-check"}
+      ]
+    }
+  ]
+}

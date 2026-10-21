@@ -175,8 +175,8 @@ func reliedOn(record runner.Record) string {
 }
 
 func frameCause(f runner.Frame) string {
-	if f.Leak != "" {
-		return "secret pattern in evidence " + f.Leak
+	if cause := f.Cause(); cause != "" {
+		return cause
 	}
 	if f.Exit != nil && *f.Exit == 0 {
 		return ""

@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
@@ -19,8 +23,10 @@ import (
 // Each pattern matches the whole secret, because redact replaces what it matches: a private key
 // block runs to its END line, or to the end of the file when that line is missing. A token starts
 // where an identifier cannot go on: `\b` would miss one after `_` or a non-ASCII letter, as in
-// MY_ghp_... or éghp_..., and an encoded byte such as %3D or \n ends in a letter or digit.
-const tokenStart = `(?:(?<![A-Za-z0-9])|(?<=%[0-9A-Fa-f]{2})|(?<=\\[nrt]))`
+// MY_ghp_... or éghp_..., and an encoded byte ends in a letter or digit: a URL escape, once or
+// more (%3D, %253D), a quoted-printable one (=3D), or a backslash escape (\n, \x3d, \075,
+// \u003c, \U0000003c).
+const tokenStart = `(?:(?<![A-Za-z0-9])|(?<=%(?:25)*[0-9A-Fa-f]{2})|(?<==[0-9A-F]{2})|(?<=\\(?:[abefnrtv]|[0-7]{1,3}|x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})))`
 
 var secretPatterns = []string{
 	`-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----|[\s\S]*)`,
@@ -46,11 +52,32 @@ func patterns(project dictionary.Project) ([]*regexp2.Regexp, error) {
 	return append(result, project.SecretPatterns...), nil
 }
 
+// Scan is what the scan of a step's evidence found, each entry by its redacted name.
+type Scan struct {
+	// Leak is the first entry that held a secret.
+	Leak string `json:"leak,omitempty"`
+	// Unread is the first entry verilex could not read, such as a file another user owns.
+	Unread string `json:"unread,omitempty"`
+}
+
+// Cause is why the scan makes its step inconclusive, or "" when nothing does. Evidence verilex
+// cannot read may hold a secret, so it never passes as clean.
+func (s Scan) Cause() string {
+	if s.Leak != "" {
+		return "secret pattern in evidence " + s.Leak
+	}
+	if s.Unread != "" {
+		return "cannot scan evidence " + s.Unread + ": permission denied"
+	}
+	return ""
+}
+
 // scan redacts every secret pattern match in the names and files under dir and names, redacted,
 // the first entry that held one. It runs before verilex reads anything from the evidence, so no
 // secret it finds reaches a run record, the usage ledger or a command's output, and the evidence
 // itself keeps none. A directory the word left closed is opened for the scan and closed again.
-func scan(dir string, patterns []*regexp2.Regexp) (leak string, err error) {
+// An entry verilex cannot open even so is named and skipped, and the rest is still scanned.
+func scan(dir string, patterns []*regexp2.Regexp) (found Scan, err error) {
 	// An error names a path, and a path not yet renamed can hold a secret.
 	defer func() {
 		if err != nil {
@@ -70,53 +97,76 @@ func scan(dir string, patterns []*regexp2.Regexp) (leak string, err error) {
 			}
 		}
 	}()
-	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path != dir {
-			name, err := redact([]byte(entry.Name()), patterns)
-			if err != nil {
-				return err
-			}
-			if name != nil {
-				renames = append(renames, path)
-				if leak == "" {
-					leak = string(name)
-				}
-				if len(leak) > nameMax {
-					leak = redacted
-				}
-			}
-		}
+	visit := func(path, name string, entry fs.DirEntry) error {
 		if entry.IsDir() {
 			info, err := entry.Info()
 			if err != nil || info.Mode().Perm()&0o500 == 0o500 {
 				return err
 			}
+			if err = os.Chmod(path, info.Mode()|0o500); err != nil {
+				return err
+			}
 			closed = append(closed, opened{path, info.Mode()})
-			return os.Chmod(path, info.Mode()|0o500)
+			return nil
 		}
-		found, err := scanFile(path, entry, patterns)
-		if found && leak == "" {
-			leak = entry.Name()
+		held, err := scanFile(path, entry, patterns)
+		if held && found.Leak == "" {
+			found.Leak = name
 		}
-		if found && errors.Is(err, fs.ErrPermission) {
+		if held && errors.Is(err, fs.ErrPermission) {
 			// Evidence another user owns, such as a container's root, cannot be rewritten: the
 			// leak is still named, so the run stays inconclusive.
 			return nil
 		}
 		return err
+	}
+	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if path == dir {
+			if err == nil {
+				err = visit(path, "", entry)
+			}
+			return err
+		}
+		name := entry.Name()
+		clean, redactErr := redact([]byte(name), patterns)
+		if redactErr != nil {
+			return redactErr
+		}
+		if clean != nil {
+			if name = string(clean); len(name) > nameMax {
+				name = redacted
+			}
+		}
+		// A directory verilex cannot list is visited a second time, with the error.
+		if err == nil {
+			if clean != nil {
+				renames = append(renames, path)
+				if found.Leak == "" {
+					found.Leak = name
+				}
+			}
+			err = visit(path, name, entry)
+		}
+		if !errors.Is(err, fs.ErrPermission) {
+			return err
+		}
+		if found.Unread == "" {
+			found.Unread = name
+		}
+		if entry.IsDir() {
+			return fs.SkipDir
+		}
+		return nil
 	})
 	if err != nil {
-		return leak, err
+		return found, err
 	}
 	// The walk lists a directory before what it holds, so renaming in reverse never moves a path
 	// still to be renamed.
 	for _, path := range slices.Backward(renames) {
 		name, err := redact([]byte(filepath.Base(path)), patterns)
 		if err != nil {
-			return leak, err
+			return found, err
 		}
 		target, err := rename(path, string(name))
 		if errors.Is(err, fs.ErrPermission) {
@@ -124,7 +174,7 @@ func scan(dir string, patterns []*regexp2.Regexp) (leak string, err error) {
 			continue
 		}
 		if err != nil {
-			return leak, err
+			return found, err
 		}
 		for i, d := range closed {
 			if rel, err := filepath.Rel(path, d.path); err == nil && filepath.IsLocal(rel) {
@@ -132,13 +182,14 @@ func scan(dir string, patterns []*regexp2.Regexp) (leak string, err error) {
 			}
 		}
 	}
-	return leak, nil
+	return found, nil
 }
 
 // scanFile redacts the secrets in one file the walk found and reports whether it held any. A
 // link stays a link unless its target path or content holds a secret: then it becomes a file
 // holding only the marker, because the target lies outside what the word wrote and none of it
-// is copied into the evidence. A link verilex cannot follow holds nothing it could read.
+// is copied into the evidence. A link verilex cannot follow holds nothing it could read, and a
+// link to a directory is not followed: its target lies outside the evidence and can be of any size.
 func scanFile(path string, entry fs.DirEntry, patterns []*regexp2.Regexp) (bool, error) {
 	link := entry.Type()&fs.ModeSymlink != 0
 	if link {
@@ -214,7 +265,8 @@ func rename(path, name string) (string, error) {
 
 // redactJudgment redacts the values a word reported, judged from stdout as written, and replaces
 // the whole of stdout, redacted by the scan, when decoding it still shows a secret, as with a
-// JSON-escaped token whose place in the file is unknown. It reports whether that happened.
+// project pattern anchored to a whole value, whose place in the file is unknown. It reports
+// whether that happened.
 func redactJudgment(j *verdict.Judgment, stdout []byte, evidence string, patterns []*regexp2.Regexp) (bool, error) {
 	// Every field counts, not only those verilex records: a secret in any of them stays in stdout.
 	var report any
@@ -302,28 +354,34 @@ func redactValue(v any, patterns []*regexp2.Regexp) (any, bool, error) {
 }
 
 // redact returns data with every pattern match replaced, or nil when nothing matched. Bytes
-// that are not UTF-8 match as U+FFFD and are kept outside a match. A match of no text marks a
-// secret whose extent is unknown, so the whole file is replaced.
+// that are not UTF-8 match as U+FFFD and are kept outside a match. The patterns also run on data
+// with its JSON escapes decoded, as decoding would show it, so a token written as ghp\u005f... is
+// found in any file and in a report verilex cannot decode whole, and the escapes it spans are
+// replaced. A match of no text marks a secret whose extent is unknown, so the whole file is
+// replaced.
 func redact(data []byte, patterns []*regexp2.Regexp) ([]byte, error) {
-	runes := make([]rune, 0, len(data))
-	offsets := make([]int, 0, len(data)+1)
-	for i := 0; i < len(data); {
-		r, size := utf8.DecodeRune(data[i:])
-		runes, offsets = append(runes, r), append(offsets, i)
-		i += size
-	}
-	offsets = append(offsets, len(data))
 	spans := [][2]int{}
-	for _, pattern := range patterns {
-		m, err := pattern.FindRunesMatch(runes)
-		for ; m != nil && err == nil; m, err = pattern.FindNextMatch(m) {
-			if m.Length == 0 {
-				return []byte(redacted), nil
-			}
-			spans = append(spans, [2]int{offsets[m.Index], offsets[m.Index+m.Length]})
+	var t text
+	for _, unescape := range []bool{false, true} {
+		if unescape && bytes.IndexByte(data, '\\') < 0 {
+			break
 		}
-		if err != nil {
-			return nil, err
+		// The decoded text is never longer than the one as written, so it takes over its memory.
+		t = decode(data, unescape, t)
+		if unescape && !t.escaped {
+			break
+		}
+		for _, pattern := range patterns {
+			m, err := pattern.FindRunesMatch(t.runes)
+			for ; m != nil && err == nil; m, err = pattern.FindNextMatch(m) {
+				if m.Length == 0 {
+					return []byte(redacted), nil
+				}
+				spans = append(spans, [2]int{t.offsets[m.Index], t.offsets[m.Index+m.Length]})
+			}
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	if len(spans) == 0 {
@@ -341,6 +399,71 @@ func redact(data []byte, patterns []*regexp2.Regexp) ([]byte, error) {
 		at = span[1]
 	}
 	return append(clean, data[at:]...), nil
+}
+
+// text is data as runes, with the offset in data where each rune starts and, last, len(data).
+type text struct {
+	runes   []rune
+	offsets []int
+	// escaped reports that at least one rune stands for a JSON escape.
+	escaped bool
+}
+
+// decode returns data as text, in the memory of reuse when it has room. With unescape, each JSON
+// escape becomes the rune it stands for, as encoding/json decodes it, and its offset is where the
+// escape starts.
+func decode(data []byte, unescape bool, reuse text) text {
+	t := text{runes: reuse.runes[:0], offsets: reuse.offsets[:0]}
+	if cap(t.offsets) < len(data)+1 {
+		t = text{runes: make([]rune, 0, len(data)), offsets: make([]int, 0, len(data)+1)}
+	}
+	for i := 0; i < len(data); {
+		r, size := utf8.DecodeRune(data[i:])
+		if unescape && r == '\\' {
+			if e, n := unescapeAt(data[i:]); n > 0 {
+				r, size, t.escaped = e, n, true
+			}
+		}
+		t.runes, t.offsets = append(t.runes, r), append(t.offsets, i)
+		i += size
+	}
+	t.offsets = append(t.offsets, len(data))
+	return t
+}
+
+// unescapeAt returns the rune the JSON escape at the start of data stands for and the escape's
+// length, or a length of 0 when data does not start with one. Two escaped UTF-16 surrogates make
+// one rune, and a lone surrogate stands for U+FFFD.
+func unescapeAt(data []byte) (rune, int) {
+	if len(data) < 2 {
+		return 0, 0
+	}
+	if i := strings.IndexByte(`"\/bfnrt`, data[1]); i >= 0 {
+		return rune("\"\\/\b\f\n\r\t"[i]), 2
+	}
+	r := utf16Unit(data)
+	if r < 0 {
+		return 0, 0
+	}
+	if !utf16.IsSurrogate(r) {
+		return r, 6
+	}
+	if pair := utf16.DecodeRune(r, utf16Unit(data[6:])); pair != utf8.RuneError {
+		return pair, 12
+	}
+	return utf8.RuneError, 6
+}
+
+// utf16Unit returns the code unit of the \uXXXX escape at the start of data, or -1.
+func utf16Unit(data []byte) rune {
+	if len(data) < 6 || data[0] != '\\' || data[1] != 'u' {
+		return -1
+	}
+	n, err := strconv.ParseUint(string(data[2:6]), 16, 16)
+	if err != nil {
+		return -1
+	}
+	return rune(n)
 }
 
 // replace swaps the file at path for one holding data. The rename replaces a symlink itself, so

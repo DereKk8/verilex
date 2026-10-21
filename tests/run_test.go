@@ -329,6 +329,7 @@ func TestDishonestWordResultsAreInconclusive(t *testing.T) {
 		{"secret-after-form-feed-escape", `printf '%s\n' "line\\fghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
 		{"secret-after-octal-escape", `printf '%s\n' "token\\075ghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
 		{"secret-after-quoted-printable", `printf '%s\n' "token=3Dghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
+		{"secret-after-lower-quoted-printable", `printf '%s\n' "token=3dghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -951,6 +952,26 @@ echo "ghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/t.txt"
 			}
 		})
 	}
+}
+
+// A word that gives its whole evidence directory away leaves verilex unable to write the exit
+// file or read anything, and the run is inconclusive, not "not run".
+func TestEvidenceDirectoryGivenAway(t *testing.T) {
+	otherUser(t)
+	root := product(t)
+	t.Cleanup(func() {
+		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+	})
+	addWord(t, root, "store-glanced", `echo fine > "$VERILEX_EVIDENCE/f.txt"
+chmod 700 "$VERILEX_EVIDENCE"
+unshare --map-auto --map-root-user chown -R 1:1 "$VERILEX_EVIDENCE"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done := verilex(t, root, nil, "run", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, verdicts(record), []string{"green", "inconclusive"})
+	equal(t, record.Words[1].Reason, any("cannot scan evidence 02-store-glanced: permission denied"))
 }
 
 func TestWordFailureWithoutDetailDoesNotFormatNone(t *testing.T) {

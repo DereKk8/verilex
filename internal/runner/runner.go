@@ -299,7 +299,7 @@ func (r *Run) drive(p Plan) error {
 		return err
 	}
 	if hidden {
-		if err = replaceWhole(filepath.Join(frame.Evidence, "stdout")); err != nil {
+		if err = replaceWhole(filepath.Join(frame.Evidence, "stdout")); err != nil && !errors.Is(err, fs.ErrPermission) {
 			return err
 		}
 		last := &r.record.Frame[len(r.record.Frame)-1]
@@ -410,7 +410,7 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 	// drop a value; redactJudgment keeps every secret out of what is recorded.
 	var written, stdout []byte
 	if code != nil {
-		if written, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil {
+		if written, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil && !errors.Is(err, fs.ErrPermission) {
 			return WordRecord{}, err
 		}
 	}
@@ -420,7 +420,7 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 		return WordRecord{}, err
 	}
 	if code != nil {
-		if stdout, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil {
+		if stdout, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil && !errors.Is(err, fs.ErrPermission) {
 			return WordRecord{}, err
 		}
 	}

@@ -5,6 +5,7 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,7 +67,8 @@ func execute(argv []string, evidence string, env []string, timeout int, stdin st
 	if code != nil {
 		text = fmt.Sprintf("%d\n", *code)
 	}
-	if err = os.WriteFile(filepath.Join(evidence, "exit"), []byte(text), 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(evidence, "exit"), []byte(text), 0600); err != nil && !errors.Is(err, fs.ErrPermission) {
+		// A word that gave its evidence directory away leaves nothing to write; the scan names the directory.
 		return nil, err
 	}
 	return code, nil

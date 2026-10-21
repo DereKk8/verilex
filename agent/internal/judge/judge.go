@@ -41,7 +41,7 @@ const MinConfidence = 0.55
 
 // format changes whenever the meaning of a judgment or the layout of a request changes, so a
 // judgment made before stops being reused.
-const format = "verilex-judgment-1"
+const format = "verilex-judgment-2"
 
 // The coverage a judge answers.
 const (
@@ -125,8 +125,11 @@ func Resolve(path, model string, allowHarness bool) (Judge, error) {
 	return Judge{Argv: builtin, Model: model, driver: "builtin " + strings.Join(builtin, "\x00")}, nil
 }
 
-// Command is the judge's argv with the model, the system prompt file and the schema filled in.
+// Command fills placeholders only in the built-in template. An explicit judge's argv is literal.
 func (j Judge) Command(system string) []string {
+	if !strings.HasPrefix(j.driver, "builtin ") {
+		return slices.Clone(j.Argv)
+	}
 	out := make([]string, len(j.Argv))
 	for i, arg := range j.Argv {
 		out[i] = strings.NewReplacer("{model}", j.Model, "{system}", system, "{schema}", strings.TrimSpace(Schema)).Replace(arg)
@@ -153,9 +156,9 @@ func Request(intent string, catalog []Claim) string {
 	return b.String()
 }
 
-// Normalize is the intent as a judgment keeps it: its words, one space apart. Only whitespace is
-// not drift; any other change to the text is a new intent.
-func Normalize(intent string) string { return strings.Join(strings.Fields(intent), " ") }
+// Normalize preserves the intent exactly: even whitespace can change the meaning of a literal.
+// The judge reads and stamps the same text the caller supplied.
+func Normalize(intent string) string { return intent }
 
 // Answer is what the judge decided.
 type Answer struct {
@@ -170,10 +173,9 @@ type Answer struct {
 // outside the catalog or contradicts itself is refused, so the run is inconclusive.
 func Parse(stdout []byte, catalog []Claim) (Answer, error) {
 	var doc struct {
-		Answer
-		Structured *Answer `json:"structured_output"`
-		IsError    bool    `json:"is_error"`
-		Result     string  `json:"result"`
+		Structured json.RawMessage `json:"structured_output"`
+		IsError    bool            `json:"is_error"`
+		Result     string          `json:"result"`
 	}
 	if err := json.Unmarshal(stdout, &doc); err != nil {
 		return Answer{}, fmt.Errorf("the judge printed no JSON answer: %v", err)
@@ -181,9 +183,16 @@ func Parse(stdout []byte, catalog []Claim) (Answer, error) {
 	if doc.IsError {
 		return Answer{}, fmt.Errorf("the judge reported an error: %s", oneLine(doc.Result))
 	}
-	answer := doc.Answer
+	raw := stdout
 	if doc.Structured != nil {
-		answer = *doc.Structured
+		raw = doc.Structured
+	}
+	if err := validateAnswer(raw); err != nil {
+		return Answer{}, err
+	}
+	var answer Answer
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		return Answer{}, fmt.Errorf("the judge printed no JSON answer: %v", err)
 	}
 	return answer, answer.check(func(name string) bool {
 		return slices.ContainsFunc(catalog, func(c Claim) bool { return c.Claim == name })
@@ -265,8 +274,8 @@ func (j Judgment) holds(catalog []Claim) bool {
 	return true
 }
 
-// rank orders coverage from the most cautious answer: of two judgments that hold, the store
-// returns the more cautious one, so two runs that judged at once cannot flip the result to green.
+// rank orders coverage from the most cautious answer: of two stored judgments that hold,
+// the store returns the more cautious one.
 func (j Judgment) rank() int { return slices.Index([]string{None, Partial, Full}, j.Coverage) }
 
 func digest(parts ...string) string {

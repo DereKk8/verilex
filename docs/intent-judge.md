@@ -16,6 +16,9 @@ The launcher reads the catalog with `verilex claims --json` and sends the judge 
 - `coverage` is `full` when a green on the listed claims proves everything the intent asks, `partial` when no claim proves some of it, and `none` when no claim proves any of it.
 - `claims` lists the claims a green must prove. `full` and `partial` list at least one, and `none` lists none. Each one must be in the catalog.
 - `confidence` is the judge's probability, from 0 to 1, that its coverage is right.
+- `reason` is the judge's explanation as a string.
+
+All four fields are required. The launcher rejects wrong types, nulls and extra answer properties. A provider's outer result may carry metadata, but its `structured_output` must obey the same answer schema.
 
 The answer decides the run before the brain starts:
 
@@ -48,7 +51,7 @@ The intent is someone else's text, and a model can follow an instruction inside 
 ## Supplying the judge
 
 - **The built-in judge** runs `claude -p` with the model, the system prompt and the answer schema, and with no tools, settings, MCP servers or saved session. It starts only with `--allow-harness`, like a real brain. It runs on the host, outside the brain's sandbox, in an empty directory, and needs the `claude` command and its login.
-- **`--judge PATH`** runs an executable instead. A relative path or a bare name is a file in the launcher's working directory, never a program found on `PATH`. It reads the request on stdin, and `VERILEX_JUDGE_MODEL` and `VERILEX_JUDGE_SYSTEM` (the system prompt file) in its environment. It prints the answer object, or a Claude Code JSON result that carries it as `structured_output`. The tests use `agent/testdata/standin-judge.py`, which answers from a fixed table.
+- **`--judge PATH`** runs an executable instead. A relative path or a bare name is a file in the launcher's working directory, never a program found on `PATH`. The path is literal: `{model}`, `{system}` and `{schema}` in a filename are not substituted. It reads the request on stdin, and `VERILEX_JUDGE_MODEL` and `VERILEX_JUDGE_SYSTEM` (the system prompt file) in its environment. It prints the answer object, or a Claude Code JSON result that carries it as `structured_output`. The tests use `agent/testdata/standin-judge.py`, which answers from a fixed table.
 - **The model** is `judge_model` in the [run ticket](tickets.md), with the same precedence as `model`, or `--judge-model`. The default is `claude-opus-5-5`. In the experiment it judged 108 of 108 normal cases right, with no false green and no false red, at about 3.4 seconds and $0.013 a judgment. Sonnet and Haiku 5.5 gave no false green either, but gave 2 of 72 and 5 of 108 false reds. Through the launcher's own prompt, Opus judged 44 of 44 labeled cases right, four injected requests among them.
 
 Without `--judge` and without `--allow-harness`, a spec with an intent is refused before anything starts.
@@ -57,9 +60,11 @@ Without `--judge` and without `--allow-harness`, a spec with an intent is refuse
 
 A judgment is stamped with what can change its answer, and the launcher reuses it while the stamp holds. A reused judgment asks no model: the launcher answers an intent that names no claim in about 8 milliseconds.
 
-- **The intent.** Only whitespace is not drift. Any other change, of a word, a letter's case or a punctuation mark, is a new intent that is judged again. Telling whether a change alters the meaning would need the model, which is the call the stamp saves.
+- **The intent.** Every text change is drift, including whitespace, a letter's case or punctuation. The request and stamp preserve the caller's exact text: `"ready now"` and `"ready  now"` can require different output. Telling whether a change alters the meaning would need the model, which is the call the stamp saves.
 - **The claims.** A claim drifts when its fingerprint changes: its sentence, arguments, entry points, preconditions, states or evidence. A `full` relies only on the claims it lists, because no other claim can make them prove less. A `partial` or `none` relies on the whole catalog, because a claim added, removed or changed may prove what was missing.
 - **The judge.** Its model, its command (the built-in template, or the content of the `--judge` executable), the system prompt, the answer schema and the judgment format.
+
+The judgment format changed to version 2 when strict answer validation and exact-text intents were added. Earlier judgments are not reused, because their answers or request text may not meet those rules.
 
 A judgment has no age limit, unlike a pass. It reads only the texts it stamps and observes nothing in the product, so time alone cannot make it wrong.
 
@@ -73,7 +78,7 @@ judgments/
     <digest>.json    one judgment, named by the sha256 of its content
 ```
 
-Each judgment file records the intent, the judge's identity and model, the answer, the fingerprint of each claim it relied on and when it was made. The launcher only adds files and never edits one, so launchers that judge at once lose nothing. A reader trusts no file: a judgment counts only when its content matches its name, its intent and judge match its key, and every claim it relied on is unchanged. When several count, the most cautious one decides (`none`, then `partial`, then `full`, then the lowest confidence), so two runs that judged at once cannot make the result green. The brain's sandbox hides the store, so a brain cannot write a judgment that decides a later run. A judgment that cannot be stored still decides its own run, and the next run judges again.
+Each judgment file records the intent, the judge's identity and model, the answer, the fingerprint of each claim it relied on and when it was made. The launcher only adds files and never edits one, so launchers that judge at once lose nothing. A reader trusts no file: a judgment counts only when its content matches its name, its intent and judge match its key, and every claim it relied on is unchanged. After recording a fresh answer, the launcher reads the store again before starting the brain. When several judgments count, the most cautious one decides (`none`, then `partial`, then `full`, then the lowest confidence). Thus an already stored `none` or `partial` overrides a delayed `full`. A judgment recorded after that read cannot retroactively change an earlier run. The brain's sandbox hides the store, so a brain cannot write a judgment that decides a later run. A judgment that cannot be stored still decides its own run, and the next run judges again.
 
 Anyone who can write the store can write a judgment that counts. Give write access only to the launchers.
 

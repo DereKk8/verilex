@@ -54,7 +54,7 @@ test_() {
   go test -race $(go list ./... | grep -v '/tests$')
   go test -race -c -o "$cover/tests.test" ./tests
   (cd tests && GOFLAGS="${GOFLAGS:-} -cover" GOCOVERDIR="$cover" "$cover/tests.test")
-  go tool covdata percent -i="$cover"
+  go tool covdata percent -i="$(find "$cover" -type d | paste -sd, -)"
   (cd agent && go test -race ./...)
 }
 build() {

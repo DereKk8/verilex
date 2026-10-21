@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	// Track the compiled CLI in Go's test cache even though tests drive its binary.
@@ -116,6 +117,8 @@ func (p *process) wait(t *testing.T) output {
 	return output{code, p.stdout.String(), p.stderr.String()}
 }
 
+var children atomic.Int64
+
 // command prepares the CLI in a product checkout with the test's isolated state, stores and config home.
 func command(root string, env map[string]string, args ...string) (*exec.Cmd, *strings.Builder, *strings.Builder) {
 	cmd := exec.Command(binary, args...)
@@ -127,6 +130,13 @@ func command(root string, env map[string]string, args ...string) (*exec.Cmd, *st
 	}
 	// The user's own profiles never reach a test: each product gets its own config home.
 	cmd.Env = append(cmd.Env, "VERILEX_HOME="+filepath.Join(filepath.Dir(root), "state"), "TALLY_STORES="+filepath.Join(filepath.Dir(root), "stores"), "XDG_CONFIG_HOME="+filepath.Join(filepath.Dir(root), "config"))
+	// Instrumented children that exit together would race on one shared coverage directory (their metadata temp file name repeats within a clock tick on macOS), so each writes to its own subdirectory.
+	if dir := os.Getenv("GOCOVERDIR"); dir != "" {
+		own := filepath.Join(dir, fmt.Sprintf("child-%d", children.Add(1)))
+		if err := os.MkdirAll(own, 0o755); err == nil {
+			cmd.Env = append(cmd.Env, "GOCOVERDIR="+own)
+		}
+	}
 	for key, value := range env {
 		cmd.Env = append(cmd.Env, key+"="+value)
 	}

@@ -8,6 +8,13 @@ from self_word import (c, source, start, expect, doc, baseline, external, setup,
                        json, shutil, subprocess)
 
 
+def replace_binary(session, data):
+    staged = session / "bin/verilex.new"
+    staged.write_bytes(data)
+    staged.chmod(0o755)
+    staged.replace(session / "bin/verilex")
+
+
 def skill_session():
     scripts = source / ".cursor/skills/verify-verilex/scripts"
     temp = c.instance / "tmp"
@@ -28,10 +35,10 @@ def skill_session():
         expect((session / "bin/verilex").read_bytes() == pinned, "launch did not freeze the --bin executable")
         expect(external("doctor-after-rebuild", [scripts / "doctor", session]).returncode == 0,
                "rebuilding source binary changed the frozen session")
-        (session / "bin/verilex").write_bytes(pinned + b"\nchanged session\n")
+        replace_binary(session, pinned + b"\nchanged session\n")
         bad = external("doctor-tampered", [scripts / "doctor", session])
         expect(bad.returncode == 1 and "doctor: FAIL binary changed since launch" in bad.stdout, "doctor accepted a tampered session binary")
-        (session / "bin/verilex").write_bytes(pinned)
+        replace_binary(session, pinned)
         snapshot = {str(p.relative_to(session)): p.read_bytes() for p in session.rglob("*") if p.is_file()}
         refused = external("cleanup-foreign", [scripts / "cleanup", session], VERIFY_VERILEX_WORKER=worker + "-other")
         expect(refused.returncode == 2 and "belongs to another worker; left alone" in refused.stderr,

@@ -291,6 +291,21 @@ func (r *Run) drive(p Plan) error {
 		r.stop(verdict.Inconclusive, "launch printed no JSON object with an 'instance'")
 		return nil
 	}
+	// A secret the scan of the raw bytes missed, such as a JSON-escaped token, ends the launch as
+	// a raw one does: the instance is not recorded, and cleanup finds it by the run's label.
+	_, hidden, err := redactValue(launched, r.patterns)
+	if err != nil {
+		return err
+	}
+	if hidden {
+		if err = replaceWhole(filepath.Join(frame.Evidence, "stdout")); err != nil {
+			return err
+		}
+		last := &r.record.Frame[len(r.record.Frame)-1]
+		last.Leak, last.Exit = "stdout", ptr(2)
+		r.stop(verdict.Inconclusive, "launch exited 2")
+		return r.save()
+	}
 	r.record.Instance = instance
 	if r.keep {
 		r.record.History = []ledger.Entry{}
@@ -390,16 +405,30 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 	if err != nil {
 		return WordRecord{}, err
 	}
-	var stdout []byte
+	// The report is judged as the word wrote it, because redacting two secret keys alike would
+	// drop a value; redactJudgment keeps every secret out of what is recorded.
+	var written, stdout []byte
+	if code != nil {
+		if written, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil {
+			return WordRecord{}, err
+		}
+	}
+	judged := verdict.Judge(code, written, step.Word.Timeout)
+	leak, err := scan(evidence, r.patterns)
+	if err != nil {
+		return WordRecord{}, err
+	}
 	if code != nil {
 		if stdout, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil {
 			return WordRecord{}, err
 		}
 	}
-	judged := verdict.Judge(code, stdout, step.Word.Timeout)
-	leak, err := scan(evidence, r.patterns)
+	hidden, err := redactJudgment(&judged, stdout, evidence, r.patterns)
 	if err != nil {
 		return WordRecord{}, err
+	}
+	if hidden && leak == "" {
+		leak = "stdout"
 	}
 	if leak != "" {
 		judged.Verdict = verdict.Inconclusive

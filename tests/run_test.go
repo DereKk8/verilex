@@ -978,8 +978,32 @@ echo '{"verdict": "pass", "observation": "fine"}'
 			record := lastRun(t, root)
 			equal(t, verdicts(record), []string{"green", "inconclusive"})
 			equal(t, record.Words[1].Reason, any(c.reason))
+			equal(t, *record.Reason, "store-glanced: "+c.reason)
+			equal(t, *record.EvidenceKept, true)
 		})
 	}
+}
+
+// A frame step that gives its evidence directory away but leaves it open keeps verilex from
+// writing its exit code, so the instance is not vouched for and the run is inconclusive.
+func TestFrameEvidenceGivenAway(t *testing.T) {
+	otherUser(t)
+	root := product(t)
+	t.Cleanup(func() {
+		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+	})
+	path := filepath.Join(root, ".verilex", "frame", "doctor")
+	give := `os.chmod(os.environ["VERILEX_EVIDENCE"], 0o755)
+subprocess.run(["unshare", "--map-auto", "--map-root-user", "chown", "-R", "1:1", os.environ["VERILEX_EVIDENCE"]], check=True)
+`
+	write(t, path, strings.Replace(read(t, path), "sys.exit(0 if", give+"sys.exit(0 if", 1), 0755)
+	done := verilex(t, root, nil, "run", "store-open")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, *record.Verdict, "inconclusive")
+	equal(t, *record.Reason, "doctor refused the instance (exit 2)")
+	equal(t, record.Frame[1].Unread, "exit")
+	equal(t, len(record.Words), 0)
 }
 
 // A word that leaves its own evidence directory or stdout closed, as `cp -a` from a read-only tree
@@ -990,6 +1014,8 @@ func TestClosedEvidenceTheWordOwnsStillBacksAPass(t *testing.T) {
 		{`chmod 500 "$VERILEX_EVIDENCE"`, "", "dr-x------"},
 		{`chmod 000 "$VERILEX_EVIDENCE"`, "", "d---------"},
 		{`chmod 000 "$VERILEX_EVIDENCE/stdout"`, "stdout", "----------"},
+		{`printf '1\n' > "$VERILEX_EVIDENCE/exit"; chmod 400 "$VERILEX_EVIDENCE/exit"`, "exit", "-rw-------"},
+		{`ln -s /etc/passwd "$VERILEX_EVIDENCE/exit"`, "exit", "-rw-------"},
 	}
 	for _, c := range cases {
 		t.Run(c.closing, func(t *testing.T) {
@@ -1015,6 +1041,23 @@ func TestClosedEvidenceTheWordOwnsStillBacksAPass(t *testing.T) {
 			equal(t, string(exit), "0\n")
 		})
 	}
+}
+
+// verilex opens closed evidence only inside the evidence: a stdout link to a closed file
+// elsewhere is not opened, so the report verilex never scanned cannot back a pass.
+func TestClosedLinkTargetIsNotOpened(t *testing.T) {
+	root := product(t)
+	outside := filepath.Join(t.TempDir(), "report")
+	write(t, outside, `{"verdict": "pass", "observation": "fine"}`+"\n", 0)
+	addWord(t, root, "store-glanced", "rm \"$VERILEX_EVIDENCE/stdout\"\nln -s '"+outside+"' \"$VERILEX_EVIDENCE/stdout\"\n")
+	done := verilex(t, root, nil, "run", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	equal(t, verdicts(lastRun(t, root)), []string{"green", "inconclusive"})
+	info, err := os.Stat(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	equal(t, info.Mode().String(), "----------")
 }
 
 func TestWordFailureWithoutDetailDoesNotFormatNone(t *testing.T) {

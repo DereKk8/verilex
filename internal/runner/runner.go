@@ -415,14 +415,9 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 		}
 	}
 	judged := verdict.Judge(code, written, step.Word.Timeout)
-	found, err := scan(evidence, r.patterns)
+	found, err := scanStep(evidence, r.patterns)
 	if err != nil {
 		return WordRecord{}, err
-	}
-	if _, err = inEvidence(evidence, "exit"); found.Unread == "" && err != nil {
-		// A word gave its evidence directory to another user but left it open: verilex could not
-		// write the exit code, so the evidence cannot back the verdict.
-		found.Unread = "exit"
 	}
 	if code != nil {
 		if stdout, err = readStdout(evidence); err != nil && !errors.Is(err, fs.ErrPermission) {
@@ -456,6 +451,20 @@ func readStdout(evidence string) (data []byte, err error) {
 	return data, err
 }
 
+// scanStep scans a word's or frame step's evidence and names a missing exit file: a step that
+// gave its evidence directory to another user but left it open kept verilex from writing the
+// exit code, so the evidence cannot back the step's result.
+func scanStep(evidence string, patterns []*regexp2.Regexp) (Scan, error) {
+	found, err := scan(evidence, patterns)
+	if err != nil {
+		return found, err
+	}
+	if _, err = inEvidence(evidence, "exit"); found.Unread == "" && err != nil {
+		found.Unread = "exit"
+	}
+	return found, nil
+}
+
 // inEvidence stats a file in a word's evidence, opening a directory the word left closed.
 func inEvidence(evidence, name string) (info fs.FileInfo, err error) {
 	err = withBits(evidence, 0o100, func() (err error) {
@@ -472,7 +481,7 @@ func (r *Run) frame(step, label string) (Frame, error) {
 		return Frame{}, err
 	}
 	f := Frame{Step: label, Exit: code, Evidence: evidence}
-	f.Scan, err = scan(evidence, r.patterns)
+	f.Scan, err = scanStep(evidence, r.patterns)
 	if err != nil {
 		return f, err
 	}
@@ -520,7 +529,7 @@ func cleanup(project dictionary.Project, record *Record, dir string, env Env) er
 	if err != nil {
 		return err
 	}
-	f.Scan, err = scan(evidence, p)
+	f.Scan, err = scanStep(evidence, p)
 	if err != nil {
 		return err
 	}
@@ -534,8 +543,10 @@ func cleanup(project dictionary.Project, record *Record, dir string, env Env) er
 	}
 	kept := true
 	for _, word := range live(record.Words) {
+		// Evidence another user owns survives although verilex cannot look inside; the word
+		// already ends inconclusive for it.
 		info, err := inEvidence(word.Evidence, "stdout")
-		if err != nil || info.IsDir() {
+		if (err != nil && !errors.Is(err, fs.ErrPermission)) || (err == nil && info.IsDir()) {
 			kept = false
 		}
 	}

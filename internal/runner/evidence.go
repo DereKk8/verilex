@@ -485,8 +485,9 @@ func withBits(path string, bits fs.FileMode, change func() error) error {
 	if !errors.Is(err, fs.ErrPermission) {
 		return err
 	}
-	info, statErr := os.Stat(path)
-	if statErr != nil || info.Mode().Perm()&bits == bits {
+	// A link is never opened: its target lies outside the evidence.
+	info, statErr := os.Lstat(path)
+	if statErr != nil || info.Mode()&fs.ModeSymlink != 0 || info.Mode().Perm()&bits == bits {
 		return err
 	}
 	if err = os.Chmod(path, info.Mode()|bits); err != nil {

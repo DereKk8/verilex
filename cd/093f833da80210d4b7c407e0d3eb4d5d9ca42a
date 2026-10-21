@@ -1,0 +1,6 @@
+{"version":1,"summary":"Annotate reads the clock once so a usage note's file name and its recorded time agree.","files":[
+{"path":"internal/usage/store.go","summary":"Derives the note file name and Recorded from one clock reading.","annotations":[
+{"newRange":[65,70],"summary":"idAt(t) builds an ID from a given time, and ID() calls it with time.Now(), so other callers behave as before.","rationale":"The file name decides note order, so it must come from the same instant as Recorded. Verified by the new test; other ID() callers are unchanged.","author":"fm/verilex-usage-clock"},
+{"newRange":[128,136],"summary":"Annotate reads time.Now() once and uses it for both Recorded and the file name.","rationale":"Two reads let concurrent marks interleave, so misses could be out of recorded order. The test failed 7 of 40 runs before the change and 0 of 40 after.","author":"fm/verilex-usage-clock"}]},
+{"path":"tests/usage_test.go","summary":"Adds a concurrency test for miss note order.","annotations":[
+{"newRange":[130,159],"summary":"Runs 32 concurrent usage --miss marks and checks misses are in recorded order and miss is the last.","rationale":"The race is timing dependent, so one run can pass by luck; repeat with -count=40 to catch it on the old code.","author":"fm/verilex-usage-clock"}]}]}

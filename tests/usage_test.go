@@ -102,3 +102,26 @@ func TestUsageAnnotationHonorsJSON(t *testing.T) {
 	equal[any](t, result, map[string]any{"run": id})
 	equal[any](t, usageJSON(t, root, nil)["totals"].(map[string]any)["tokens"], float64(3))
 }
+
+func TestUsageJSONListsEveryMissOldestFirst(t *testing.T) {
+	root := product(t)
+	equal(t, verilex(t, root, nil, "run", chain).code, 0)
+	id := lastRun(t, root).Run
+	notes := []string{"first finding", "second finding", "third finding", "fourth finding"}
+	for _, note := range notes {
+		equal(t, verilex(t, root, nil, "usage", id, "--miss", note).code, 0)
+	}
+	result := usageJSON(t, root, nil)
+	equal[any](t, result["totals"].(map[string]any)["misses"], float64(1))
+	entry := result["entries"].([]any)[0].(map[string]any)
+	misses, _ := entry["misses"].([]any)
+	var got []string
+	for _, raw := range misses {
+		got = append(got, raw.(map[string]any)["review"].(string))
+	}
+	equal(t, len(got), len(notes))
+	for i, note := range notes {
+		equal(t, got[i], note)
+	}
+	equal[any](t, entry["miss"].(map[string]any)["review"], notes[len(notes)-1])
+}

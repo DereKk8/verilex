@@ -29,6 +29,7 @@ type Miss struct {
 
 // Entry keeps the judged record even after the run's evidence is removed.
 // Nil Seconds or Verdict means the caller did not finish recording the run.
+// Misses lists every review note oldest first; Miss repeats the newest.
 type Entry struct {
 	Record     runner.Record `json:"record"`
 	Change     string        `json:"change,omitempty"`
@@ -37,6 +38,7 @@ type Entry struct {
 	Seconds    *float64      `json:"seconds"`
 	Tokens     *Tokens       `json:"tokens"`
 	Miss       *Miss         `json:"miss,omitempty"`
+	Misses     []Miss        `json:"misses,omitempty"`
 }
 
 type Totals struct {
@@ -169,6 +171,7 @@ func (s Store) Read() (Report, error) {
 			}
 			if note.Miss != nil {
 				entry.Miss = note.Miss
+				entry.Misses = append(entry.Misses, *note.Miss)
 			}
 		}
 		if entry.Seconds != nil && (*entry.Seconds < 0 || math.IsInf(*entry.Seconds, 0) || math.IsNaN(*entry.Seconds)) {

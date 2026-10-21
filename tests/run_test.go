@@ -2,6 +2,7 @@ package tests
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"maps"
@@ -9,9 +10,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 
 	// Track the compiled CLI in Go's test cache even though tests drive its binary.
@@ -395,9 +398,7 @@ func TestCleanupEvidenceSecretLeakMakesRunInconclusive(t *testing.T) {
 // A frame step's evidence verilex cannot read makes the run inconclusive as a leak does, and the
 // frame records which entry it could not scan.
 func TestUnreadableCleanupEvidenceMakesRunInconclusive(t *testing.T) {
-	if err := exec.Command("unshare", "--map-auto", "--map-root-user", "true").Run(); err != nil {
-		t.Skipf("unshare cannot map a subordinate uid here (%v), so no file can belong to another user", err)
-	}
+	otherUser(t)
 	root := product(t)
 	t.Cleanup(func() {
 		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
@@ -830,14 +831,34 @@ func TestLongRedactedEvidenceNameEnds(t *testing.T) {
 	equal(t, read(t, filepath.Join(record.Words[1].Evidence, "[redacted]")), "")
 }
 
+// otherUser skips the test unless unshare can give a file to a subordinate uid, as a container's
+// root does: creating the namespace can succeed while chown inside it fails, as under Ubuntu's
+// AppArmor rule for unprivileged namespaces. The Linux CI runner is set up for it, so there a
+// failed probe fails the test instead of skipping it.
+func otherUser(t *testing.T) {
+	t.Helper()
+	probe := filepath.Join(t.TempDir(), "probe")
+	write(t, probe, "", 0644)
+	err := exec.Command("unshare", "--map-auto", "--map-root-user", "chown", "1:1", probe).Run()
+	if err == nil {
+		var info os.FileInfo
+		if info, err = os.Stat(probe); err == nil && info.Sys().(*syscall.Stat_t).Uid == uint32(os.Getuid()) {
+			err = errors.New("the file kept its owner")
+		}
+	}
+	if err == nil {
+		return
+	}
+	if runtime.GOOS == "linux" && os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Fatalf("unshare cannot give a file to another user on the CI runner: %v", err)
+	}
+	t.Skipf("unshare cannot give a file to another user here (%v)", err)
+}
+
 // Evidence another user owns, as a container's root writes it, cannot be rewritten: the run still
 // ends inconclusive and names the leak, and no token reaches the output or the records.
 func TestSecretInEvidenceAnotherUserOwns(t *testing.T) {
-	// unshare maps a subordinate uid, so the test makes files this user does not own.
-	owned := exec.Command("unshare", "--map-auto", "--map-root-user", "true")
-	if err := owned.Run(); err != nil {
-		t.Skipf("unshare cannot map a subordinate uid here (%v), so no file can belong to another user", err)
-	}
+	otherUser(t)
 	root := product(t)
 	t.Cleanup(func() {
 		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
@@ -866,9 +887,7 @@ echo '{"verdict": "pass", "observation": "fine"}'
 // A secret name in a directory another user owns cannot be renamed: the run still ends
 // inconclusive and names the leak.
 func TestSecretNameInDirectoryAnotherUserOwns(t *testing.T) {
-	if err := exec.Command("unshare", "--map-auto", "--map-root-user", "true").Run(); err != nil {
-		t.Skipf("unshare cannot map a subordinate uid here (%v), so no file can belong to another user", err)
-	}
+	otherUser(t)
 	root := product(t)
 	t.Cleanup(func() {
 		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
@@ -892,9 +911,7 @@ echo '{"verdict": "pass", "observation": "fine"}'
 // directory, cannot be scanned: the run ends inconclusive and names it, and the rest of the
 // evidence is still scanned and redacted.
 func TestUnreadableEvidenceAnotherUserOwns(t *testing.T) {
-	if err := exec.Command("unshare", "--map-auto", "--map-root-user", "true").Run(); err != nil {
-		t.Skipf("unshare cannot map a subordinate uid here (%v), so no file can belong to another user", err)
-	}
+	otherUser(t)
 	foreign := `unshare --map-auto --map-root-user chown -R 1:1 "$VERILEX_EVIDENCE/k" "$VERILEX_EVIDENCE/d"
 echo '{"verdict": "pass", "observation": "fine"}'
 `

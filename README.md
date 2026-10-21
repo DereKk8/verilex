@@ -18,7 +18,7 @@ verilex includes the chain runner, its trust frame, the three verdicts, quiet ou
 go install github.com/DereKk8/verilex/cmd/verilex@latest
 ```
 
-Use Go 1.27.2 or newer on a Unix system. Add `$(go env GOPATH)/bin` to your `PATH`.
+Use Go 1.27.3 or newer on a Unix system. Add `$(go env GOPATH)/bin` to your `PATH`.
 The core is Go; frame steps and words can use any language installed on the product's workstation.
 
 ## A first look

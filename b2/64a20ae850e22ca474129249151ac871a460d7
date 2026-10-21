@@ -1,0 +1,5 @@
+{"version":1,"summary":"The standin brain test now writes its lookalike outside path under /tmp whatever TMPDIR is.",
+"files":[{"path":"agent/standin_linux_test.go","summary":"Moves the STANDIN_OUTSIDE path from the host temporary directory to /tmp.",
+"annotations":[{"newRange":[90,92],"summary":"The test builds an outside path directly under /tmp and removes it on cleanup.","rationale":"The brain sees only its private /tmp as writable, so a path under another TMPDIR made the probe report false. Verified with TMPDIR=/var/tmp, which failed on main and passes now, and with TMPDIR=/tmp. A TMPDIR under the home directory still fails for a separate sandbox reason with symlinked PATH directories.","author":"fm/verilex-standin-tmpdir"},
+{"newRange":[113,113],"summary":"STANDIN_OUTSIDE now takes the /tmp path.","rationale":"The probe keeps its expected value true, so the property it names is unchanged.","author":"fm/verilex-standin-tmpdir"},
+{"newRange":[172,172],"summary":"The host-leak check now stats the same /tmp path.","rationale":"The check must look where the brain wrote, so a leak to the host /tmp is still caught.","author":"fm/verilex-standin-tmpdir"}]}]}

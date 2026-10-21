@@ -209,6 +209,12 @@ func Run(opts Options, timer Timer) (result Result, err error) {
 		}
 		judging = &intentJudge{judge: jd, store: judge.At(judgments), dir: d.judge, log: d.log}
 	}
+	// A store the caller names stays hidden on every run, also one with nothing to judge.
+	if judgments == "" && opts.Judgments != "" {
+		if judgments, err = abs(opts.Judgments); err != nil {
+			return Result{}, err
+		}
+	}
 	intent := spec.Intent
 	if intent == "" {
 		intent = prompt.DefaultIntent

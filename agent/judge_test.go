@@ -256,7 +256,8 @@ func TestJudgePathIsTheLaunchersFile(t *testing.T) {
 
 // A run with no intent has nothing to judge, so it needs no judgment store: a state directory
 // it cannot create or a missing HOME never refuses it, and it leaves no store behind. A run with
-// an intent and no place for its store is refused.
+// an intent and no place for its store is refused. A store the caller names stays hidden from
+// the brain on every run.
 func TestOnlyAnIntentNeedsTheJudgmentStore(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -265,14 +266,17 @@ func TestOnlyAnIntentNeedsTheJudgmentStore(t *testing.T) {
 		args []string
 		// ticket is what the fake verilex resolves; a diff ticket when empty.
 		ticket []byte
-		code   int
-		want   string
+		// store names a --judgments store in the project, which the brain tries to read.
+		store bool
+		code  int
+		want  string
 	}{
 		{name: "an unwritable state directory", env: map[string]string{"XDG_STATE_HOME": "/proc/verilex-no-store"},
 			args: []string{"--diff", "HEAD"}, code: 0},
 		{name: "no HOME", env: map[string]string{"XDG_STATE_HOME": "", "HOME": ""}, args: []string{"--diff", "HEAD"}, code: 0},
 		{name: "no HOME with an intent", env: map[string]string{"XDG_STATE_HOME": "", "HOME": ""},
 			args: []string{"--intent", "prove the store opens"}, ticket: intentTicket("prove the store opens"), code: 2, want: "refused: no judgment store: pass --judgments or set HOME"},
+		{name: "a named store", args: []string{"--diff", "HEAD"}, store: true, code: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -282,16 +286,29 @@ func TestOnlyAnIntentNeedsTheJudgmentStore(t *testing.T) {
 				tc.ticket = []byte("{\"diff\":\"HEAD\",\"harness\":\"stub\",\"model\":\"stub\"}\n")
 			}
 			fake := writeFake(t, dir, fakeFiles{run: green, ticket: tc.ticket})
-			brain := writeBrain(t, dir, "#!/bin/sh\nverilex run --json --changed notes.txt\n")
+			// A brain that reads the store makes no run, so the launcher is not green.
+			brain := writeBrain(t, dir, "#!/bin/sh\n[ -n \"$STORE\" ] && cat \"$STORE/probe\" && exit 0\nverilex run --json --changed notes.txt\n")
 			argv, err := launcherArgs(dir, fake, brain, append(tc.args, "--harness", "stub", "--model", "stub")...)
 			if err != nil {
 				t.Fatal(err)
 			}
-			// No --judgments, so the launcher picks the default store.
 			i := slices.Index(argv, "--judgments")
 			argv = slices.Delete(argv, i, i+2)
+			var store string
+			if tc.store {
+				store = filepath.Join(dir, "project", "judgments")
+				if err = os.MkdirAll(store, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err = os.WriteFile(filepath.Join(store, "probe"), []byte("judgment\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				argv = append(argv, "--judgments", store)
+			}
+			// Without --judgments, the launcher picks the default store.
 			cmd := exec.Command(agentBin, argv...)
 			cmd.Dir = dir
+			cmd.Env = append(cmd.Env, "STORE="+store)
 			for _, kv := range os.Environ() {
 				if name, _, _ := strings.Cut(kv, "="); name != "HOME" && name != "XDG_STATE_HOME" {
 					cmd.Env = append(cmd.Env, kv)

@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strings"
 )
 
 // Store keeps judgments, so an intent is judged once and not on every run. It is a directory
@@ -78,18 +77,7 @@ func (s Store) Find(intent string, j Judge, catalog []Claim) (Judgment, bool) {
 	if len(found) == 0 {
 		return Judgment{}, false
 	}
-	slices.SortStableFunc(found, func(a, b Judgment) int {
-		if a.rank() != b.rank() {
-			return a.rank() - b.rank()
-		}
-		switch {
-		case a.Confidence < b.Confidence:
-			return -1
-		case a.Confidence > b.Confidence:
-			return 1
-		}
-		return strings.Compare(a.Judged, b.Judged)
-	})
+	slices.SortStableFunc(found, Cautious)
 	return found[0], true
 }
 

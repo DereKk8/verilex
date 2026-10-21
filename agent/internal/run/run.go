@@ -748,8 +748,9 @@ func (j *intentJudge) intent(ctx context.Context, verilex, project, intent strin
 	judged := judge.New(intent, j.judge, answer, catalog, time.Now())
 	// A judgment the store cannot keep is still this run's judgment; the next run makes it again.
 	_ = j.store.Record(judged)
-	// Another launcher may have recorded a more cautious answer while this judge ran.
-	if found, ok := j.store.Find(intent, j.judge, catalog); ok {
+	// Another launcher may have recorded a more cautious answer while this judge ran. A stored
+	// answer replaces this one only when it is more cautious: this one may not have been stored.
+	if found, ok := j.store.Find(intent, j.judge, catalog); ok && judge.Cautious(found, judged) < 0 {
 		return found, nil
 	}
 	return judged, nil

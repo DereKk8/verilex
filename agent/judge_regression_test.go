@@ -116,26 +116,7 @@ func TestConcurrentJudgmentsApplyTheStoredCautiousAnswer(t *testing.T) {
 	green := claimRun("green", "r1", []string{"store-opened"}, nil)
 	fake := writeFake(t, dir, fakeFiles{run: green, ticket: intentTicket(intent)})
 	brain := writeBrain(t, dir, "#!/bin/sh\ntouch \"$HOME/started\"\nverilex run --json --claim store-opened\n")
-	path := filepath.Join(dir, "concurrent-judge")
-	script := `#!/usr/bin/env python3
-import json, os, pathlib, sys, time
-sys.stdin.read()
-gate = pathlib.Path(os.environ["JUDGE_GATE"])
-role = os.environ["JUDGE_ROLE"]
-with (gate / "calls").open("a") as log:
-    log.write(role + "\n")
-if role == "full":
-    (gate / "waiting").touch()
-    deadline = time.monotonic() + 15
-    while not (gate / "release").exists():
-        if time.monotonic() > deadline:
-            sys.exit("release never arrived")
-        time.sleep(0.01)
-print(json.dumps({"coverage":role,"claims":["store-opened"] if role == "full" else [],"confidence":0.9,"reason":"controlled " + role}))
-`
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	path := gatedJudge(t, dir)
 	args := []string{"--judge", path, "--intent", intent, "--harness", "stub", "--model", "stub"}
 	// Prepare the shared project and skill before either launcher starts.
 	if _, err := launcherArgs(dir, fake, brain, args...); err != nil {
@@ -144,7 +125,7 @@ print(json.dumps({"coverage":role,"claims":["store-opened"] if role == "full" el
 	tmp := runTemp(t)
 	done := make(chan kept, 1)
 	go func() {
-		out, stderr, code, err := launchEnv(dir, fake, brain, []string{"JUDGE_GATE=" + dir, "JUDGE_ROLE=full", "TMPDIR=" + tmp}, append(args, "--keep-work")...)
+		out, stderr, code, err := launchEnv(dir, fake, brain, []string{"JUDGE_GATE=" + dir, "JUDGE_ROLE=full", "JUDGE_HOLD=1", "TMPDIR=" + tmp}, append(args, "--keep-work")...)
 		if err != nil {
 			stderr += err.Error()
 			code = -1
@@ -153,16 +134,7 @@ print(json.dumps({"coverage":role,"claims":["store-opened"] if role == "full" el
 	}()
 	// Always release the judge, including when the test's preconditions fail.
 	defer os.WriteFile(filepath.Join(dir, "release"), nil, 0o600)
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "waiting")); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the full judge never reached the cache-miss gate")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	awaitGate(t, dir)
 	none := launchKeptEnv(t, dir, fake, brain, []string{"JUDGE_GATE=" + dir, "JUDGE_ROLE=none"}, args...)
 	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -184,6 +156,102 @@ print(json.dumps({"coverage":role,"claims":["store-opened"] if role == "full" el
 	control := launchKeptEnv(t, dir, fake, brain, []string{"JUDGE_GATE=" + dir, "JUDGE_ROLE=full"}, append(args, "--judgments", filepath.Join(dir, "fresh"))...)
 	if control.code != 0 || control.stdout != string(green) || control.home(t, "started") != "" {
 		t.Fatalf("uncontested full: exit %d\nstdout: %s\nstderr: %s", control.code, control.stdout, control.stderr)
+	}
+}
+
+// gatedJudge writes a judge that answers JUDGE_ROLE and logs each call in JUDGE_GATE/calls.
+// With JUDGE_HOLD set, it touches JUDGE_GATE/waiting after its cache miss and answers only
+// once the test writes JUDGE_GATE/release.
+func gatedJudge(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "gated-judge")
+	script := `#!/usr/bin/env python3
+import json, os, pathlib, sys, time
+sys.stdin.read()
+gate = pathlib.Path(os.environ["JUDGE_GATE"])
+role = os.environ["JUDGE_ROLE"]
+with (gate / "calls").open("a") as log:
+    log.write(role + "\n")
+if os.environ.get("JUDGE_HOLD"):
+    (gate / "waiting").touch()
+    deadline = time.monotonic() + 15
+    while not (gate / "release").exists():
+        if time.monotonic() > deadline:
+            sys.exit("release never arrived")
+        time.sleep(0.01)
+print(json.dumps({"coverage":role,"claims":["store-opened"] if role == "full" else [],"confidence":0.9,"reason":"controlled " + role}))
+`
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// awaitGate returns once the held judge in dir reached its gate.
+func awaitGate(t *testing.T, dir string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "waiting")); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the held judge never reached the cache-miss gate")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A fresh cautious answer the store cannot keep still decides its run: a full another launcher
+// stored while this judge ran must not replace it.
+func TestUnstoredCautiousAnswerBeatsAFullStoredMeanwhile(t *testing.T) {
+	dir := t.TempDir()
+	intent := "prove the store opens"
+	green := claimRun("green", "r1", []string{"store-opened"}, nil)
+	fake := writeFake(t, dir, fakeFiles{run: green, ticket: intentTicket(intent)})
+	brain := writeBrain(t, dir, "#!/bin/sh\ntouch \"$HOME/started\"\nverilex run --json --claim store-opened\n")
+	args := []string{"--judge", gatedJudge(t, dir), "--intent", intent, "--harness", "stub", "--model", "stub"}
+	if _, err := launcherArgs(dir, fake, brain, args...); err != nil {
+		t.Fatal(err)
+	}
+	tmp := runTemp(t)
+	done := make(chan kept, 1)
+	go func() {
+		out, stderr, code, err := launchEnv(dir, fake, brain, []string{"JUDGE_GATE=" + dir, "JUDGE_ROLE=none", "JUDGE_HOLD=1", "TMPDIR=" + tmp}, append(args, "--keep-work")...)
+		if err != nil {
+			stderr += err.Error()
+			code = -1
+		}
+		done <- kept{stdout: out, stderr: stderr, code: code}
+	}()
+	defer os.WriteFile(filepath.Join(dir, "release"), nil, 0o600)
+	awaitGate(t, dir)
+	full := launchKeptEnv(t, dir, fake, brain, []string{"JUDGE_GATE=" + dir, "JUDGE_ROLE=full"}, args...)
+	if full.code != 0 || full.stdout != string(green) {
+		t.Fatalf("uncontested full: exit %d\nstdout: %s\nstderr: %s", full.code, full.stdout, full.stderr)
+	}
+	// The none launcher's store stays readable but no longer takes a new judgment.
+	keys, err := filepath.Glob(filepath.Join(dir, "judgments", "*"))
+	if err != nil || len(keys) != 1 {
+		t.Fatalf("judgment keys: %v (%v)", keys, err)
+	}
+	if err = os.Chmod(keys[0], 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(keys[0], 0o700) })
+	if err = os.WriteFile(filepath.Join(dir, "release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	none := <-done
+	none.root = runRoot(t, tmp)
+	if none.code != 2 || none.stdout != "" || !strings.Contains(none.stderr, "answered none with confidence 0.90: controlled none") {
+		t.Fatalf("unstored none: exit %d\nstdout: %s\nstderr: %s", none.code, none.stdout, none.stderr)
+	}
+	if _, err = os.Stat(filepath.Join(none.root, "brain", "home", "started")); !os.IsNotExist(err) {
+		t.Fatalf("unstored none started the brain: %v", err)
+	}
+	if paths, _ := filepath.Glob(filepath.Join(keys[0], "*.json")); len(paths) != 1 {
+		t.Fatalf("the read-only key took a judgment: %v", paths)
 	}
 }
 

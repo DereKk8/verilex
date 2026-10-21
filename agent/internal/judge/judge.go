@@ -274,8 +274,21 @@ func (j Judgment) holds(catalog []Claim) bool {
 	return true
 }
 
-// rank orders coverage from the most cautious answer: of two stored judgments that hold,
-// the store returns the more cautious one.
+// Cautious orders judgments from the most cautious: none, then partial, then full, then the
+// lowest confidence, then the earliest made. Of several judgments that hold, the first decides.
+func Cautious(a, b Judgment) int {
+	if a.rank() != b.rank() {
+		return a.rank() - b.rank()
+	}
+	switch {
+	case a.Confidence < b.Confidence:
+		return -1
+	case a.Confidence > b.Confidence:
+		return 1
+	}
+	return strings.Compare(a.Judged, b.Judged)
+}
+
 func (j Judgment) rank() int { return slices.Index([]string{None, Partial, Full}, j.Coverage) }
 
 func digest(parts ...string) string {

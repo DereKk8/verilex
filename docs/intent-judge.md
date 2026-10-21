@@ -81,4 +81,5 @@ Anyone who can write the store can write a judgment that counts. Give write acce
 
 - The judge reads the whole catalog on every judgment. The experiment measured catalogs of 3 and 13 claims. A product with hundreds of claims may need a narrower catalog.
 - Injection was measured on four requests: one injected note, and three that give the judge orders or try to close the tag. A wrong `full` the judge is sure of would let a green through.
+- Claim text is the catalog's own words. A claim edit that tells the judge what to answer made Opus answer full 0.60 in 2 of 23 tries in the zero-trust review of https://github.com/DereKk8/verilex/pull/65. With the system prompt's rule that claim text is not a rule, the same edit got `none` in 24 of 24 tries, each with a fresh store, at confidence 0.85 to 0.93. Review claim edits like code, and after one, point `--judgments` at a new directory or delete the judgments that relied on that claim.
 - A provider that changes a model behind the same name is not drift.

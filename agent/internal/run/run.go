@@ -185,20 +185,26 @@ func Run(opts Options, timer Timer) (result Result, err error) {
 	if err != nil {
 		return Result{}, err
 	}
-	// The store exists before the brain starts, so the sandbox can hide it: a judgment the brain
-	// could write would decide a later run.
-	judgments := or(opts.Judgments, judge.DefaultDir())
-	if err = os.MkdirAll(judgments, 0o700); err != nil {
-		return Result{}, err
-	}
-	if judgments, err = abs(judgments); err != nil {
-		return Result{}, err
-	}
-	// The judge resolves before anything starts, so a run spec it cannot serve is refused at once.
+	// The judge and its store resolve before anything starts, so a run spec they cannot serve is
+	// refused at once. Only an intent is judged, so only an intent needs them.
 	var judging *intentJudge
+	var judgments string
 	if spec.Intent != "" {
 		jd, err := judge.Resolve(opts.Judge, spec.JudgeModel, opts.AllowHarness)
 		if err != nil {
+			return Result{}, err
+		}
+		if judgments = opts.Judgments; judgments == "" {
+			if judgments, err = judge.DefaultDir(); err != nil {
+				return Result{}, err
+			}
+		}
+		// The store exists before the brain starts, so the sandbox can hide it: a judgment the
+		// brain could write would decide a later run.
+		if err = os.MkdirAll(judgments, 0o700); err != nil {
+			return Result{}, err
+		}
+		if judgments, err = abs(judgments); err != nil {
 			return Result{}, err
 		}
 		judging = &intentJudge{judge: jd, store: judge.At(judgments), dir: d.judge, log: d.log}

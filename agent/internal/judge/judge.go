@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -101,6 +102,13 @@ func Resolve(path, model string, allowHarness bool) (Judge, error) {
 		model = DefaultModel
 	}
 	if path != "" {
+		// The judge runs from an empty directory, so the file checked, stamped and run is one
+		// absolute path, never a PATH lookup.
+		full, err := filepath.Abs(path)
+		if err != nil {
+			return Judge{}, fmt.Errorf("--judge %s: %v", path, err)
+		}
+		path = full
 		info, err := os.Stat(path)
 		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
 			return Judge{}, fmt.Errorf("--judge %s is not an executable file", path)

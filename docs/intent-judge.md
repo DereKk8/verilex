@@ -48,7 +48,7 @@ The intent is someone else's text, and a model can follow an instruction inside 
 ## Supplying the judge
 
 - **The built-in judge** runs `claude -p` with the model, the system prompt and the answer schema, and with no tools, settings, MCP servers or saved session. It starts only with `--allow-harness`, like a real brain. It runs on the host, outside the brain's sandbox, in an empty directory, and needs the `claude` command and its login.
-- **`--judge PATH`** runs an executable instead. It reads the request on stdin, and `VERILEX_JUDGE_MODEL` and `VERILEX_JUDGE_SYSTEM` (the system prompt file) in its environment. It prints the answer object, or a Claude Code JSON result that carries it as `structured_output`. The tests use `agent/testdata/standin-judge.py`, which answers from a fixed table.
+- **`--judge PATH`** runs an executable instead. A relative path or a bare name is a file in the launcher's working directory, never a program found on `PATH`. It reads the request on stdin, and `VERILEX_JUDGE_MODEL` and `VERILEX_JUDGE_SYSTEM` (the system prompt file) in its environment. It prints the answer object, or a Claude Code JSON result that carries it as `structured_output`. The tests use `agent/testdata/standin-judge.py`, which answers from a fixed table.
 - **The model** is `judge_model` in the [run ticket](tickets.md), with the same precedence as `model`, or `--judge-model`. The default is `claude-opus-5-5`. In the experiment it judged 108 of 108 normal cases right, with no false green and no false red, at about 3.4 seconds and $0.013 a judgment. Sonnet and Haiku 5.5 gave no false green either, but gave 2 of 72 and 5 of 108 false reds. Through the launcher's own prompt, Opus judged 44 of 44 labeled cases right, four injected requests among them.
 
 Without `--judge` and without `--allow-harness`, a spec with an intent is refused before anything starts.
@@ -65,7 +65,7 @@ A judgment has no age limit, unlike a pass. It reads only the texts it stamps an
 
 ## The judgments store
 
-The store is a directory, `$XDG_STATE_HOME/verilex-agent/judgments` (by default under `~/.local/state`), or the one `--judgments DIR` names. Point launchers on several machines at one shared directory, as with [the shared ledger](skipping.md#the-shared-ledger), and an intent is judged once for all of them.
+The store is a directory, `$XDG_STATE_HOME/verilex-agent/judgments` (by default under `~/.local/state`), or the one `--judgments DIR` names. Without `--judgments`, `XDG_STATE_HOME` or `HOME`, a run with an intent is refused. A run with no intent judges nothing, so it needs no store and creates none. Point launchers on several machines at one shared directory, as with [the shared ledger](skipping.md#the-shared-ledger), and an intent is judged once for all of them.
 
 ```tree
 judgments/

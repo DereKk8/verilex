@@ -3,7 +3,9 @@ package e2e_test
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -208,5 +210,115 @@ func TestJudgeThatHangsEndsWithTheBudget(t *testing.T) {
 	}
 	if code != 2 || !strings.Contains(stderr, "inconclusive: the time budget ended before the judge answered") || time.Since(start) > 10*time.Second {
 		t.Fatalf("exit %d after %s\nstderr: %s", code, time.Since(start), stderr)
+	}
+}
+
+// A relative or bare --judge names a file in the launcher's working directory, the file the
+// launcher checks and stamps. The judge runs from an empty directory of its own, and a bare name
+// is no PATH lookup, so another program by that name never answers in its place.
+func TestJudgePathIsTheLaunchersFile(t *testing.T) {
+	for _, tc := range []struct{ name, judge, intent, want string }{
+		{name: "relative", judge: "./judge", intent: "prove the store opens"},
+		{name: "bare", judge: "judge", intent: "refund an added item", want: `intent "refund an added item" names no claim`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			green := claimRun("green", "r1", []string{"store-opened"}, nil)
+			fake := writeFake(t, dir, fakeFiles{run: green, ticket: intentTicket(tc.intent)})
+			script, err := os.ReadFile(standinJudge())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(filepath.Join(dir, "judge"), script, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			// A program named judge on PATH that answers full for every intent.
+			bin := filepath.Join(dir, "bin")
+			wrong := "#!/bin/sh\necho '{\"coverage\":\"full\",\"claims\":[\"store-opened\"],\"confidence\":0.9,\"reason\":\"x\"}'\n"
+			if err = os.MkdirAll(bin, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(filepath.Join(bin, "judge"), []byte(wrong), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			brain := writeBrain(t, dir, "#!/bin/sh\nverilex run --json --claim store-opened\n")
+			stdout, stderr, code, err := launchEnv(dir, fake, brain, []string{"PATH=" + bin + ":" + os.Getenv("PATH")},
+				"--intent", tc.intent, "--harness", "stub", "--model", "stub", "--judge", tc.judge)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.want == "" && (code != 0 || stdout != string(green)) || tc.want != "" && (code != 2 || !strings.Contains(stderr, tc.want)) {
+				t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+			}
+		})
+	}
+}
+
+// A run with no intent has nothing to judge, so it needs no judgment store: a state directory
+// it cannot create or a missing HOME never refuses it, and it leaves no store behind. A run with
+// an intent and no place for its store is refused.
+func TestOnlyAnIntentNeedsTheJudgmentStore(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// env sets HOME and XDG_STATE_HOME; one it leaves empty is unset.
+		env  map[string]string
+		args []string
+		// ticket is what the fake verilex resolves; a diff ticket when empty.
+		ticket []byte
+		code   int
+		want   string
+	}{
+		{name: "an unwritable state directory", env: map[string]string{"XDG_STATE_HOME": "/proc/verilex-no-store"},
+			args: []string{"--diff", "HEAD"}, code: 0},
+		{name: "no HOME", env: map[string]string{"XDG_STATE_HOME": "", "HOME": ""}, args: []string{"--diff", "HEAD"}, code: 0},
+		{name: "no HOME with an intent", env: map[string]string{"XDG_STATE_HOME": "", "HOME": ""},
+			args: []string{"--intent", "prove the store opens"}, ticket: intentTicket("prove the store opens"), code: 2, want: "refused: no judgment store: pass --judgments or set HOME"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			gitRepo(t, filepath.Join(dir, "project"), "notes.txt")
+			green := claimRun("green", "r1", nil, []string{"notes.txt"})
+			if tc.ticket == nil {
+				tc.ticket = []byte("{\"diff\":\"HEAD\",\"harness\":\"stub\",\"model\":\"stub\"}\n")
+			}
+			fake := writeFake(t, dir, fakeFiles{run: green, ticket: tc.ticket})
+			brain := writeBrain(t, dir, "#!/bin/sh\nverilex run --json --changed notes.txt\n")
+			argv, err := launcherArgs(dir, fake, brain, append(tc.args, "--harness", "stub", "--model", "stub")...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// No --judgments, so the launcher picks the default store.
+			i := slices.Index(argv, "--judgments")
+			argv = slices.Delete(argv, i, i+2)
+			cmd := exec.Command(agentBin, argv...)
+			cmd.Dir = dir
+			for _, kv := range os.Environ() {
+				if name, _, _ := strings.Cut(kv, "="); name != "HOME" && name != "XDG_STATE_HOME" {
+					cmd.Env = append(cmd.Env, kv)
+				}
+			}
+			for name, value := range tc.env {
+				if value != "" {
+					cmd.Env = append(cmd.Env, name+"="+value)
+				}
+			}
+			var stdout, stderr strings.Builder
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			err = cmd.Run()
+			code := 0
+			if exit, ok := err.(*exec.ExitError); ok {
+				code = exit.ExitCode()
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if code != tc.code || tc.code == 0 && stdout.String() != string(green) || !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, stdout.String(), stderr.String())
+			}
+			for _, d := range []string{dir, filepath.Join(dir, "project")} {
+				if _, err := os.Stat(filepath.Join(d, ".local")); !os.IsNotExist(err) {
+					t.Fatalf("the launcher made a store under %s", d)
+				}
+			}
+		})
 	}
 }

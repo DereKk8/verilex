@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -27,14 +28,18 @@ type Store struct{ dir string }
 func At(dir string) Store { return Store{dir: dir} }
 
 // DefaultDir is the store a launcher uses when it is given none:
-// $XDG_STATE_HOME/verilex-agent/judgments, by default under ~/.local/state.
-func DefaultDir() string {
+// $XDG_STATE_HOME/verilex-agent/judgments, by default under ~/.local/state. Without either
+// variable there is no default.
+func DefaultDir() (string, error) {
 	dir := os.Getenv("XDG_STATE_HOME")
 	if dir == "" {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", errors.New("no judgment store: pass --judgments or set HOME")
+		}
 		dir = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(dir, "verilex-agent", "judgments")
+	return filepath.Join(dir, "verilex-agent", "judgments"), nil
 }
 
 var judgmentName = regexp.MustCompile(`^([0-9a-f]{64})\.json$`)

@@ -955,23 +955,66 @@ echo "ghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/t.txt"
 }
 
 // A word that gives its whole evidence directory away leaves verilex unable to write the exit
-// file or read anything, and the run is inconclusive, not "not run".
+// file, and the run is inconclusive, not "not run" and never green.
 func TestEvidenceDirectoryGivenAway(t *testing.T) {
 	otherUser(t)
-	root := product(t)
-	t.Cleanup(func() {
-		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
-	})
-	addWord(t, root, "store-glanced", `echo fine > "$VERILEX_EVIDENCE/f.txt"
-chmod 700 "$VERILEX_EVIDENCE"
+	cases := []struct{ mode, reason string }{
+		{"700", "cannot scan evidence 02-store-glanced: permission denied"},
+		{"755", "cannot scan evidence exit: permission denied"},
+	}
+	for _, c := range cases {
+		t.Run(c.mode, func(t *testing.T) {
+			root := product(t)
+			t.Cleanup(func() {
+				exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+			})
+			addWord(t, root, "store-glanced", `echo fine > "$VERILEX_EVIDENCE/f.txt"
+chmod `+c.mode+` "$VERILEX_EVIDENCE"
 unshare --map-auto --map-root-user chown -R 1:1 "$VERILEX_EVIDENCE"
 echo '{"verdict": "pass", "observation": "fine"}'
 `)
-	done := verilex(t, root, nil, "run", "store-open | store-glanced")
-	equal(t, done.code, 2)
-	record := lastRun(t, root)
-	equal(t, verdicts(record), []string{"green", "inconclusive"})
-	equal(t, record.Words[1].Reason, any("cannot scan evidence 02-store-glanced: permission denied"))
+			done := verilex(t, root, nil, "run", "store-open | store-glanced")
+			equal(t, done.code, 2)
+			record := lastRun(t, root)
+			equal(t, verdicts(record), []string{"green", "inconclusive"})
+			equal(t, record.Words[1].Reason, any(c.reason))
+		})
+	}
+}
+
+// A word that leaves its own evidence directory or stdout closed, as `cp -a` from a read-only tree
+// does, still gets its exit code written and its report read: the run is green and the evidence
+// keeps its exit file and its modes.
+func TestClosedEvidenceTheWordOwnsStillBacksAPass(t *testing.T) {
+	cases := []struct{ closing, path, mode string }{
+		{`chmod 500 "$VERILEX_EVIDENCE"`, "", "dr-x------"},
+		{`chmod 000 "$VERILEX_EVIDENCE"`, "", "d---------"},
+		{`chmod 000 "$VERILEX_EVIDENCE/stdout"`, "stdout", "----------"},
+	}
+	for _, c := range cases {
+		t.Run(c.closing, func(t *testing.T) {
+			root := product(t)
+			addWord(t, root, "store-glanced", "echo fine > \"$VERILEX_EVIDENCE/f.txt\"\n"+c.closing+"\necho '{\"verdict\": \"pass\", \"observation\": \"fine\"}'\n")
+			done := verilex(t, root, nil, "run", "store-open | store-glanced")
+			equal(t, done.code, 0)
+			record := lastRun(t, root)
+			equal(t, verdicts(record), []string{"green", "green"})
+			evidence := record.Words[1].Evidence
+			info, err := os.Stat(filepath.Join(evidence, c.path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			equal(t, info.Mode().String(), c.mode)
+			if err = os.Chmod(evidence, 0700); err != nil {
+				t.Fatal(err)
+			}
+			exit, err := os.ReadFile(filepath.Join(evidence, "exit"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			equal(t, string(exit), "0\n")
+		})
+	}
 }
 
 func TestWordFailureWithoutDetailDoesNotFormatNone(t *testing.T) {

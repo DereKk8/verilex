@@ -67,7 +67,9 @@ func execute(argv []string, evidence string, env []string, timeout int, stdin st
 	if code != nil {
 		text = fmt.Sprintf("%d\n", *code)
 	}
-	if err = os.WriteFile(filepath.Join(evidence, "exit"), []byte(text), 0600); err != nil && !errors.Is(err, fs.ErrPermission) {
+	// A directory the word left read-only is opened for the write and closed again.
+	write := func() error { return os.WriteFile(filepath.Join(evidence, "exit"), []byte(text), 0600) }
+	if err = withBits(evidence, 0o300, write); err != nil && !errors.Is(err, fs.ErrPermission) {
 		// A word that gave its evidence directory away leaves nothing to write; the scan names the directory.
 		return nil, err
 	}

@@ -410,7 +410,7 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 	// drop a value; redactJudgment keeps every secret out of what is recorded.
 	var written, stdout []byte
 	if code != nil {
-		if written, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil && !errors.Is(err, fs.ErrPermission) {
+		if written, err = readStdout(evidence); err != nil && !errors.Is(err, fs.ErrPermission) {
 			return WordRecord{}, err
 		}
 	}
@@ -419,8 +419,13 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 	if err != nil {
 		return WordRecord{}, err
 	}
+	if _, err = inEvidence(evidence, "exit"); found.Unread == "" && err != nil {
+		// A word gave its evidence directory to another user but left it open: verilex could not
+		// write the exit code, so the evidence cannot back the verdict.
+		found.Unread = "exit"
+	}
 	if code != nil {
-		if stdout, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil && !errors.Is(err, fs.ErrPermission) {
+		if stdout, err = readStdout(evidence); err != nil && !errors.Is(err, fs.ErrPermission) {
 			return WordRecord{}, err
 		}
 	}
@@ -436,6 +441,28 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 		judged.Reason = cause
 	}
 	return WordRecord{Word: step.Word.Name, Args: step.Argv, Provides: step.Provides, Implements: step.Word.Implements, Proves: step.Word.Proves(), Entry: step.Word.Entry, Verdict: judged.Verdict, Reported: judged.Reported, Reason: judged.Reason, Observation: judged.Observation, Detail: judged.Detail, Exit: code, Seconds: math.RoundToEven(time.Since(started).Seconds()*100) / 100, Evidence: evidence}, nil
+}
+
+// readStdout reads a word's stdout, opening a stdout or directory the word left closed for the
+// read and closing it again. Only evidence another user owns stays unreadable; the scan names it.
+func readStdout(evidence string) (data []byte, err error) {
+	read := func() error {
+		return withBits(filepath.Join(evidence, "stdout"), 0o400, func() (err error) {
+			data, err = os.ReadFile(filepath.Join(evidence, "stdout"))
+			return err
+		})
+	}
+	err = withBits(evidence, 0o100, read)
+	return data, err
+}
+
+// inEvidence stats a file in a word's evidence, opening a directory the word left closed.
+func inEvidence(evidence, name string) (info fs.FileInfo, err error) {
+	err = withBits(evidence, 0o100, func() (err error) {
+		info, err = os.Stat(filepath.Join(evidence, name))
+		return err
+	})
+	return info, err
 }
 
 func (r *Run) frame(step, label string) (Frame, error) {
@@ -507,7 +534,7 @@ func cleanup(project dictionary.Project, record *Record, dir string, env Env) er
 	}
 	kept := true
 	for _, word := range live(record.Words) {
-		info, err := os.Stat(filepath.Join(word.Evidence, "stdout"))
+		info, err := inEvidence(word.Evidence, "stdout")
 		if err != nil || info.IsDir() {
 			kept = false
 		}

@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "summary": "verilex redacts every secret it detects in evidence, names, link targets and decoded reports before it reads them, and verify-verilex capture keeps only safe reproduction controls from the inherited environment.",
+  "files": [
+    {
+      "path": "internal/runner/evidence.go",
+      "summary": "Owns secret detection and redaction of word and frame evidence, names, links, decoded reports and scan errors.",
+      "annotations": [
+        {
+          "newRange": [
+            26,
+            31
+          ],
+          "summary": "Each built-in token pattern starts with tokenStart, and the private key pattern spans the whole block.",
+          "rationale": "Redaction replaces only what a pattern matches, so a header-only key match would leave the key body. regexp2's \\b treats _ and non-ASCII letters as word characters, and an encoded byte such as %3D or \\n ends in a letter, so tokens after them gave a green run (PX-2, PX-3). The secret-after-* rows in TestDishonestWordResultsAreInconclusive cover each case.",
+          "author": "fm/verilex-secret-evidence"
+        },
+        {
+          "newRange": [
+            49,
+            73
+          ],
+          "summary": "scan redacts secrets from its own error text and opens directories the word left closed, restoring their modes afterwards.",
+          "rationale": "An error can name a path that is not renamed yet, so a token in a directory name reached run.json through the error (D8). WalkDir calls the callback for a directory before reading it, so a chmod there lets a mode-000 directory be scanned (PX-6). TestEvidenceWithoutReadPermissionIsScanned checks the kept mode 000.",
+          "author": "fm/verilex-secret-evidence"
+        },
+        {
+          "newRange": [
+            93,
+            106
+          ],
+          "summary": "A name that holds a secret is queued for renaming, capped at the marker when too long, and a file another user owns is named as a leak and left as it is.",
+          "rationale": "A file a container wrote as root cannot be rewritten; returning nil keeps the run inconclusive with the leak named instead of an internal error (D8). TestSecretInEvidenceAnotherUserOwns covers this where unshare can map a subordinate uid, and a real docker run was checked by hand.",
+          "author": "fm/verilex-secret-evidence"
+        },
+        {
+          "newRange": [
+            127,
+            229
+          ],
+          "summary": "scan skips a rename another user's directory refuses, and scanFile turns a link whose target path or content holds a secret into a file holding only [redacted].",
+          "rationale": "A token-named entry in a directory another user owns cannot be renamed; skipping it keeps the run inconclusive with the leak named instead of an internal error (D9, TestSecretNameInDirectoryAnotherUserOwns). Copying a link target with only matches redacted would write secrets no pattern knows into evidence (D3), and a link verilex cannot follow is left alone (PX-5).",
+          "author": "fm/verilex-secret-evidence"
+        },
+        {
+          "newRange": [
+            231,
+            269
+          ],
+          "summary": "rename stops at nameMax and on any Lstat error, redactJudgment decodes the whole report, and redactError cleans error text.",
+          "rationale": "A redacted name longer than NAME_MAX made Lstat fail with ENAMETOOLONG for every candidate, so the loop never ended (D6); TestLongRedactedEvidenceNameEnds hung before the fix. Every decoded report field counts, so an escaped token in an unrecorded field no longer ends green (D4).",
+          "author": "fm/verilex-secret-evidence"
+        },
+        {
+          "newRange": [
+            299,
+            392
+          ],
+          "summary": "redactValue walks map keys in sorted order and numbers keys that redact alike, and withBits retries a refused change with owner bits added.",
+          "rationale": "Go's random map order gave alike keys different numbers per run, so TestRawSecretReportKeysKeepEveryValue failed about 1 run in 10 (D10); it passed 60 of 60 after the fix. Numbering keeps every value (D5). withBits serves read-only directories (D1) and unreadable files (PX-6) with one restore rule.",
+          "author": "fm/verilex-secret-evidence"
+        }
+      ]
+    },
+    {
+      "path": "internal/runner/runner.go",
+      "summary": "Judges the word report as written, scans before anything is recorded, and checks the decoded launch output.",
+      "annotations": [
+        {
+          "newRange": [
+            294,
+            308
+          ],
+          "summary": "drive treats a secret in the decoded launch output like a raw launch leak: exit 2, no instance recorded.",
+          "rationale": "The raw scan cannot see a JSON-escaped token, which run.json would then store in instance. Without a recorded instance the cleanup frame finds the store by the run label. TestEscapedSecretInLaunchInstanceIsNotRecorded checks that no store is left.",
+          "author": "fm/verilex-secret-evidence"
+        },
+        {
+          "newRange": [
+            408,
+            416
+          ],
+          "summary": "The report is judged from stdout as the word wrote it, then the scan redacts the evidence.",
+          "rationale": "Judging after the byte-level redaction merged two raw token keys into one [redacted] key, losing a value (D7). TestRawSecretReportKeysKeepEveryValue checks both values survive.",
+          "author": "fm/verilex-secret-evidence"
+        },
+        {
+          "newRange": [
+            421,
+            432
+          ],
+          "summary": "redactJudgment redacts every recorded field, and a secret that only decoding shows makes the word inconclusive.",
+          "rationale": "Because the judgment came from unredacted stdout, every recorded field must pass through redactValue, so no raw token reaches run.json, the usage ledger or the output. TestSecretInWordDetailIsRedactedEverywhere walks the whole state home.",
+          "author": "fm/verilex-secret-evidence"
+        }
+      ]
+    },
+    {
+      "path": ".cursor/skills/verify-verilex/scripts/capture",
+      "summary": "Writes the env evidence file with values for reproduction controls only.",
+      "annotations": [
+        {
+          "newRange": [
+            27,
+            36
+          ],
+          "summary": "capture lists exported names with compgen -e and withholds every value outside the control allowlist.",
+          "rationale": "Evidence is meant to be shared, so an inherited secret with a TALLY_, VERILEX_ or VX_ name must not be saved (issue 59). compgen -e avoids parsing env output, where a value with a newline could forge a line. The ledger variables are safe to record because capture refuses them unless they point inside the session.",
+          "author": "fm/verilex-secret-evidence"
+        }
+      ]
+    },
+    {
+      "path": "scripts/smoke",
+      "summary": "Adds the regression for issue 59 through the public vx entry point.",
+      "annotations": [
+        {
+          "newRange": [
+            13,
+            19
+          ],
+          "summary": "smoke runs vx with a public canary variable and fails if the canary value appears anywhere in the evidence.",
+          "rationale": "This check failed on main with 'smoke: capture evidence kept an inherited value' and passes on this branch. It also checks that TALLY_DEFECT keeps its value, so the allowlist still records reproduction controls.",
+          "author": "fm/verilex-secret-evidence"
+        }
+      ]
+    }
+  ]
+}

@@ -10,7 +10,7 @@ lint() {
   go vet ./...
   go tool staticcheck ./...
   go tool actionlint
-  shellcheck .cursor/skills/verify-verilex/scripts/* .verilex/frame/* scripts/ci scripts/canary-guards scripts/smoke scripts/docs scripts/author-prompts-check
+  shellcheck .cursor/skills/verify-verilex/scripts/* .verilex/frame/* scripts/ci scripts/ci-guards scripts/canary-guards scripts/smoke scripts/docs scripts/author-prompts-check
   go vet ./agent/...
   go tool staticcheck ./agent/...
 }
@@ -65,7 +65,12 @@ test_() { test_core; test_agent; }
 test_core() (
   # tests/ builds verilex itself; the instrumented binary writes coverage to GOCOVERDIR, which go test would override
   if [ -n "${COVER_OUT:-}" ]; then
-    cover="$COVER_OUT"
+    mkdir -p "$COVER_OUT"
+    cover="$(cd "$COVER_OUT" && pwd -P)"
+    if [ "$cover" = / ] || [[ "$(pwd -P)/" == "$cover/"* ]]; then
+      echo "COVER_OUT must not be the checkout or a parent of it: $COVER_OUT" >&2
+      return 1
+    fi
   else
     cover="$(mktemp -d)"
     trap 'remove_temp "$cover"' EXIT
@@ -151,7 +156,7 @@ for step in "${steps[@]}"; do
     test) test_ ;;
     test-core) test_core ;;
     test-agent) test_agent ;;
-    canary-guards) scripts/canary-guards ;;
+    canary-guards) scripts/ci-guards; scripts/canary-guards ;;
     author-prompts) scripts/author-prompts-check ;;
     *) echo "unknown step: $step" >&2; exit 2 ;;
   esac

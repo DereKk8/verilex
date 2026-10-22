@@ -3,7 +3,7 @@ name: pr-author-prompts
 description: "Post one `## Author prompts` comment on the PR: a self-contained paragraph on why the PR exists, then the author's own sanitized prompts that led to it; use whenever you open a PR or push to one. Asks the author once for consent and saves the answer for every repository and future session."
 ---
 
-Skill version: 1.1.0
+Skill version: 1.1.1
 
 # PR author prompts
 
@@ -56,7 +56,7 @@ When the latest prompt alone fails the test:
 - Put every fact a cold reader needs into that Why paragraph as plain prose. Agents are the main readers; humans read it to learn intent. Lead with the point. Use short literal sentences, one idea each, active voice, and common words. Do not use jargon, noun stacks, or em dashes (use "-").
 - Keep each Why sentence short and literal, with one idea, at about 25 words at most.
 - Define every Verilex-specific term on first use, or replace it with plain words. Use `term (plain definition)` with at least three words for the definition. For example, `word (an executable verification check)` or `canary guard (a test of Verilex's own verification)`. Define a term used in a quote in the Why first, so the quote can stay unchanged. Literal commands and paths in backticks need no glossary expansion.
-- The checker knows these overloaded terms: word, claim, frame, brain, chain, canary guard, onboarding evidence, proof stamp, drift-suspect, onboarding, admission, admitted, provisional and inconclusive. It checks plural forms where applicable. You must also explain other technical terms that a cold reader would not know.
+- The checker knows these overloaded terms: word, claim, frame, brain, chain, canary guard, onboarding evidence, proof stamp, drift-suspect, onboarding, admission, admitted, provisional and inconclusive. It checks plural forms where applicable and exempts ordinary phrases such as "plain words" and "the author's own words". You must also explain other technical terms that a cold reader would not know.
 - The comment has no separate context section. Do not add a line or paragraph labeled `Context:`, `Background:`, or similar between the Why paragraph and the quotes. Never paste orchestrator briefing there as a pointer; fold the needed facts into the Why paragraph instead.
 - Technical sources (the linked issue, a review report, the PR description) may add facts a reader needs, after the author's motive. They never replace it.
 - Keep a fragment quote only when it adds the author's voice about this PR on top of that paragraph. Drop answer lists that only make sense next to their questions, and omit broad requests that could be attached to any PR. Never add unrelated quotes just to satisfy the checker.

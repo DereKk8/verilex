@@ -55,6 +55,8 @@ comment "$why The command is \`verilex words\`." '> keep the reason before a lon
 expect ok command-is-literal "$work/comment.md"
 comment "$why The paragraph keeps the author’s own words intact." '> keep the reason before a long path'
 expect ok ordinary-words "$work/comment.md"
+comment "$why The paragraph uses plain words to explain the reason." '> keep the reason before a long path'
+expect ok plain-words "$work/comment.md"
 # Posting must refuse before any forge call, and preserve the accepted body on
 # both create and update. The fake transport observes the public script boundary.
 mkdir "$work/bin"

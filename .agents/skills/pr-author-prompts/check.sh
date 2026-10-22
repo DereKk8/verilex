@@ -23,7 +23,7 @@ awk '
   # Backticks name literal commands/paths, not unexplained prose terminology.
   function jargon(s, quote,   re, term, tail, def, key, words, a) {
     s = tolower(s); gsub(/`[^`]*`/, " ", s)
-    gsub(/(author.s|their|own|your|my) (own )?words/, " ", s)
+    gsub(/(author.s|their|own|your|my) (own )?words|plain words/, " ", s)
     re = "(^|[^a-z0-9_])(canary guards?|onboarding evidence|proof stamps?|drift-suspect|words?|claims?|frames?|brains?|chains?|onboarding|admission|admitted|provisional|inconclusive)([^a-z0-9_]|$)"
     while (match(s, re)) {
       term = substr(s, RSTART, RLENGTH); sub(/^[^a-z0-9]+/, "", term); sub(/[^a-z0-9]+$/, "", term)

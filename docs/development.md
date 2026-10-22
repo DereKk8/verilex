@@ -13,7 +13,11 @@ also need `bwrap` on Linux or `sandbox-exec` on macOS.
 
 ## CI and the canary
 
-`scripts/ci` runs the whole blocking set that CI runs. Its `canary` step has verilex prove its own
+`scripts/ci` runs the whole blocking set that CI runs. `scripts/ci test` runs both `test-core` and
+`test-agent`. Linux CI runs `test-core` in `test`, and `test-agent` with the build, smoke and canary
+checks in parallel in `test-agent-canary`. Both jobs keep their 10-minute limits, and `ci` requires both.
+
+Its `canary` step has verilex prove its own
 claims: the repository's `.verilex/` holds words that build the verilex under test from the checkout and drive it
 on a scratch tally, each claim anchored on a `verify-verilex` sub-feature. A known-good build pinned in
 `scripts/ci` (`canary_driver`) runs them live in throwaway state, never the build under test, and the step fails

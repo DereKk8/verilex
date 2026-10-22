@@ -8,9 +8,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/DereKk8/verilex/internal/curation"
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/fingerprint"
 	"github.com/DereKk8/verilex/internal/grouping"
@@ -46,6 +48,12 @@ func verilexIn(t *testing.T, root, dir string, args ...string) output {
 
 func groupWritable(t *testing.T, root string) {
 	t.Helper()
+	chmodAll(t, root, func(perm fs.FileMode) fs.FileMode { return perm | 0o020 })
+}
+
+// chmodAll gives root and everything under it the permission bits change makes of its own.
+func chmodAll(t *testing.T, root string, change func(fs.FileMode) fs.FileMode) {
+	t.Helper()
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -54,7 +62,7 @@ func groupWritable(t *testing.T, root string) {
 		if err != nil {
 			return err
 		}
-		return os.Chmod(path, info.Mode().Perm()|0o020)
+		return os.Chmod(path, change(info.Mode().Perm()))
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -335,6 +343,86 @@ func TestFullModeRecordsOfGroupWritableCheckoutStayAdmitted(t *testing.T) {
 		"  item-stored: "+shared+"\n"+
 		"  store-glanced: the word's files changed since admission; the shared word files changed since admission (.verilex/words/tally_word.py)\n"+
 		"  store-open: "+shared+"\n")
+}
+
+// A verilex from before RecordedPerm also hashed every permission bit into the packets it
+// proposed. A team that proposed a word with it on a group-writable checkout admits the curator's
+// verdict after the upgrade while no file and no mode changes. The admission records the digests
+// verilex makes now, so the word stays admitted once the checkout has only the modes git records.
+// A changed word file, mode, frame, shared word file or implemented section still refuses it.
+func TestFullModePacketOfGroupWritableCheckoutIsAdmitted(t *testing.T) {
+	root := baseline(t)
+	addWord(t, root, "store-glanced", `echo '{"verdict": "pass", "observation": "fine"}'`+"\n")
+	used(t, root, "store-open | store-glanced")
+	used(t, root, "store-open | store-glanced")
+	groupWritable(t, filepath.Join(root, ".verilex"))
+	packet := fullModePacket(t, root, "store-glanced")
+	file := verdict(t, root, `{"word": "store-glanced", "packet": "`+packet+`", "verdict": "admit", "curator": "curator-model-1", "reason": "One real moment, proven twice."}`)
+
+	words := filepath.Join(root, ".verilex", "words")
+	run := filepath.Join(words, "store-glanced", "run")
+	contract := filepath.Join(words, "store-glanced", "word.md")
+	for _, c := range []struct {
+		name   string
+		path   string
+		change func(path string)
+	}{
+		{"word file", run, func(path string) { appendTo(t, path, "\n# changed\n") }},
+		// The packet holds every permission bit as it was judged, a bit git does not record
+		// (group write) and one it does (owner execute).
+		{"group write", run, func(path string) { chmod(t, path, 0o755) }},
+		{"owner execute", contract, func(path string) { chmod(t, path, 0o764) }},
+		{"frame", filepath.Join(root, ".verilex", "frame", "launch"), func(path string) { appendTo(t, path, "\n# changed\n") }},
+		{"shared word file", filepath.Join(words, "tally_word.py"), func(path string) { appendTo(t, path, "\n# changed\n") }},
+		{"section", feature(root, "store.md"), func(path string) { appendTo(t, path, "- A changed gotcha.\n") }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			info, err := os.Stat(c.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := read(t, c.path)
+			c.change(c.path)
+			equal(t, verilex(t, root, nil, "admit", "store-glanced", "--verdict", file), output{code: 2, stderr: "verilex: refused: store-glanced changed since packet " + packet + "; propose it again\n"})
+			write(t, c.path, text, 0)
+			chmod(t, c.path, info.Mode().Perm())
+		})
+	}
+
+	equal(t, verilex(t, root, nil, "admit", "store-glanced", "--verdict", file), output{stdout: "admitted store-glanced (curator curator-model-1, 2 runs)\n"})
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (4 admitted)\n")
+	chmodAll(t, filepath.Join(root, ".verilex"), func(perm fs.FileMode) fs.FileMode { return perm &^ 0o020 })
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (4 admitted)\n")
+}
+
+// fullModePacket proposes word and rewrites the packet's word digest and binding as a verilex
+// from before RecordedPerm made them on this checkout. It returns the packet's id.
+func fullModePacket(t *testing.T, root, word string) string {
+	t.Helper()
+	path := filepath.Join(filepath.Dir(root), "state", "tally", "proposals", word, propose(t, root, word).ID+".json")
+	var packet curation.Packet
+	if err := json.Unmarshal([]byte(read(t, path)), &packet); err != nil {
+		t.Fatal(err)
+	}
+	project, err := dictionary.FindProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	words, err := lifecycle.LoadWords(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(words, func(w dictionary.Word) bool { return w.Name == word })
+	if i < 0 {
+		t.Fatalf("no word %s", word)
+	}
+	packet.WordDigest, packet.Binding = fullModeWordDigest(t, words[i]), fullModeBinding(t, project)
+	data, err := json.Marshal(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, path, string(data), 0)
+	return packet.ID
 }
 
 // fullModeRecords rewrites every onboarding decision and admission record as a verilex from

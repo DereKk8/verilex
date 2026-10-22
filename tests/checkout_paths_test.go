@@ -1,13 +1,20 @@
 package tests
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/DereKk8/verilex/internal/dictionary"
+	"github.com/DereKk8/verilex/internal/fingerprint"
+	"github.com/DereKk8/verilex/internal/grouping"
+	"github.com/DereKk8/verilex/internal/lifecycle"
 	"github.com/DereKk8/verilex/internal/runner"
 )
 
@@ -244,4 +251,175 @@ func stampNamed(t *testing.T, stamps []string, name string) string {
 	}
 	t.Fatalf("no stamp for %s in %v", name, stamps)
 	return ""
+}
+
+// A verilex from before RecordedPerm hashed every permission bit into the records it wrote. A
+// team that onboarded and admitted its words with it on a group-writable checkout keeps those
+// records after the upgrade while no file and no mode changes: the word files, the frame and the
+// shared word files, for words that prove a claim, a word whose claim covers another claim's
+// sentence, and a word without a claim. An edit still drifts.
+func TestFullModeRecordsOfGroupWritableCheckoutStayAdmitted(t *testing.T) {
+	root := baseline(t)
+	// item-kept-once maps a sentence of item-added's sub-feature, so item-stored stays clean only
+	// while item-added-twice's onboarding decision matches its files.
+	twice := "Expect exit 2 and `exists NAME` when NAME is already stored."
+	edit(t, feature(root, "items.md"), "`store.json` lists NAME.\n", "`store.json` lists NAME. "+twice+"\n")
+	write(t, claimFile(root, "item-kept-once"), "claim: item-kept-once\nsentence: A name is stored at most once.\nargs: [name]\nentry: [cli]\nrequires: [store]\n"+
+		"evidence:\n  action: \"`tally add NAME` twice exits 2 the second time and prints `exists NAME`.\"\n  observation: store.json lists NAME once.\n"+
+		"defects:\n  dropped-add: {TALLY_DEFECT: drop-adds}\n"+
+		"sources:\n  - ref: "+itemAdd+"\n    prose: 2948a95bd310\n    requirements: [\""+twice+"\"]\n", 0644)
+	dir := filepath.Join(root, ".verilex", "words", "item-added-twice")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "word.md"), "---\nword: item-added-twice\npromise: A name added twice is stored once.\nargs: [name]\nclaim: "+pinOf(t, root, "item-kept-once")+"\nentry: cli\ninputs: [bin/tally]\n---\n", 0644)
+	write(t, filepath.Join(dir, "run"), read(t, filepath.Join(root, ".verilex", "words", "item-stored", "run")), 0755)
+	used(t, root, "store-open | item-added-twice apple")
+	used(t, root, "store-open | item-added-twice apple")
+	onboard(t, root, "item-added-twice")
+	addWord(t, root, "store-glanced", `echo '{"verdict": "pass", "observation": "fine"}'`+"\n")
+	used(t, root, "store-open | store-glanced")
+	used(t, root, "store-open | store-glanced")
+	admit(t, root, "store-glanced")
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (5 admitted)\n")
+
+	groupWritable(t, filepath.Join(root, ".verilex"))
+	fullModeRecords(t, root)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (5 admitted)\n")
+	used(t, root, chain)
+	if got := plan(t, root, chain).stdout; !strings.HasPrefix(got, "plan: skip 3, run 0\n") {
+		t.Fatalf("plan: %q", got)
+	}
+
+	for _, word := range []string{"item-listed", "store-glanced"} {
+		appendTo(t, filepath.Join(root, ".verilex", "words", word, "run"), "\n# changed\n")
+	}
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 2 of 5 admitted drift-suspect; they always run\n"+
+		"  item-listed: the word's files changed since onboarding\n"+
+		"  store-glanced: the word's files changed since admission\n")
+	appendTo(t, filepath.Join(root, ".verilex", "words", "tally_word.py"), "\n# changed\n")
+	shared := "the shared word files changed since onboarding (.verilex/words/tally_word.py)"
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 5 of 5 admitted drift-suspect; they always run\n"+
+		"  item-added-twice: "+shared+"\n"+
+		"  item-listed: the word's files changed since onboarding; "+shared+"\n"+
+		"  item-stored: "+shared+"\n"+
+		"  store-glanced: the word's files changed since admission; the shared word files changed since admission (.verilex/words/tally_word.py)\n"+
+		"  store-open: "+shared+"\n")
+}
+
+// fullModeRecords rewrites every onboarding decision and admission record as a verilex from
+// before RecordedPerm wrote it on this checkout.
+func fullModeRecords(t *testing.T, root string) {
+	t.Helper()
+	project, err := dictionary.FindProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	words, err := lifecycle.LoadWords(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := grouping.Load(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := fullModeBinding(t, project)
+	for _, word := range words {
+		if d, ok := g.Words[word.Name]; ok {
+			d.Digest, d.Binding = fullModeWordDigest(t, word), binding
+			g.Set(word.Name, d)
+			continue
+		}
+		var a lifecycle.Admission
+		if err = json.Unmarshal([]byte(read(t, lifecycle.AdmissionPath(word))), &a); err != nil {
+			t.Fatal(err)
+		}
+		a.WordDigest, a.Binding = fullModeWordDigest(t, word), binding
+		data, err := json.Marshal(a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(t, lifecycle.AdmissionPath(word), string(data), 0644)
+	}
+	if err = grouping.Save(project, g); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// fullModeWordDigest is the word digest over every permission bit of each word file.
+func fullModeWordDigest(t *testing.T, w dictionary.Word) string {
+	t.Helper()
+	h := sha256.New()
+	err := lifecycle.EachFile(w, func(rel string, _ fs.FileMode, data []byte) {
+		info, err := os.Stat(filepath.Join(w.Path, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(h, "%s\x00%o\x00%d\x00", rel, info.Mode().Perm(), len(data))
+		h.Write(data)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// fullModeBinding fingerprints the frame and the shared word files over every permission bit of
+// each file and directory.
+func fullModeBinding(t *testing.T, project dictionary.Project) map[string]string {
+	t.Helper()
+	parts, err := fingerprint.Binding(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digests := map[string]string{}
+	for _, part := range parts {
+		lines := make([]string, len(part.Names))
+		for i, path := range part.Paths() {
+			lines[i] = part.Names[i] + "=" + fullModeTree(t, path)
+		}
+		digests[part.Name] = fingerprint.Of(strings.Join(lines, "\n"))
+	}
+	return digests
+}
+
+func fullModeTree(t *testing.T, root string) string {
+	t.Helper()
+	file := func(path string, info fs.FileInfo) string {
+		sum := sha256.Sum256([]byte(fmt.Sprintf("file %o\n", info.Mode().Perm()) + read(t, path)))
+		return hex.EncodeToString(sum[:])
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() {
+		return file(root, info)
+	}
+	var lines strings.Builder
+	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := os.Stat(path)
+		switch {
+		case err != nil:
+			return err
+		case info.IsDir() && fingerprint.Cache(entry.Name()):
+			return filepath.SkipDir
+		case info.IsDir():
+			fmt.Fprintf(&lines, "%q dir %o\n", rel, info.Mode().Perm())
+		default:
+			fmt.Fprintf(&lines, "%q %s\n", rel, file(path, info))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fingerprint.Of(lines.String())
 }

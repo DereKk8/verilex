@@ -53,7 +53,7 @@ Read-only. It prints `doctor: ok` and the binary source, sha256, `vcs.revision` 
 
 ## Evidence
 
-Each `vx` call writes `${TMPDIR:-/tmp}/verify-verilex-evidence/<session id>/NN-<label>/` with `command`, `env` (any `TALLY_*` or `VERILEX_*` it saw), `stdout`, `stderr` and `exit`. `session` beside them names the binary and its sha256.
+Each `vx` call writes `${TMPDIR:-/tmp}/verify-verilex-evidence/<session id>/NN-<label>/` with `command`, `env`, `stdout`, `stderr` and `exit`. `session` beside them names the binary and its sha256. Evidence is meant to be shared, so `env` keeps the values of only the reproduction controls `TALLY_DEFECT`, `TALLY_SIMULATE_LOCK`, `TALLY_ADOPT_STORE`, `VX_INSTANCE`, `VERILEX_LEDGER` and `VERILEX_USAGE_LEDGER`. Any other inherited `TALLY_*`, `VERILEX_*` or `VX_*` variable appears as `NAME=<withheld>`, and the `VERILEX_HOME` and `TALLY_STORES` that `vx` replaces do not appear. The session needs no credential: [secrets.json](secrets.json) declares none.
 
 Proof standards:
 

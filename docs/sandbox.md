@@ -6,7 +6,7 @@ The brain runs untrusted, in a sandbox: bubblewrap (`bwrap`) on Linux, `sandbox-
 
 - reads, and cannot write, the project, the system directories, the directories on its `PATH`, its own executable or install directory, the launcher's executable, the project's git directory when it lives elsewhere (a worktree), and its harness's credential files. On macOS it may also read the rest of the system outside `/Users`, `/Volumes`, the temporary directories and the user's home;
 - writes only `<run>/brain`, which holds its `HOME` and its `TMPDIR` (`/tmp` on Linux);
-- cannot reach the verilex home, the ledger, the real `verilex` binary (`--verilex`, and any other `verilex` on `PATH`), `VERILEX_HOME`, `VERILEX_LEDGER` or the run's logs. Each one is missing, or shows as an empty directory or as `/dev/null`;
+- cannot reach the verilex home, the ledger, the [judgments](intent-judge.md#the-judgments-store), the real `verilex` binary (`--verilex`, and any other `verilex` on `PATH`), `VERILEX_HOME`, `VERILEX_LEDGER`, the run's logs or the judge's files. Each one is missing, or shows as an empty directory or as `/dev/null`;
 - runs verilex only through `<run>/share/bin/verilex`, which sends each command to the launcher. The launcher runs it with its own home and ledger;
 - reaches the network only through an egress proxy (`HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY`). The proxy serves `CONNECT` to public addresses only. It refuses loopback, private, link-local, CGNAT and reserved addresses, and the host's own addresses;
 - on Linux, sees only its own processes and has no host network, IPC or abstract sockets. Every process it starts ends with the run;
@@ -52,6 +52,10 @@ verilex-agent-*/
     prompt.txt
     suggest.txt
     bin/verilex
+  judge/             the brain cannot see it
+    system.txt       the judge's system prompt
+    request.txt      the claim catalog and the intent
+    cwd/             the judge's empty working directory
   brain/             the brain writes it
     home/
     tmp/
@@ -62,13 +66,15 @@ verilex-agent-*/
     suggest.err
     verilex.log
     egress.log
+    judge.out        the judge's answer, when it judged
+    judge.err
   sock/              the socket behind `bin/verilex`
   sandbox/           per phase: `egress.sock` (Linux) or `sandbox.sb` (macOS)
   home/              the verilex home, when `--home` is not given
   ticket.yaml        the run spec
 ```
 
-The launcher removes the directory at the end. With `--keep-work`, it keeps the directory and prints `verilex-agent: run files kept in <dir>`. `log/verilex.log` lists each verilex command the brain sent to the launcher, with its exit code or the refusal. `log/egress.log` lists each network request and whether the proxy refused it.
+The launcher removes the directory at the end, also when SIGTERM, SIGINT or SIGHUP ends the run: it stops the brain, removes the directory, prints nothing on stdout and exits `2` (inconclusive). A second SIGTERM or SIGINT ends the launcher at once, but SIGHUP stays ignored after the first, because a closed terminal sends it twice. A launcher started with SIGHUP ignored, as under `nohup`, keeps ignoring it, so a closed terminal does not end that run. With `--keep-work`, it keeps the directory and prints `verilex-agent: run files kept in <dir>`. `log/verilex.log` lists each verilex command the brain sent to the launcher, with its exit code or the refusal. `log/egress.log` lists each network request and whether the proxy refused it.
 
 ## Harness credentials
 

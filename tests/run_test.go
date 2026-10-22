@@ -2,13 +2,19 @@ package tests
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"slices"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 
 	// Track the compiled CLI in Go's test cache even though tests drive its binary.
@@ -116,6 +122,8 @@ func (p *process) wait(t *testing.T) output {
 	return output{code, p.stdout.String(), p.stderr.String()}
 }
 
+var children atomic.Int64
+
 // command prepares the CLI in a product checkout with the test's isolated state, stores and config home.
 func command(root string, env map[string]string, args ...string) (*exec.Cmd, *strings.Builder, *strings.Builder) {
 	cmd := exec.Command(binary, args...)
@@ -127,6 +135,13 @@ func command(root string, env map[string]string, args ...string) (*exec.Cmd, *st
 	}
 	// The user's own profiles never reach a test: each product gets its own config home.
 	cmd.Env = append(cmd.Env, "VERILEX_HOME="+filepath.Join(filepath.Dir(root), "state"), "TALLY_STORES="+filepath.Join(filepath.Dir(root), "stores"), "XDG_CONFIG_HOME="+filepath.Join(filepath.Dir(root), "config"))
+	// Instrumented children that exit together would race on one shared coverage directory (their metadata temp file name repeats within a clock tick on macOS), so each writes to its own subdirectory.
+	if dir := os.Getenv("GOCOVERDIR"); dir != "" {
+		own := filepath.Join(dir, fmt.Sprintf("child-%d", children.Add(1)))
+		if err := os.MkdirAll(own, 0o755); err == nil {
+			cmd.Env = append(cmd.Env, "GOCOVERDIR="+own)
+		}
+	}
 	for key, value := range env {
 		cmd.Env = append(cmd.Env, key+"="+value)
 	}
@@ -200,6 +215,12 @@ func frames(r runner.Record) []string {
 		result = append(result, f.Step)
 	}
 	return result
+}
+
+// unlock lets the test remove its temporary directory after a word left evidence this user
+// cannot write or read.
+func unlock(t *testing.T, root string) {
+	t.Cleanup(func() { exec.Command("chmod", "-R", "u+rwX", filepath.Dir(root)).Run() })
 }
 
 func addWord(t *testing.T, root, name, script string) {
@@ -298,6 +319,16 @@ func TestDishonestWordResultsAreInconclusive(t *testing.T) {
 		{"wrong-exit", `echo '{"verdict": "pass", "observation": "fine"}'` + "\nexit 1\n", "exit 1 disagrees with verdict pass"},
 		{"not-json", "echo all good\n", "stdout is not one result JSON object"},
 		{"secret", `printf -- "-----BEGIN PRIVATE KEY-----\n" > "$VERILEX_EVIDENCE/key.pem"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence key.pem"},
+		{"secret-after-underscore", `echo "MY_ghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
+		{"secret-after-url-escape", `echo "token%3Dghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
+		{"secret-after-json-escape", `printf '%s\n' "line\\nghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
+		{"secret-after-letter", `echo "éghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
+		{"secret-after-hex-escape", `printf '%s\n' "token\\x3dghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
+		{"secret-after-unicode-escape", `printf '%s\n' "token \\u003cghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
+		{"secret-after-double-url-escape", `printf '%s\n' "token%253Dghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
+		{"secret-after-form-feed-escape", `printf '%s\n' "line\\fghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
+		{"secret-after-octal-escape", `printf '%s\n' "token\\075ghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
+		{"secret-after-quoted-printable", `printf '%s\n' "token=3Dghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -362,6 +393,564 @@ func TestCleanupEvidenceSecretLeakMakesRunInconclusive(t *testing.T) {
 	equal(t, *record.Reason, "secret pattern in evidence key.pem")
 	equal(t, record.Cleanup, "done")
 	contains(t, done.stdout, "  inconclusive  cleanup: secret pattern in evidence key.pem\n")
+}
+
+// A frame step's evidence verilex cannot read makes the run inconclusive as a leak does, and the
+// frame records which entry it could not scan.
+func TestUnreadableCleanupEvidenceMakesRunInconclusive(t *testing.T) {
+	otherUser(t)
+	root := product(t)
+	t.Cleanup(func() {
+		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+	})
+	path := filepath.Join(root, ".verilex", "frame", "cleanup")
+	write(t, path, read(t, path)+"\nfrom pathlib import Path\nimport os, subprocess\n"+`k = Path(os.environ["VERILEX_EVIDENCE"]) / "k"
+k.write_text("fine\n")
+k.chmod(0o600)
+subprocess.run(["unshare", "--map-auto", "--map-root-user", "chown", "1:1", str(k)], check=True)`+"\n", 0755)
+	done := verilex(t, root, nil, "run", "store-open")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, *record.Verdict, "inconclusive")
+	equal(t, *record.Reason, "cannot scan evidence k: permission denied")
+	equal(t, record.Frame[len(record.Frame)-1].Unread, "k")
+	equal(t, record.Cleanup, "done")
+	contains(t, done.stdout, "  inconclusive  cleanup: cannot scan evidence k: permission denied\n")
+}
+
+// A product error that echoes a token keeps the run inconclusive, and the token reaches none of
+// what verilex writes or prints: the output, the run record, the usage ledger or the evidence.
+func TestSecretInWordDetailIsRedactedEverywhere(t *testing.T) {
+	root := product(t)
+	token := "ghp_" + strings.Repeat("A", 36)
+	addWord(t, root, "store-glanced", `tok="ghp_$(printf 'A%.0s' $(seq 36))"`+"\n"+`printf '{"verdict": "fail", "preconditions_held": true, "detail": "auth failed for token %s"}\n' "$tok"`+"\nexit 1\n")
+	done := verilex(t, root, nil, "run", "--json", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, *record.Verdict, "inconclusive")
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence stdout"))
+	equal(t, record.Words[1].Detail, any("auth failed for token [redacted]"))
+	contains(t, done.stdout, "auth failed for token [redacted]")
+	noSecret(t, root, done, token)
+}
+
+// noSecret fails when a command's output, or any name or file in the state home of root, the
+// usage record of its last run included, holds one of secrets.
+func noSecret(t *testing.T, root string, done output, secrets ...string) {
+	t.Helper()
+	state := filepath.Join(filepath.Dir(root), "state")
+	written := map[string]string{"output": done.stdout + done.stderr}
+	err := filepath.WalkDir(state, func(path string, d fs.DirEntry, err error) error {
+		if err == nil {
+			written[path] = ""
+			if d.Type().IsRegular() {
+				written[path] = read(t, path)
+			}
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, strings.Join(slices.Collect(maps.Keys(written)), "\n"), filepath.Join(state, "usage", lastRun(t, root).Run, "run.json"))
+	for path, text := range written {
+		for _, secret := range secrets {
+			if strings.Contains(path, secret) || strings.Contains(text, secret) {
+				t.Fatalf("%s keeps a secret: %q", path, text)
+			}
+		}
+	}
+}
+
+// Redaction replaces only the secret in a file, a whole private key block included, and never
+// writes through a link to a file outside the evidence.
+func TestEvidenceRedactionKeepsTheRestOfEachFile(t *testing.T) {
+	root := product(t)
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	write(t, filepath.Join(root, ".verilex", "config.yaml"), "project: tally\nsecret_patterns: ['(?=PROBE-)']\n", 0644)
+	addWord(t, root, "store-glanced", `tok="ghp_$(printf 'A%.0s' $(seq 36))"
+printf 'before\377%s\377after\n' "$tok" > "$VERILEX_EVIDENCE/bytes.bin"
+printf -- '-----BEGIN PRIVATE KEY-----\nMIIBODY\n-----END PRIVATE KEY-----\nkept\n' > "$VERILEX_EVIDENCE/key.pem"
+printf -- '-----BEGIN RSA PRIVATE KEY-----\nMIIBODY\n' > "$VERILEX_EVIDENCE/cut.pem"
+printf 'note PROBE-1\n' > "$VERILEX_EVIDENCE/note.txt"
+printf '%s\n' "$tok" > "$OUTSIDE"
+ln -s "$OUTSIDE" "$VERILEX_EVIDENCE/linked.txt"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done := verilex(t, root, map[string]string{"OUTSIDE": outside}, "run", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence bytes.bin"))
+	evidence := record.Words[1].Evidence
+	equal(t, read(t, filepath.Join(evidence, "bytes.bin")), "before\377[redacted]\377after\n")
+	equal(t, read(t, filepath.Join(evidence, "key.pem")), "[redacted]\nkept\n")
+	equal(t, read(t, filepath.Join(evidence, "cut.pem")), "[redacted]")
+	equal(t, read(t, filepath.Join(evidence, "note.txt")), "[redacted]")
+	equal(t, read(t, filepath.Join(evidence, "linked.txt")), "[redacted]")
+	equal(t, read(t, outside), "ghp_"+strings.Repeat("A", 36)+"\n")
+	equal(t, read(t, filepath.Join(evidence, "stdout")), `{"verdict": "pass", "observation": "fine"}`+"\n")
+}
+
+// A word may leave a read-only directory in its evidence: verilex still redacts the secret
+// there, names the leak, and gives the directory its mode back.
+func TestEvidenceRedactionInReadOnlyDirectory(t *testing.T) {
+	root := product(t)
+	unlock(t, root)
+	addWord(t, root, "store-glanced", `mkdir "$VERILEX_EVIDENCE/ro"
+printf '%s\n' "ghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/ro/t.txt"
+chmod 555 "$VERILEX_EVIDENCE/ro"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done := verilex(t, root, nil, "run", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, verdicts(record), []string{"green", "inconclusive"})
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence t.txt"))
+	ro := filepath.Join(record.Words[1].Evidence, "ro")
+	equal(t, read(t, filepath.Join(ro, "t.txt")), "[redacted]\n")
+	info, err := os.Stat(ro)
+	if err != nil {
+		t.Fatal(err)
+	}
+	equal(t, info.Mode().Perm(), fs.FileMode(0o555))
+}
+
+// A secret in the name of an evidence file or directory is redacted from the name too, so the
+// cause verilex prints and records holds none.
+func TestSecretInEvidenceNameIsRedacted(t *testing.T) {
+	root := product(t)
+	token := "ghp_" + strings.Repeat("A", 36)
+	addWord(t, root, "store-glanced", `tok="ghp_$(printf 'A%.0s' $(seq 36))"
+echo clean > "$VERILEX_EVIDENCE/$tok"
+mkdir "$VERILEX_EVIDENCE/$tok-dir"
+echo clean > "$VERILEX_EVIDENCE/$tok-dir/$tok.txt"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done := verilex(t, root, nil, "run", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence [redacted]"))
+	contains(t, done.stdout, "  inconclusive  store-glanced: secret pattern in evidence [redacted]\n")
+	evidence := record.Words[1].Evidence
+	equal(t, read(t, filepath.Join(evidence, "[redacted]")), "clean\n")
+	equal(t, read(t, filepath.Join(evidence, "[redacted]-dir", "[redacted].txt")), "clean\n")
+	noSecret(t, root, done, token)
+}
+
+// A token the raw evidence hides behind a JSON escape is still a secret once decoded: the run is
+// inconclusive, never red, and neither form survives.
+func TestEscapedSecretInWordReportIsRedacted(t *testing.T) {
+	root := product(t)
+	token := "ghp_" + strings.Repeat("A", 36)
+	escaped := `ghp\u005f` + strings.Repeat("A", 36)
+	addWord(t, root, "store-glanced", `printf '{"verdict": "fail", "preconditions_held": true, "detail": "auth failed for token ghp\\u005f%s", "observation": {"ghp\\u005f%s": ["x"]}}\n' "$(printf 'A%.0s' $(seq 36))" "$(printf 'A%.0s' $(seq 36))"`+"\nexit 1\n")
+	done := verilex(t, root, nil, "run", "--json", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, record.Words[1].Verdict, "inconclusive")
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence stdout"))
+	equal(t, record.Words[1].Detail, any("auth failed for token [redacted]"))
+	equal(t, record.Words[1].Observation, any(map[string]any{"[redacted]": []any{"x"}}))
+	equal(t, read(t, filepath.Join(record.Words[1].Evidence, "stdout")), `{"verdict": "fail", "preconditions_held": true, "detail": "auth failed for token [redacted]", "observation": {"[redacted]": ["x"]}}`+"\n")
+	noSecret(t, root, done, token, escaped)
+}
+
+// A JSON-escaped token in the launch's instance ends the launch as a raw one does, and the
+// instance it launched is still torn down.
+func TestEscapedSecretInLaunchInstanceIsNotRecorded(t *testing.T) {
+	root := product(t)
+	path := filepath.Join(root, ".verilex", "frame", "launch")
+	launch := read(t, path)
+	printed := `print(json.dumps({"instance": {"store": str(store)}}))`
+	contains(t, launch, printed)
+	write(t, path, strings.Replace(launch, printed, `print(json.dumps({"instance": {"store": str(store), "dsn": "@@"}}).replace("@@", "ghp\\u005f" + "A" * 36))`, 1), 0755)
+	done := verilex(t, root, nil, "run", "--json", "store-open")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, *record.Reason, "launch exited 2")
+	equal(t, record.Instance, any(nil))
+	equal(t, record.Frame[0].Leak, "stdout")
+	equal(t, stores(t, root), []string{})
+	noSecret(t, root, done, "ghp_"+strings.Repeat("A", 36), `ghp\u005f`+strings.Repeat("A", 36))
+}
+
+// A link to a file outside the evidence that holds a secret becomes a file holding only
+// [redacted]: nothing else of the target, such as a secret no pattern knows, is copied in.
+func TestSymlinkedSecretFileIsNotCopiedIntoEvidence(t *testing.T) {
+	root := product(t)
+	outside := filepath.Join(t.TempDir(), "app.env")
+	addWord(t, root, "store-glanced", `printf 'GITHUB_TOKEN=ghp_%s\nDB_PASSWORD=hunter2\n' "$(printf 'A%.0s' $(seq 36))" > "$OUTSIDE"
+ln -s "$OUTSIDE" "$VERILEX_EVIDENCE/app.env"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done := verilex(t, root, map[string]string{"OUTSIDE": outside}, "run", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence app.env"))
+	equal(t, read(t, filepath.Join(record.Words[1].Evidence, "app.env")), "[redacted]")
+	equal(t, read(t, outside), "GITHUB_TOKEN=ghp_"+strings.Repeat("A", 36)+"\nDB_PASSWORD=hunter2\n")
+	noSecret(t, root, done, "hunter2")
+}
+
+// A link whose target path names a secret is a leak too, and the link is replaced. A dangling
+// link and a link to a clean file are kept as they are, and the run stays green.
+func TestSymlinkTargetsInEvidence(t *testing.T) {
+	root := product(t)
+	token := "ghp_" + strings.Repeat("A", 36)
+	addWord(t, root, "store-glanced", `ln -s /nonexistent "$VERILEX_EVIDENCE/dangling"
+ln -s "$VERILEX_PROJECT_ROOT/bin/tally" "$VERILEX_EVIDENCE/clean"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done := verilex(t, root, nil, "run", "store-open | store-glanced")
+	equal(t, done.code, 0)
+	evidence := lastRun(t, root).Words[1].Evidence
+	for name, target := range map[string]string{"dangling": "/nonexistent", "clean": filepath.Join(root, "bin", "tally")} {
+		link, err := os.Readlink(filepath.Join(evidence, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		equal(t, link, target)
+	}
+	root = product(t)
+	addWord(t, root, "store-glanced", `ln -s "/srv/$(printf 'ghp_%s' "$(printf 'A%.0s' $(seq 36))")/app.env" "$VERILEX_EVIDENCE/config"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done = verilex(t, root, nil, "run", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence config"))
+	equal(t, read(t, filepath.Join(record.Words[1].Evidence, "config")), "[redacted]")
+	noSecret(t, root, done, token)
+}
+
+// A file or directory the word left without read permission is scanned all the same, and keeps
+// its mode: a clean one leaves the run green, and a secret inside one is redacted.
+func TestEvidenceWithoutReadPermissionIsScanned(t *testing.T) {
+	for _, c := range []struct{ name, content string }{{"clean", "fine"}, {"secret", "ghp_$(printf 'A%.0s' $(seq 36))"}} {
+		t.Run(c.name, func(t *testing.T) {
+			root := product(t)
+			unlock(t, root)
+			addWord(t, root, "store-glanced", `mkdir "$VERILEX_EVIDENCE/closed"
+echo "`+c.content+`" > "$VERILEX_EVIDENCE/closed/f.txt"
+echo "`+c.content+`" > "$VERILEX_EVIDENCE/locked.txt"
+chmod 000 "$VERILEX_EVIDENCE/closed/f.txt" "$VERILEX_EVIDENCE/locked.txt" "$VERILEX_EVIDENCE/closed"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+			done := verilex(t, root, nil, "run", "store-open | store-glanced")
+			record := lastRun(t, root)
+			equal(t, len(record.Words), 2)
+			evidence := record.Words[1].Evidence
+			closed := filepath.Join(evidence, "closed")
+			for _, path := range []string{closed, filepath.Join(evidence, "locked.txt")} {
+				info, err := os.Stat(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				equal(t, info.Mode().Perm(), fs.FileMode(0))
+			}
+			if err := os.Chmod(closed, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range []string{filepath.Join(closed, "f.txt"), filepath.Join(evidence, "locked.txt")} {
+				if err := os.Chmod(path, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.name == "clean" {
+				equal(t, done.code, 0)
+				equal(t, read(t, filepath.Join(closed, "f.txt")), "fine\n")
+				return
+			}
+			equal(t, done.code, 2)
+			equal(t, record.Words[1].Reason, any("secret pattern in evidence f.txt"))
+			equal(t, read(t, filepath.Join(closed, "f.txt")), "[redacted]\n")
+			equal(t, read(t, filepath.Join(evidence, "locked.txt")), "[redacted]\n")
+		})
+	}
+}
+
+// A JSON-escaped token in any field of the report, not only those verilex records, makes the
+// run inconclusive and leaves no form of it in the evidence.
+func TestEscapedSecretInAnyReportFieldIsRedacted(t *testing.T) {
+	root := product(t)
+	addWord(t, root, "store-glanced", `printf '{"verdict": "pass", "observation": "fine", "extra": "ghp\\u005f%s"}\n' "$(printf 'A%.0s' $(seq 36))"`+"\n")
+	done := verilex(t, root, nil, "run", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence stdout"))
+	equal(t, read(t, filepath.Join(record.Words[1].Evidence, "stdout")), `{"verdict": "pass", "observation": "fine", "extra": "[redacted]"}`+"\n")
+	noSecret(t, root, done, `ghp\u005f`+strings.Repeat("A", 36))
+}
+
+// A secret only a decoded value shows, as a project pattern anchored to a whole value finds it,
+// has no place in the file verilex can redact: the whole stdout of the word or the launch is
+// replaced, the run is inconclusive, and the launch's instance is not recorded.
+func TestSecretOnlyDecodingShowsReplacesWholeStdout(t *testing.T) {
+	root := product(t)
+	write(t, filepath.Join(root, ".verilex", "config.yaml"), "project: tally\nsecret_patterns: ['^hunter2$']\n", 0644)
+	addWord(t, root, "store-glanced", `echo '{"verdict": "pass", "observation": "fine", "extra": "hunter2"}'`+"\n")
+	done := verilex(t, root, nil, "run", "--json", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence stdout"))
+	equal(t, read(t, filepath.Join(record.Words[1].Evidence, "stdout")), "[redacted]")
+	noSecret(t, root, done, "hunter2")
+
+	root = product(t)
+	write(t, filepath.Join(root, ".verilex", "config.yaml"), "project: tally\nsecret_patterns: ['^hunter2$']\n", 0644)
+	path := filepath.Join(root, ".verilex", "frame", "launch")
+	launch := read(t, path)
+	printed := `print(json.dumps({"instance": {"store": str(store)}}))`
+	contains(t, launch, printed)
+	write(t, path, strings.Replace(launch, printed, `print(json.dumps({"instance": {"store": str(store), "dsn": "hunter2"}}))`, 1), 0755)
+	done = verilex(t, root, nil, "run", "--json", "store-open")
+	equal(t, done.code, 2)
+	record = lastRun(t, root)
+	equal(t, *record.Reason, "launch exited 2")
+	equal(t, record.Instance, any(nil))
+	equal(t, record.Frame[0].Leak, "stdout")
+	equal(t, read(t, filepath.Join(record.Frame[0].Evidence, "stdout")), "[redacted]")
+	equal(t, stores(t, root), []string{})
+	noSecret(t, root, done, "hunter2")
+}
+
+// A JSON-escaped token in a report verilex cannot decode whole, as with a duplicate key, a second
+// value, a byte order mark or a cut-off key block, still makes the run inconclusive and leaves no
+// form of it in the evidence.
+func TestEscapedSecretInUndecodableReportIsRedacted(t *testing.T) {
+	for name, report := range map[string]string{
+		"duplicate-key":   `{"verdict": "pass", "observation": "fine", "extra": "ghp\\u005f%s", "extra": "clean"}`,
+		"second-value":    `{"verdict": "pass", "observation": "fine"}{"x": "ghp\\u005f%s"}`,
+		"byte-order-mark": `\357\273\277{"verdict": "pass", "observation": "fine", "extra": "ghp\\u005f%s"}`,
+		"cut-key-block":   `{"verdict": "pass", "observation": "ghp\\u005f%s", "key": "-----BEGIN RSA PRIVATE KEY-----MIIabc"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := product(t)
+			addWord(t, root, "store-glanced", `printf '`+report+`\n' "$(printf 'A%.0s' $(seq 36))"`+"\n")
+			done := verilex(t, root, nil, "run", "--json", "store-open | store-glanced")
+			equal(t, done.code, 2)
+			record := lastRun(t, root)
+			equal(t, record.Words[1].Verdict, "inconclusive")
+			equal(t, record.Words[1].Reason, any("secret pattern in evidence stdout"))
+			noSecret(t, root, done, "ghp_"+strings.Repeat("A", 36), `ghp\u005f`+strings.Repeat("A", 36))
+		})
+	}
+}
+
+// A JSON-escaped token in any evidence file, not only the report, makes the run inconclusive and
+// is redacted where it stands: the rest of the file, every other escape included, is kept.
+func TestEscapedSecretInEvidenceFileIsRedacted(t *testing.T) {
+	root := product(t)
+	addWord(t, root, "store-glanced", `printf '{"a": "token \\u0067hp_%s", "b": "ghp\\u005f%s\\u0041", "c": "\\\\u0067hp_%s", "d": "\\"\\\\\\/\\b\\f\\n\\r\\t\\ud83d\\ude00"}\n' "$(printf 'A%.0s' $(seq 36))" "$(printf 'A%.0s' $(seq 35))" "$(printf 'B%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/log.json"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done := verilex(t, root, nil, "run", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence log.json"))
+	equal(t, read(t, filepath.Join(record.Words[1].Evidence, "log.json")), `{"a": "token [redacted]", "b": "[redacted]", "c": "\\u0067hp_`+strings.Repeat("B", 36)+`", "d": "\"\\\/\b\f\n\r\t\ud83d\ude00"}`+"\n")
+	noSecret(t, root, done, `hp_`+strings.Repeat("A", 36), `ghp\u005f`+strings.Repeat("A", 35))
+}
+
+// Patterns run on evidence as JSON decoding shows it: each escape stands for its own character,
+// an escaped UTF-16 pair for one character, and a lone surrogate for U+FFFD.
+func TestPatternsMatchDecodedJSONEscapes(t *testing.T) {
+	root := product(t)
+	write(t, filepath.Join(root, ".verilex", "config.yaml"), `project: tally
+secret_patterns: ['Q"/\\\x08\x0c\n\r\t\u00e9\uFFFD.Q']
+`, 0644)
+	addWord(t, root, "store-glanced", `cat > "$VERILEX_EVIDENCE/log.json" <<'EOF'
+{"p": "Q\"\/\\\b\f\n\r\t\u00e9\udc00\ud83d\ude00Q", "kept": "Q\\nQ"}
+EOF
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done := verilex(t, root, nil, "run", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence log.json"))
+	equal(t, read(t, filepath.Join(record.Words[1].Evidence, "log.json")), `{"p": "[redacted]", "kept": "Q\\nQ"}`+"\n")
+}
+
+// A link to a directory is kept as a link and not followed, because its target lies outside the
+// evidence and can be as large as the whole file system: a secret in a file the directory holds
+// leaves the run green. A secret in the link's target path is still found.
+func TestSymlinkToDirectoryIsNotFollowed(t *testing.T) {
+	root := product(t)
+	outside := t.TempDir()
+	write(t, filepath.Join(outside, "t.txt"), "ghp_"+strings.Repeat("A", 36)+"\n", 0644)
+	addWord(t, root, "store-glanced", `ln -s "$OUTSIDE" "$VERILEX_EVIDENCE/cfg"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done := verilex(t, root, map[string]string{"OUTSIDE": outside}, "run", "store-open | store-glanced")
+	equal(t, done.code, 0)
+	link, err := os.Readlink(filepath.Join(lastRun(t, root).Words[1].Evidence, "cfg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	equal(t, link, outside)
+	equal(t, read(t, filepath.Join(outside, "t.txt")), "ghp_"+strings.Repeat("A", 36)+"\n")
+}
+
+// Two report keys that both redact to [redacted] keep both values in the recorded observation.
+func TestRedactedReportKeysKeepEveryValue(t *testing.T) {
+	root := product(t)
+	addWord(t, root, "store-glanced", `printf '{"verdict": "pass", "observation": {"ghp\\u005f%s": "first", "ghp\\u005f%s": "second"}}\n' "$(printf 'A%.0s' $(seq 36))" "$(printf 'B%.0s' $(seq 36))"`+"\n")
+	equal(t, verilex(t, root, nil, "run", "store-open | store-glanced").code, 2)
+	observation := lastRun(t, root).Words[1].Observation.(map[string]any)
+	values := []string{}
+	for _, v := range observation {
+		values = append(values, v.(string))
+	}
+	slices.Sort(values)
+	equal(t, values, []string{"first", "second"})
+	equal(t, slices.Sorted(maps.Keys(observation)), []string{"[redacted]", "[redacted]-2"})
+}
+
+// Raw secret keys keep every value too: verilex judges the report as the word wrote it.
+func TestRawSecretReportKeysKeepEveryValue(t *testing.T) {
+	root := product(t)
+	addWord(t, root, "store-glanced", `printf '{"verdict": "pass", "observation": {"ghp_%s": "first", "ghp_%s": "second"}}\n' "$(printf 'A%.0s' $(seq 36))" "$(printf 'B%.0s' $(seq 36))"`+"\n")
+	done := verilex(t, root, nil, "run", "--json", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence stdout"))
+	equal(t, record.Words[1].Observation, any(map[string]any{"[redacted]": "first", "[redacted]-2": "second"}))
+	noSecret(t, root, done, "ghp_"+strings.Repeat("A", 36), "ghp_"+strings.Repeat("B", 36))
+}
+
+// A redacted name longer than a file name can be still ends the run: the marker alone names it.
+func TestLongRedactedEvidenceNameEnds(t *testing.T) {
+	root := product(t)
+	write(t, filepath.Join(root, ".verilex", "config.yaml"), "project: tally\nsecret_patterns: ['QZ']\n", 0644)
+	addWord(t, root, "store-glanced", `touch "$VERILEX_EVIDENCE/$(printf 'QZ%.0s' $(seq 100))"`+"\n"+`echo '{"verdict": "pass", "observation": "fine"}'`+"\n")
+	done := verilex(t, root, nil, "run", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, record.Words[1].Verdict, "inconclusive")
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence [redacted]"))
+	equal(t, read(t, filepath.Join(record.Words[1].Evidence, "[redacted]")), "")
+}
+
+// otherUser skips the test unless unshare can give a file to a subordinate uid, as a container's
+// root does: creating the namespace can succeed while chown inside it fails, as under Ubuntu's
+// AppArmor rule for unprivileged namespaces. The Linux CI runner is set up for it, so there a
+// failed probe fails the test instead of skipping it.
+func otherUser(t *testing.T) {
+	t.Helper()
+	probe := filepath.Join(t.TempDir(), "probe")
+	write(t, probe, "", 0644)
+	err := exec.Command("unshare", "--map-auto", "--map-root-user", "chown", "1:1", probe).Run()
+	if err == nil {
+		var info os.FileInfo
+		if info, err = os.Stat(probe); err == nil && info.Sys().(*syscall.Stat_t).Uid == uint32(os.Getuid()) {
+			err = errors.New("the file kept its owner")
+		}
+	}
+	if err == nil {
+		return
+	}
+	if runtime.GOOS == "linux" && os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Fatalf("unshare cannot give a file to another user on the CI runner: %v", err)
+	}
+	t.Skipf("unshare cannot give a file to another user here (%v)", err)
+}
+
+// Evidence another user owns, as a container's root writes it, cannot be rewritten: the run still
+// ends inconclusive and names the leak, and no token reaches the output or the records.
+func TestSecretInEvidenceAnotherUserOwns(t *testing.T) {
+	otherUser(t)
+	root := product(t)
+	t.Cleanup(func() {
+		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+	})
+	token := "ghp_" + strings.Repeat("A", 36)
+	addWord(t, root, "store-glanced", `tok="ghp_$(printf 'A%.0s' $(seq 36))"
+mkdir "$VERILEX_EVIDENCE/$tok-dir"
+echo "$tok" > "$VERILEX_EVIDENCE/$tok-dir/t.txt"
+unshare --map-auto --map-root-user chown -R 1:1 "$VERILEX_EVIDENCE/$tok-dir"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done := verilex(t, root, nil, "run", "--json", "store-open | store-glanced")
+	record := lastRun(t, root)
+	equal(t, done.code, 2)
+	equal(t, verdicts(record), []string{"green", "inconclusive"})
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence [redacted]-dir"))
+	runs := filepath.Join(filepath.Dir(root), "state", "tally", "runs", record.Run, "run.json")
+	usage := filepath.Join(filepath.Dir(root), "state", "usage", record.Run, "run.json")
+	for _, text := range []string{done.stdout + done.stderr, read(t, runs), read(t, usage)} {
+		if strings.Contains(text, token) {
+			t.Fatalf("a token reached the output or the records: %q", text)
+		}
+	}
+}
+
+// A secret name in a directory another user owns cannot be renamed: the run still ends
+// inconclusive and names the leak.
+func TestSecretNameInDirectoryAnotherUserOwns(t *testing.T) {
+	otherUser(t)
+	root := product(t)
+	t.Cleanup(func() {
+		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+	})
+	addWord(t, root, "store-glanced", `mkdir "$VERILEX_EVIDENCE/d"
+touch "$VERILEX_EVIDENCE/d/ghp_$(printf 'A%.0s' $(seq 36))"
+unshare --map-auto --map-root-user chown -R 1:1 "$VERILEX_EVIDENCE/d"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done := verilex(t, root, nil, "run", "--json", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, verdicts(record), []string{"green", "inconclusive"})
+	equal(t, record.Words[1].Reason, any("secret pattern in evidence [redacted]"))
+	if strings.Contains(done.stdout+done.stderr, "ghp_"+strings.Repeat("A", 36)) {
+		t.Fatalf("a token reached the output: %q", done.stdout+done.stderr)
+	}
+}
+
+// Evidence another user owns that verilex cannot read, such as a container's private file or
+// directory, cannot be scanned: the run ends inconclusive and names it, and the rest of the
+// evidence is still scanned and redacted.
+func TestUnreadableEvidenceAnotherUserOwns(t *testing.T) {
+	otherUser(t)
+	foreign := `unshare --map-auto --map-root-user chown -R 1:1 "$VERILEX_EVIDENCE/k" "$VERILEX_EVIDENCE/d"
+echo '{"verdict": "pass", "observation": "fine"}'
+`
+	for _, c := range []struct{ name, script, reason string }{
+		{"file", `echo fine > "$VERILEX_EVIDENCE/k"
+chmod 600 "$VERILEX_EVIDENCE/k"
+mkdir "$VERILEX_EVIDENCE/d"
+`, "cannot scan evidence k: permission denied"},
+		{"directory", `touch "$VERILEX_EVIDENCE/k"
+mkdir "$VERILEX_EVIDENCE/d"
+echo fine > "$VERILEX_EVIDENCE/d/t.txt"
+chmod 700 "$VERILEX_EVIDENCE/d"
+`, "cannot scan evidence d: permission denied"},
+		{"secret-beside", `echo fine > "$VERILEX_EVIDENCE/k"
+chmod 600 "$VERILEX_EVIDENCE/k"
+mkdir "$VERILEX_EVIDENCE/d"
+echo "ghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/t.txt"
+`, "secret pattern in evidence t.txt"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := product(t)
+			t.Cleanup(func() {
+				exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+			})
+			addWord(t, root, "store-glanced", c.script+foreign)
+			done := verilex(t, root, nil, "run", "store-open | store-glanced")
+			equal(t, done.code, 2)
+			record := lastRun(t, root)
+			equal(t, verdicts(record), []string{"green", "inconclusive"})
+			equal(t, record.Words[1].Reason, any(c.reason))
+			equal(t, stores(t, root), []string{})
+			if c.name == "secret-beside" {
+				equal(t, read(t, filepath.Join(record.Words[1].Evidence, "t.txt")), "[redacted]\n")
+				if strings.Contains(done.stdout+done.stderr, "ghp_"+strings.Repeat("A", 36)) {
+					t.Fatalf("a token reached the output: %q", done.stdout+done.stderr)
+				}
+			}
+		})
+	}
 }
 
 func TestWordFailureWithoutDetailDoesNotFormatNone(t *testing.T) {

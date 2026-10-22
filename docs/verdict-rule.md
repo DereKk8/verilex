@@ -13,7 +13,7 @@ The rule uses these terms:
 
 - A **planned run** is a `verilex run` whose chain verilex planned from `--claim`, `--named` or `--changed`. verilex says so in its JSON: the format is `verilex-claim-run-1` and `requested.chain` is `null`. Each run that the launcher judges must be a planned run. A run that verilex did not plan means that verilex ignored `--no-chain`, so the result is inconclusive. A claim run without `requested.chain` comes from a verilex that is older than the launcher, and it is inconclusive too (`TestClaimRunWithoutRequestedChainIsInconclusive`).
 - A red is a failure that verilex found in the code under test. The project is read-only for the brain, so no later run can undo that red.
-- The **floor** is every `--claim` given to the launcher, plus each claim that `verilex index --intent <intent> --json` finds for the intent, plus, on a diff, each claim that `verilex index --changed <path>... --json` finds for the diff's paths (the touched claims). The launcher runs these lookups itself before the brain starts, and the prompt lists the floor. A spec without an intent or a diff has only the `--claim` floor.
+- The **floor** is every `--claim` given to the launcher, plus each claim that [the intent judge](intent-judge.md) lists when it finds the intent fully proven, plus, on a diff, each claim that `verilex index --changed <path>... --json` finds for the diff's paths (the touched claims). The launcher runs the judge and these lookups itself before the brain starts, and the prompt lists the floor. An intent that the judge does not find fully proven, with confidence, is inconclusive before the brain starts, whatever `--claim` adds. A spec without an intent or a diff has only the `--claim` floor.
 - A run **proves** a claim when the run is green and its `requested` names the claim (`claims` or `named`), or its `claims` show the claim green. Its `words` do not count: a word that ran on other arguments than those onboarding admitted it on only provided a state, and verilex leaves its claim out of `claims`.
 - An inconclusive run leaves **open** every claim that it selected: its `requested` claims and its `claims`. A last green must prove these claims.
 - A green **covers the spec** when it proves every floor claim and its `requested.changed` holds every path that the diff changes. The diff's paths are `git diff --name-only -z --no-renames --relative <diff>` in the project, so both sides of a rename count.
@@ -22,17 +22,18 @@ The rule uses these terms:
 
 The table uses the tally fixture (`tests/fixtures/tally`) and these short forms:
 
-- `apple` is `--intent 'prove a stored apple is listed'`, with the floor `item-listed` and `item-added`. `store` is `--intent 'prove the store opens'`, with the floor `store-opened`. `nothing` is `--intent 'make the export faster'`, which names no claim. `diff` is `--diff HEAD`, with `bin/tally` changed.
+- `apple` is `--intent 'prove a stored apple is listed'`, with the floor `item-listed` and `item-added`. `store` is `--intent 'prove the store opens'`, with the floor `store-opened`. `nothing` is `--intent 'make the export faster'`, which names no claim. `trap` is `--intent 'refund an added item'`, which shares the word `add` with `item-added` but asks for something no claim proves. `diff` is `--diff HEAD`, with `bin/tally` changed.
+- The judge is `agent/testdata/standin-judge.py`, which answers like the measured model: `full` for `apple` and `store`, and `none` for `nothing` and `trap`.
 - `claim X` is `verilex run --claim X`. `+ changed` adds `--changed bin/tally`. `chain A | B` is `verilex run 'A | B'`. `refused` means that verilex refused the run under `--no-chain`: exit `2`, no JSON and no run record.
 - `hide-lists` is `TALLY_DEFECT=hide-lists`, which makes `item-listed` red. `hide-apple` is `TALLY_DEFECT=hide-apple`: `tally list` leaves out only `apple`, so only some inputs reach the defect. A locked store makes verilex inconclusive.
 - `run N` means that the launcher prints the JSON of the brain's run N, as verilex printed it. `no JSON` means that the launcher prints `verilex-agent: inconclusive: <reason>` on stderr and nothing on stdout.
 
 | # | Spec | The brain's runs, in order | Verdict | Exit | Why |
 |---|---|---|---|---|---|
-| 1 | `nothing` | none: the brain does not start | inconclusive, no JSON | 2 | The intent names no claim, and no `--claim` stands for it. So no verilex run can prove the intent. |
+| 1 | `nothing` | none: the brain does not start | inconclusive, no JSON | 2 | The judge finds that no claim proves the intent. So no verilex run can prove it. |
 | 2 | `--diff HEAD..HEAD`, no intent and no `--claim` | none: the brain does not start | inconclusive, no JSON | 2 | The diff changes no file, and no intent or `--claim` names a claim. So there is nothing to prove. |
-| 3 | `apple`, `verilex index` fails | none: the brain does not start | inconclusive, no JSON | 2 | The floor is unknown. The launcher ran the lookup itself, so the failure is the environment's, not a refusal. |
-| 4 | `apple`, `time_budget: 1s`, `verilex index` hangs | none: the brain does not start | inconclusive, no JSON | 2 | The floor is unknown. The lookup stops when the time budget ends or after 30 seconds, whichever comes first. |
+| 3 | `apple`, `verilex claims` fails | none: the brain does not start | inconclusive, no JSON | 2 | The judge's catalog, and so the floor, is unknown. The launcher ran the lookup itself, so the failure is the environment's, not a refusal. |
+| 4 | `apple`, `time_budget: 1s`, `verilex claims` hangs | none: the brain does not start | inconclusive, no JSON | 2 | The floor is unknown. The lookup stops when the time budget ends or after 30 seconds, whichever comes first. |
 | 5 | `store`, the sandbox tool fails | none: the brain does not start | inconclusive, no JSON | 2 | The brain runs only in a sandbox. See [Sandbox](sandbox.md). |
 | 6 | `store`, the sandbox tool starts the brain without a sandbox | none: the brain does not start | inconclusive, no JSON | 2 | The check inside the sandbox finds that the brain could write the project. |
 | 7 | `store`, a file in the project changes on the host during the run | `claim store-opened` green | inconclusive, no JSON | 2 | The verdict can be about code that is no longer the code under test. |
@@ -57,7 +58,7 @@ The table uses the tally fixture (`tests/fixtures/tally`) and these short forms:
 | 26 | `apple` | `claim item-listed` green | green, run 1 | 0 | The green covers the spec. Its `claims` prove both floor claims. |
 | 27 | `apple` | `claim item-listed` green, `claim store-opened` green | inconclusive, no JSON | 2 | The last green proves neither floor claim. An earlier green does not count, because the last run is the result. |
 | 28 | `store`, `--claim item-listed` | `claim store-opened` green | inconclusive, no JSON | 2 | The green does not prove `item-listed`, a floor claim from `--claim`. |
-| 29 | `nothing`, `--claim store-opened` | `claim store-opened` green | green, run 1 | 0 | `--claim` stands for an intent that names no claim. |
+| 29 | `trap`, `--claim item-added` | none: the brain does not start | inconclusive, no JSON | 2 | The judge finds that no claim proves the intent. A `--claim` adds to the floor, but it never stands for an intent that the judge does not find fully proven. |
 | 30 | `diff` | `claim store-opened` green | inconclusive, no JSON | 2 | The green was not asked about `bin/tally`. |
 | 31 | `diff` | `verilex run --changed bin/tally` green | green, run 1 | 0 | The green covers the spec. It proves every claim that the diff touches, so verilex prints no warning. |
 | 32 | `diff` | `claim store-opened + changed` green | inconclusive, no JSON | 2 | The green leaves `item-added` and `item-listed`, which the diff touches, unproven. verilex's own warning, `2 touched claims not covered`, is in that run's JSON. |
@@ -72,13 +73,13 @@ Row 7 checks every file that git tracks or would track, and ignores the files th
 
 A red or inconclusive verdict is returned as verilex printed it. Exit codes are verilex's: `0` green, `1` red, `2` inconclusive or refused. `--text` prints the verdict line and each gap instead of the JSON.
 
-One deadline, the run spec's `time_budget`, covers the intent lookup, `--suggest` and the run. No child that the brain started holds the launcher past it. Each `verilex ticket` and `verilex index` command that the launcher runs for itself also stops after 30 seconds, and the launcher is then inconclusive.
+One deadline, the run spec's `time_budget`, covers the lookups, the judge, `--suggest` and the run. No child that the brain started holds the launcher past it. Each `verilex ticket`, `verilex claims` and `verilex index` command that the launcher runs for itself also stops after 30 seconds, and the judge after 2 minutes, and the launcher is then inconclusive.
 
 ## Limits
 
 The rule has these limits:
 
-- The floor is only as good as the index's intent lookup. `verilex index --intent` returns up to five claims, best first, weak matches included, and the floor holds all of them. So on a large product, a brain that proves only the claims that it judged relevant can get inconclusive and must run more claims. This costs time, but it never gives a false green or a false red.
+- The intent's floor is only as good as the judge. A wrong `full` that the judge is sure of would let a green prove less than the intent asks; every other wrong answer is inconclusive. See [the intent judge](intent-judge.md#limits) for what the judge was measured on.
 - The last run is the run that finished last. When the brain runs verilex in parallel, timing decides which run is last, so the same runs can give green or inconclusive. They cannot give a false green, because the last run must cover the spec alone.
 - The brain cannot run a chain, so it cannot reach a defect that no admitted word's inputs reach. verilex proves a claim through its admitted words, so such a defect is outside the claim. Explore with chains in plain verilex, outside the launcher.
 - On a diff, the floor holds every touched claim, so a brain must prove them all, or the result is inconclusive. This costs time on a wide diff, but it never gives a false green. A failed `verilex index --changed` is inconclusive, because the touched claims are unknown.

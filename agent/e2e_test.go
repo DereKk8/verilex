@@ -386,8 +386,8 @@ type fakeFiles struct {
 	runExit int
 	// runs, when set, answers each verilex run in turn instead of run.
 	runs []fakeRun
-	// index answers verilex index; by default the intent names store-opened.
-	index []byte
+	// claims answers verilex claims; by default the tally sample's three claims.
+	claims []byte
 	// changed answers verilex index --changed; by default the diff touches no claim.
 	changed []byte
 }
@@ -413,12 +413,8 @@ for arg in "$@"; do
 done
 case "$cmd" in
   ticket) cat "$FAKE_TICKET"; exit 0 ;;
-  index)
-    case "$*" in
-      *--changed*) cat "$FAKE_CHANGED" ;;
-      *) cat "$FAKE_INDEX" ;;
-    esac
-    exit 0 ;;
+  index) cat "$FAKE_CHANGED"; exit 0 ;;
+  claims) cat "$FAKE_CLAIMS"; exit 0 ;;
   plan) cat "$FAKE_PLAN"; exit 0 ;;
   run)
     if [ -n "$FAKE_RUNS" ]; then
@@ -449,11 +445,11 @@ func writeFake(t *testing.T, dir string, files fakeFiles) string {
 		}
 		return p
 	}
-	if files.index == nil {
-		files.index = []byte(`[{"claim":"store-opened"}]` + "\n")
+	if files.claims == nil {
+		files.claims = tallyClaims
 	}
 	t.Setenv("FAKE_TICKET", write("ticket.json", files.ticket))
-	t.Setenv("FAKE_INDEX", write("index.json", files.index))
+	t.Setenv("FAKE_CLAIMS", write("claims.json", files.claims))
 	if files.changed == nil {
 		files.changed = []byte(`{"files":[],"claims":[]}` + "\n")
 	}
@@ -475,6 +471,15 @@ func writeFake(t *testing.T, dir string, files fakeFiles) string {
 	}
 	return path
 }
+
+// tallyClaims is the tally sample's catalog as verilex claims --json prints it, cut to what the
+// judge reads.
+var tallyClaims = []byte(`[{"claim":"item-added","fingerprint":"18e2db0cee8f","sentence":"A named item is in the store.","evidence":{"action":"tally add NAME exits 0.","observation":"store.json lists NAME."}},` +
+	`{"claim":"item-listed","fingerprint":"b8fa4e44bc73","sentence":"A stored item shows up when a user lists the store.","evidence":{"action":"tally list prints NAME.","observation":"The listing matches store.json."}},` +
+	`{"claim":"store-opened","fingerprint":"5a0f3c2d1e4b","sentence":"A new, empty store is open and ready for items.","evidence":{"action":"tally open exits 0.","observation":"store.json holds no items."}}]` + "\n")
+
+// standinJudge is the scripted judge every launcher in these tests uses unless it names another.
+func standinJudge() string { return filepath.Join(repo, "agent", "testdata", "standin-judge.py") }
 
 func writeBrain(t *testing.T, dir, body string) string {
 	t.Helper()
@@ -546,6 +551,12 @@ func launcherArgs(dir, verilex, brain string, args ...string) ([]string, error) 
 		}
 	}
 	argv := []string{"--verilex", verilex, "--skill", skill, "--project", project}
+	if !slices.Contains(args, "--judge") {
+		argv = append(argv, "--judge", standinJudge())
+	}
+	if !slices.Contains(args, "--judgments") {
+		argv = append(argv, "--judgments", filepath.Join(dir, "judgments"))
+	}
 	if brain != "" {
 		argv = append(argv, "--brain", brain)
 	}

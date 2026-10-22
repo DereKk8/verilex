@@ -2,9 +2,11 @@ package tests
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func usageJSON(t *testing.T, root string, env map[string]string) map[string]any {
@@ -101,4 +103,57 @@ func TestUsageAnnotationHonorsJSON(t *testing.T) {
 	}
 	equal[any](t, result, map[string]any{"run": id})
 	equal[any](t, usageJSON(t, root, nil)["totals"].(map[string]any)["tokens"], float64(3))
+}
+
+func TestUsageJSONListsEveryMissOldestFirst(t *testing.T) {
+	root := product(t)
+	equal(t, verilex(t, root, nil, "run", chain).code, 0)
+	id := lastRun(t, root).Run
+	notes := []string{"first finding", "second finding", "third finding", "fourth finding"}
+	for _, note := range notes {
+		equal(t, verilex(t, root, nil, "usage", id, "--miss", note).code, 0)
+	}
+	result := usageJSON(t, root, nil)
+	equal[any](t, result["totals"].(map[string]any)["misses"], float64(1))
+	entry := result["entries"].([]any)[0].(map[string]any)
+	misses, _ := entry["misses"].([]any)
+	var got []string
+	for _, raw := range misses {
+		got = append(got, raw.(map[string]any)["review"].(string))
+	}
+	equal(t, len(got), len(notes))
+	for i, note := range notes {
+		equal(t, got[i], note)
+	}
+	equal[any](t, entry["miss"].(map[string]any)["review"], notes[len(notes)-1])
+}
+
+func TestUsageConcurrentMissesKeepRecordedOrder(t *testing.T) {
+	root := product(t)
+	equal(t, verilex(t, root, nil, "run", chain).code, 0)
+	id := lastRun(t, root).Run
+	for round := 0; round < 4; round++ {
+		var pending []*process
+		for i := 0; i < 8; i++ {
+			pending = append(pending, start(t, root, nil, "usage", id, "--miss", fmt.Sprintf("finding %d-%d", round, i)))
+		}
+		for _, p := range pending {
+			equal(t, p.wait(t).code, 0)
+		}
+	}
+	entry := usageJSON(t, root, nil)["entries"].([]any)[0].(map[string]any)
+	misses := entry["misses"].([]any)
+	equal(t, len(misses), 32)
+	var last time.Time
+	for _, raw := range misses {
+		recorded, err := time.Parse(time.RFC3339Nano, raw.(map[string]any)["recorded"].(string))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if recorded.Before(last) {
+			t.Fatalf("miss recorded %s listed after %s", recorded, last)
+		}
+		last = recorded
+	}
+	equal[any](t, entry["miss"], misses[len(misses)-1])
 }

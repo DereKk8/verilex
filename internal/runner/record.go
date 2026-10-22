@@ -17,7 +17,7 @@ type Frame struct {
 	Step     string `json:"step"`
 	Exit     *int   `json:"exit"`
 	Evidence string `json:"evidence"`
-	Leak     string `json:"leak,omitempty"`
+	Scan
 }
 
 // ClaimRunFormat is the claim-run JSON contract. A different value is a breaking change.

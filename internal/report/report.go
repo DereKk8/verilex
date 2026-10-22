@@ -175,8 +175,8 @@ func reliedOn(record runner.Record) string {
 }
 
 func frameCause(f runner.Frame) string {
-	if f.Leak != "" {
-		return "secret pattern in evidence " + f.Leak
+	if cause := f.Cause(); cause != "" {
+		return cause
 	}
 	if f.Exit != nil && *f.Exit == 0 {
 		return ""
@@ -236,7 +236,7 @@ func Ticket(t ticket.Ticket, out io.Writer) {
 	}
 	for _, field := range []struct{ name, value string }{
 		{"intent", OneLine(t.Intent)}, {"diff", t.Diff}, {"profile", t.Profile}, {"harness", t.Harness}, {"model", t.Model},
-		{"effort", t.Effort}, {"token_budget", tokens}, {"time_budget", t.TimeBudget},
+		{"effort", t.Effort}, {"token_budget", tokens}, {"time_budget", t.TimeBudget}, {"judge_model", t.JudgeModel},
 	} {
 		if field.value == "" {
 			continue

@@ -23,12 +23,16 @@ mod() {
 }
 boundary() { go run scripts/boundary.go; }
 vuln() {
-  go tool govulncheck ./...
+  # govulncheck cannot map a distro-suffixed `go version` (go1.27.2-X:nodwarf5) and then reports no
+  # standard-library findings, so each module is scanned with the exact release its go.mod names.
+  root="go$(go mod edit -print | sed -n 's/^go //p')"
+  GOTOOLCHAIN="$root" go tool govulncheck ./...
   # site/ keeps its own dependencies, outside go.work; the same govulncheck checks them, against
   # the standard library of the Go its go.mod requires.
   tools="$(mktemp -d)"
-  go build -o "$tools" golang.org/x/vuln/cmd/govulncheck
-  (cd site && GOWORK=off GOTOOLCHAIN=auto "$tools/govulncheck" ./...)
+  GOTOOLCHAIN="$root" go build -o "$tools" golang.org/x/vuln/cmd/govulncheck
+  site="go$(GOWORK=off go -C site mod edit -print | sed -n 's/^go //p')"
+  (cd site && GOWORK=off GOTOOLCHAIN="$site" "$tools/govulncheck" ./...)
 }
 # The docs web app: a module of its own, outside go.work, so the core and the launcher keep no
 # dependencies. Vetted with the core's staticcheck, tested, and every docs link and anchor checked.
@@ -54,6 +58,9 @@ test_() {
   go test -race $(go list ./... | grep -v '/tests$')
   go test -race -c -o "$cover/tests.test" ./tests
   (cd tests && GOFLAGS="${GOFLAGS:-} -cover" GOCOVERDIR="$cover" "$cover/tests.test")
+  # Each instrumented child wrote to its own subdirectory; gather one covmeta (all are identical) and every counter file so covdata reads one directory however many children ran.
+  find "$cover" -mindepth 2 -name 'covmeta.*' -print -quit | while read -r meta; do mv "$meta" "$cover"; done
+  find "$cover" -mindepth 2 -name 'covcounters.*' -exec sh -c 'mv "$@" "$0"' "$cover" {} +
   go tool covdata percent -i="$cover"
   (cd agent && go test -race ./...)
 }

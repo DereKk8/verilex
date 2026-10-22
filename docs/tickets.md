@@ -11,11 +11,12 @@ model: claude-opus-5-5
 effort: high               # minimal, low, medium, high, xhigh or max
 token_budget: 400000       # optional, a positive whole number
 time_budget: 45m           # optional, a positive duration such as 30m or 1h30m
+judge_model: claude-opus-5-5   # optional: the model the launcher's intent judge asks
 ```
 
 ## Precedence
 
-Each of `harness`, `model`, `effort`, `token_budget` and `time_budget` comes from the first level that sets it:
+Each of `harness`, `model`, `effort`, `token_budget`, `time_budget` and `judge_model` comes from the first level that sets it:
 
 1. the ticket;
 2. its named profile;
@@ -36,7 +37,7 @@ profiles:
   deep-verify: {model: claude-opus-5-5, effort: xhigh, token_budget: 400000}
 ```
 
-The profile is the ticket's `profile`, else the project default's, else the user default's. A project profile replaces a user profile of the same name as a whole. A resolved ticket must name a harness and a model.
+The profile is the ticket's `profile`, else the project default's, else the user default's. A project profile replaces a user profile of the same name as a whole. A resolved ticket must name a harness and a model. It may leave `judge_model` unset; [the intent judge](intent-judge.md) then asks its default model.
 
 ## Validating a ticket
 

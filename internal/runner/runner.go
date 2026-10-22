@@ -291,6 +291,22 @@ func (r *Run) drive(p Plan) error {
 		r.stop(verdict.Inconclusive, "launch printed no JSON object with an 'instance'")
 		return nil
 	}
+	// A secret only a decoded value shows, such as a project pattern anchored to a whole value,
+	// ends the launch as a scanned one does: the instance is not recorded, and cleanup finds it by
+	// the run's label.
+	_, hidden, err := redactValue(launched, r.patterns)
+	if err != nil {
+		return err
+	}
+	if hidden {
+		if err = replaceWhole(filepath.Join(frame.Evidence, "stdout")); err != nil {
+			return err
+		}
+		last := &r.record.Frame[len(r.record.Frame)-1]
+		last.Leak, last.Exit = "stdout", ptr(2)
+		r.stop(verdict.Inconclusive, "launch exited 2")
+		return r.save()
+	}
 	r.record.Instance = instance
 	if r.keep {
 		r.record.History = []ledger.Entry{}
@@ -390,20 +406,34 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 	if err != nil {
 		return WordRecord{}, err
 	}
-	var stdout []byte
+	// The report is judged as the word wrote it, because redacting two secret keys alike would
+	// drop a value; redactJudgment keeps every secret out of what is recorded.
+	var written, stdout []byte
+	if code != nil {
+		if written, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil {
+			return WordRecord{}, err
+		}
+	}
+	judged := verdict.Judge(code, written, step.Word.Timeout)
+	found, err := scan(evidence, r.patterns)
+	if err != nil {
+		return WordRecord{}, err
+	}
 	if code != nil {
 		if stdout, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil {
 			return WordRecord{}, err
 		}
 	}
-	judged := verdict.Judge(code, stdout, step.Word.Timeout)
-	leak, err := scan(evidence, r.patterns)
+	hidden, err := redactJudgment(&judged, stdout, evidence, r.patterns)
 	if err != nil {
 		return WordRecord{}, err
 	}
-	if leak != "" {
+	if hidden && found.Leak == "" {
+		found.Leak = "stdout"
+	}
+	if cause := found.Cause(); cause != "" {
 		judged.Verdict = verdict.Inconclusive
-		judged.Reason = "secret pattern in evidence " + leak
+		judged.Reason = cause
 	}
 	return WordRecord{Word: step.Word.Name, Args: step.Argv, Provides: step.Provides, Implements: step.Word.Implements, Proves: step.Word.Proves(), Entry: step.Word.Entry, Verdict: judged.Verdict, Reported: judged.Reported, Reason: judged.Reason, Observation: judged.Observation, Detail: judged.Detail, Exit: code, Seconds: math.RoundToEven(time.Since(started).Seconds()*100) / 100, Evidence: evidence}, nil
 }
@@ -415,11 +445,11 @@ func (r *Run) frame(step, label string) (Frame, error) {
 		return Frame{}, err
 	}
 	f := Frame{Step: label, Exit: code, Evidence: evidence}
-	f.Leak, err = scan(evidence, r.patterns)
+	f.Scan, err = scan(evidence, r.patterns)
 	if err != nil {
 		return f, err
 	}
-	if f.Leak != "" && f.Exit != nil && *f.Exit == 0 {
+	if f.Cause() != "" && f.Exit != nil && *f.Exit == 0 {
 		f.Exit = ptr(2)
 	}
 	r.record.Frame = append(r.record.Frame, f)
@@ -463,11 +493,11 @@ func cleanup(project dictionary.Project, record *Record, dir string, env Env) er
 	if err != nil {
 		return err
 	}
-	f.Leak, err = scan(evidence, p)
+	f.Scan, err = scan(evidence, p)
 	if err != nil {
 		return err
 	}
-	if f.Leak != "" && code != nil && *code == 0 {
+	if f.Cause() != "" && code != nil && *code == 0 {
 		f.Exit = ptr(2)
 	}
 	record.Frame = append(record.Frame, f)
@@ -491,9 +521,9 @@ func cleanup(project dictionary.Project, record *Record, dir string, env Env) er
 		record.Verdict = ptr(verdict.Inconclusive)
 		record.Reason = ptr("evidence did not survive cleanup")
 	}
-	if f.Leak != "" {
+	if cause := f.Cause(); cause != "" {
 		record.Verdict = ptr(verdict.Inconclusive)
-		record.Reason = ptr("secret pattern in evidence " + f.Leak)
+		record.Reason = ptr(cause)
 	}
 	record.Finished = now()
 	return Save(dir, record)

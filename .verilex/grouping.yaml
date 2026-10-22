@@ -237,7 +237,7 @@ words:
   self-skill-session:
     claim: self-skill-session@69aeb6897d44
     entry: cli
-    digest: 916fe2ae5485fe70c12aaba9a65615d41da4f04d68e7772f06a069d338eab75c
+    digest: fe9f3074ccb379996bd7c6f0061d8afadf6ce88860185577617351b51724816e
     binding:
       frame: 4234d5b346e13591eda59feb4774d9ba9c4d15f0fff0ace785ccb77c3258a6fd
       shared: 589552a333bc6b5b028f9bdb12c7950251e624116bdd4a197808a72bffff7749
@@ -248,10 +248,10 @@ words:
       skill-unpinned-bin: d9c059eb4611
     uses:
       verilex:
-        - 1791988583-61c4be626cab
-        - 1791988584-1483fb497df7
+        - 1792592743-2b7e323625fc
+        - 1792592744-0e830aa20ca9
     chain: self-skill-session
     claim_sources: 030cb48c957077ed0c742b6a0d9b0841b61e618b4963edff1c472151f78722ca
-    date: "2026-10-14T14:36:30Z"
-    record: 1791988590-353f73
-    seal: 327fee70a087affeacff735d2baf52a578236ead1864d884bc0c27dbbf37cdb3
+    date: "2026-10-21T14:25:45Z"
+    record: 1792592745-306d4a
+    seal: 99733402aebac4fa8bf9c21e87e6f2161a32fc7a4a2697841c2bf6b0796d5987

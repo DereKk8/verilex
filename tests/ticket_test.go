@@ -129,13 +129,13 @@ func TestNamedProfilesResolveToHarnessModelAndEffort(t *testing.T) {
 	root := product(t)
 	writeFile(t, projectProfiles(root), "profiles:\n"+
 		"  quick-verify: {harness: codex, model: gpt-5.1-codex-mini, effort: low, time_budget: 5m}\n"+
-		"  deep-verify: {harness: claude-code, model: claude-opus-5-5, effort: xhigh, token_budget: 400000, time_budget: 1h}\n")
-	for name, want := range map[string][5]any{
-		"quick-verify": {"codex", "gpt-5.1-codex-mini", "low", 0, "5m"},
-		"deep-verify":  {"claude-code", "claude-opus-5-5", "xhigh", 400000, "1h"},
+		"  deep-verify: {harness: claude-code, model: claude-opus-5-5, effort: xhigh, token_budget: 400000, time_budget: 1h, judge_model: claude-sonnet-5-5}\n")
+	for name, want := range map[string][6]any{
+		"quick-verify": {"codex", "gpt-5.1-codex-mini", "low", 0, "5m", ""},
+		"deep-verify":  {"claude-code", "claude-opus-5-5", "xhigh", 400000, "1h", "claude-sonnet-5-5"},
 	} {
 		got := resolved(t, root, ticketAt(t, root, name, "intent: prove the store opens empty\nprofile: "+name+"\n"))
-		equal(t, [5]any{got.Harness, got.Model, got.Effort, got.TokenBudget, got.TimeBudget}, want)
+		equal(t, [6]any{got.Harness, got.Model, got.Effort, got.TokenBudget, got.TimeBudget, got.JudgeModel}, want)
 		for _, field := range []string{"harness", "model", "effort"} {
 			equal(t, got.From[field], "project profile "+name)
 		}
@@ -149,12 +149,13 @@ func TestInvalidTicketIsRefusedNamingTheField(t *testing.T) {
 		name, ticket, project, user, refusal string
 	}{
 		{"effort", "intent: x\neffort: turbo\n", "", base, `effort: "turbo" is not one of minimal, low, medium, high, xhigh, max`},
-		{"unknown field", "intent: x\nefort: max\n", "", base, "efort: unknown field; expected one of intent, diff, profile, harness, model, effort, token_budget, time_budget"},
+		{"unknown field", "intent: x\nefort: max\n", "", base, "efort: unknown field; expected one of intent, diff, profile, harness, model, effort, token_budget, time_budget, judge_model"},
 		{"token budget", "intent: x\ntoken_budget: -5\n", "", base, "token_budget: must be a positive whole number of tokens, not -5"},
 		{"time budget", "intent: x\ntime_budget: soon\n", "", base, `time_budget: must be a positive duration such as 30m or 1h30m, not "soon"`},
 		{"no intent or diff", "model: claude-opus-5-5\n", "", base, "intent or diff: a ticket names at least one"},
 		{"diff", "diff: --output=/tmp/x\n", "", base, `diff: must be a git revision or range such as main...HEAD, not "--output=/tmp/x"`},
 		{"model", "intent: x\nmodel: two words\n", "", base, `model: must be a plain name without spaces, not "two words"`},
+		{"judge model", "intent: x\njudge_model: two words\n", "", base, `judge_model: must be a plain name without spaces, not "two words"`},
 		{"unknown profile", "intent: x\nprofile: nightly\n", "", base, "profile: no profile named nightly in {project} or {user}"},
 		{"harness unset", "intent: x\nmodel: claude-opus-5-5\n", "", "", "harness: not set by the ticket, a profile, or the project or user defaults"},
 		{"profiles file", "intent: x\nprofile: quick-verify\n", "profiles:\n  quick-verify:\n    model: two words\n", base, `{project}: profiles.quick-verify.model: must be a plain name without spaces, not "two words"`},

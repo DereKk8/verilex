@@ -58,7 +58,7 @@ A word is **provisional** until it is admitted. A word that proves a claim is ad
 
 ## The launcher
 
-`verilex-agent` starts the brain a run ticket names in a sandbox, lets it run only claim plans, and prints the JSON of one of its `verilex run`s, chosen by a fixed rule. See [Companion launcher](launcher.md).
+`verilex-agent` asks a judge whether the product's claims prove the intent, starts the brain a run ticket names in a sandbox, lets it run only claim plans, and prints the JSON of one of its `verilex run`s, chosen by a fixed rule. See [Companion launcher](launcher.md).
 
 ## Glossary
 
@@ -74,6 +74,7 @@ A word is **provisional** until it is admitted. A word that proves a claim is ad
 | evidence | What each step leaves under `~/.local/state/verilex/<project>/runs/<run>/`, outside the product and every repository. |
 | frame | The project's `launch`, `doctor`, `refresh` and `cleanup` steps in `.verilex/frame/`. |
 | instance | What `launch` creates for one run. No two runs share a mutable instance. |
+| judge | The model `verilex-agent` asks whether the product's claims prove an intent. Only its sure `full` lets an intent go green. See [The intent judge](intent-judge.md). |
 | ledger | The directory of passes that every verilex instance pointed at it reads and writes. |
 | pass | A green step of a run that is not inconclusive and launched its own instance, recorded in the ledger with its stamp, its claim version and a copy of its evidence. |
 | planted defect | Environment variables under which a claim is false. Onboarding requires its word to go red under each. |

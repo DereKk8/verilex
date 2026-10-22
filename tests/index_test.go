@@ -112,6 +112,12 @@ func TestIntentLookupReturnsTheRightClaim(t *testing.T) {
 	done := verilex(t, root, nil, "index", "--intent", "x", "item-added")
 	equal(t, done.code, 2)
 	contains(t, done.stderr, "look up one thing at a time")
+	for _, empty := range []string{"", "  "} {
+		done = verilex(t, root, nil, "index", "--intent", empty)
+		equal(t, done.code, 2)
+		equal(t, done.stdout, "")
+		contains(t, done.stderr, "--intent needs text that says what to prove")
+	}
 }
 
 // An intent that shares one or two terms with a claim but is about something no claim describes
@@ -158,11 +164,13 @@ func TestWeakIntentMatchFindsNoClaim(t *testing.T) {
 
 // A two-term intent that shares one term with a claim finds it only when that term names the
 // claim: it is what sets the claim's name apart from the other claims. `store` and `item` are in
-// every claim, so `store refunds` finds nothing; `list works` names item-listed. Intents that
-// share both terms, and longer intents the floor accepts, still return.
+// every claim, so `store refunds` finds nothing, and neither does a longer intent whose only
+// shared terms are those (issue #49); `list works` names item-listed. Intents that share both
+// terms, and longer intents the floor accepts, still return.
 func TestShortIntentRejectsOneSharedTerm(t *testing.T) {
 	root := product(t)
-	for _, intent := range []string{"store refunds", "store store store refund", "item refunds", "store backup"} {
+	for _, intent := range []string{"store refunds", "store store store refund", "item refunds", "store backup",
+		"store item refunds", "delete an item from the store", "store items"} {
 		done := verilex(t, root, nil, "index", "--intent", intent)
 		equal(t, done.code, 0)
 		equal(t, done.stdout, "intent: 0 claim(s) for '"+intent+"'\n")
@@ -188,6 +196,89 @@ func TestShortIntentRejectsOneSharedTerm(t *testing.T) {
 			found = append(found, strings.SplitN(line, "  ", 2)[0])
 		}
 		equal(t, found, claims)
+	}
+}
+
+// A weak intent finds no claim whatever shape the product has (issue #49): in a product with one
+// claim, where every term sets the claim apart, and in one where a claim lacks the shared nouns, so
+// they no longer sit in every claim. Its subject (refunds, deleting) is a term no claim found
+// holds, and the intent names none of them. Intents that name their claim still find it.
+func TestWeakIntentFindsNoClaimInAnyProduct(t *testing.T) {
+	one := product(t)
+	for _, path := range []string{claimFile(one, "item-added"), claimFile(one, "item-listed"),
+		filepath.Join(one, ".verilex", "words", "item-stored"), filepath.Join(one, ".verilex", "words", "item-listed")} {
+		if err := os.RemoveAll(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	four := product(t)
+	report := strings.NewReplacer("claim: store-opened", "claim: report-printed", "sentence: A new, empty store is open and ready for items.", "sentence: A printed report shows the totals.",
+		"provides: [store]", "provides: []", "action: \"`tally open` exits 0 and prints `opened`.\"", "action: \"`tally report` exits 0.\"",
+		"observation: store.json holds no items.", "observation: the report lists totals.").Replace(read(t, claimFile(four, "store-opened")))
+	write(t, claimFile(four, "report-printed"), report, 0644)
+	for _, c := range []struct {
+		root   string
+		intent string
+		claims []string
+	}{
+		{one, "store item refunds", nil},
+		{one, "store items refunds", nil},
+		{one, "delete an item from the store", nil},
+		{one, "make sure an item gets added to the store", nil},
+		{one, "prove the store opens", []string{"store-opened"}},
+		{one, "open a new empty store", []string{"store-opened"}},
+		{four, "store item refunds", nil},
+		{four, "store items refunds", nil},
+		{four, "delete an item from the store", nil},
+		{four, "a user lists the store", []string{"item-listed"}},
+		{four, "item added refund payment", []string{"item-added"}},
+		{four, "make sure an item gets added to the store", []string{"item-added"}},
+	} {
+		done := verilex(t, c.root, nil, "index", "--intent", c.intent)
+		equal(t, done.code, 0)
+		lines := strings.Split(strings.TrimSuffix(done.stdout, "\n"), "\n")
+		equal(t, lines[0], fmt.Sprintf("intent: %d claim(s) for '%s'", len(c.claims), c.intent))
+		for i, claim := range c.claims {
+			equal(t, strings.SplitN(lines[i+1], "  ", 2)[0], claim)
+		}
+	}
+}
+
+// A weak intent finds no claim in a larger product where the shared nouns sit in only half of the
+// claims, so each is rare (zero-trust re-check of #62, D5). A rare name term names a claim only when
+// no other claim found holds it; intents that name their claim still find it.
+func TestWeakIntentFindsNoClaimInALargerProduct(t *testing.T) {
+	root := product(t)
+	feature := "# Reports\n\n## Sub-features\n\n- `report-print` prints the totals.\n- `backup-write` writes a backup copy.\n- `user-sign-in` signs a user in.\n\n" +
+		"## Driving it with the tally CLI\n\n- `report-print`: Run `bin/tally report`. Expect exit 0 and a totals line.\n" +
+		"- `backup-write`: Run `bin/tally backup`. Expect exit 0 and a backup file.\n- `user-sign-in`: Run `bin/tally login`. Expect exit 0 and a session file.\n"
+	write(t, filepath.Join(root, ".cursor", "skills", "verify-tally", "features", "reports.md"), feature, 0644)
+	for _, c := range [][4]string{
+		{"report-printed", "report-print", "A printed report shows the totals.", "Expect exit 0 and a totals line."},
+		{"backup-written", "backup-write", "A backup copy of the data file is written.", "Expect exit 0 and a backup file."},
+		{"user-signed-in", "user-sign-in", "A user can sign in with a password.", "Expect exit 0 and a session file."},
+	} {
+		write(t, claimFile(root, c[0]), "claim: "+c[0]+"\nsentence: "+c[2]+"\nentry: [cli]\nevidence:\n  action: run it\n  observation: it works\nsources:\n  - ref: verify-tally/features/reports.md#"+c[1]+"\n    prose: 000000000000\n    requirements:\n      - \""+c[3]+"\"\n", 0644)
+	}
+	for _, c := range []struct {
+		intent string
+		claims []string
+	}{
+		{"store item refunds", nil},
+		{"store items refunds", nil},
+		{"delete an item from the store", nil},
+		{"prove the store opens", []string{"store-opened"}},
+		{"a user lists the store", []string{"item-listed"}},
+		{"make sure an item gets added to the store", []string{"item-added"}},
+		{"print the report", []string{"report-printed"}},
+	} {
+		done := verilex(t, root, nil, "index", "--intent", c.intent)
+		equal(t, done.code, 0)
+		lines := strings.Split(strings.TrimSuffix(done.stdout, "\n"), "\n")
+		equal(t, lines[0], fmt.Sprintf("intent: %d claim(s) for '%s'", len(c.claims), c.intent))
+		for i, claim := range c.claims {
+			equal(t, strings.SplitN(lines[i+1], "  ", 2)[0], claim)
+		}
 	}
 }
 

@@ -10,7 +10,7 @@ lint() {
   go vet ./...
   go tool staticcheck ./...
   go tool actionlint
-  shellcheck .cursor/skills/verify-verilex/scripts/* .verilex/frame/* scripts/ci scripts/canary-guards scripts/smoke scripts/docs scripts/author-prompts-check
+  shellcheck .cursor/skills/verify-verilex/scripts/* .verilex/frame/* scripts/ci scripts/ci-guards scripts/canary-guards scripts/smoke scripts/docs scripts/author-prompts-check
   go vet ./agent/...
   go tool staticcheck ./agent/...
 }
@@ -22,7 +22,12 @@ mod() {
     { echo "site/go.mod is stale (run GOWORK=off go mod tidy in site)"; return 1; }
 }
 boundary() { go run scripts/boundary.go; }
-vuln() {
+# Test evidence may be read-only. Make owned scratch writable before removing it.
+remove_temp() {
+  chmod -R u+w "$1"
+  rm -rf "$1"
+}
+vuln() (
   # govulncheck cannot map a distro-suffixed `go version` (go1.27.2-X:nodwarf5) and then reports no
   # standard-library findings, so each module is scanned with the exact release its go.mod names.
   root="go$(go mod edit -print | sed -n 's/^go //p')"
@@ -30,16 +35,22 @@ vuln() {
   # site/ keeps its own dependencies, outside go.work; the same govulncheck checks them, against
   # the standard library of the Go its go.mod requires.
   tools="$(mktemp -d)"
+  trap 'remove_temp "$tools"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   GOTOOLCHAIN="$root" go build -o "$tools" golang.org/x/vuln/cmd/govulncheck
   site="go$(GOWORK=off go -C site mod edit -print | sed -n 's/^go //p')"
   (cd site && GOWORK=off GOTOOLCHAIN="$site" "$tools/govulncheck" ./...)
-}
+)
 # The docs web app: a module of its own, outside go.work, so the core and the launcher keep no
 # dependencies. Vetted with the core's staticcheck, tested, and every docs link and anchor checked.
 # It is a server, so its go.mod requires a Go whose net/http has the latest fixes; GOTOOLCHAIN=auto
 # fetches that Go where CI pins an older one.
-site() {
+site() (
   tools="$(mktemp -d)"
+  trap 'remove_temp "$tools"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   go build -o "$tools" honnef.co/go/tools/cmd/staticcheck
   (
     cd site
@@ -49,12 +60,25 @@ site() {
     go test -race ./...
     go run . check -root ..
   )
-}
+)
 test_() { test_core; test_agent; }
-test_core() {
+test_core() (
   # tests/ builds verilex itself; the instrumented binary writes coverage to GOCOVERDIR, which go test would override
-  cover="${COVER_OUT:-$(mktemp -d)}"
-  rm -rf "$cover" && mkdir -p "$cover"
+  if [ -n "${COVER_OUT:-}" ]; then
+    mkdir -p "$COVER_OUT"
+    cover="$(cd "$COVER_OUT" && pwd -P)"
+    if [ ! "$cover" -ef "$COVER_OUT" ] || [ "$cover" = / ] || [[ "$(pwd -P)/" == "$cover/"* ]]; then
+      echo "COVER_OUT must not be the checkout or a parent of it: $COVER_OUT" >&2
+      return 1
+    fi
+  else
+    cover="$(mktemp -d)"
+    trap 'remove_temp "$cover"' EXIT
+  fi
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  mkdir -p "$cover"
+  find "$cover" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
   # shellcheck disable=SC2046
   go test -race $(go list ./... | grep -v '/tests$')
   go test -race -c -o "$cover/tests.test" ./tests
@@ -63,7 +87,7 @@ test_core() {
   find "$cover" -mindepth 2 -name 'covmeta.*' -print -quit | while read -r meta; do mv "$meta" "$cover"; done
   find "$cover" -mindepth 2 -name 'covcounters.*' -exec sh -c 'mv "$@" "$0"' "$cover" {} +
   go tool covdata percent -i="$cover"
-}
+)
 test_agent() { (cd agent && go test -race ./...); }
 build() {
   go build -o /dev/null ./cmd/verilex
@@ -85,6 +109,9 @@ canary() (
   git merge-base --is-ancestor "$canary_driver" "$main" ||
     { echo "canary: driver $canary_driver is not on origin/main"; return 1; }
   state="$(mktemp -d)"
+  trap 'remove_temp "$state"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   mkdir "$state/driver"
   git archive "$canary_driver" | tar -x -C "$state/driver"
   (cd "$state/driver" && go build -o "$state/verilex" ./cmd/verilex)
@@ -116,8 +143,8 @@ canary() (
     claim="${claim##*/}"; claim="${claim%.yaml}"
     grep -qxF "$claim" <<<"$active" || { echo "canary: claim $claim has no admitted word"; ok=false; }
   done
-  if $ok; then rm -rf "$state"; return; fi
-  echo "canary red: evidence kept in $state; reproduce with scripts/ci canary"
+  if $ok; then return; fi
+  echo "canary red: reproduce with scripts/ci canary"
   return 1
 )
 
@@ -129,7 +156,7 @@ for step in "${steps[@]}"; do
     test) test_ ;;
     test-core) test_core ;;
     test-agent) test_agent ;;
-    canary-guards) scripts/canary-guards ;;
+    canary-guards) scripts/ci-guards; scripts/canary-guards ;;
     author-prompts) scripts/author-prompts-check ;;
     *) echo "unknown step: $step" >&2; exit 2 ;;
   esac

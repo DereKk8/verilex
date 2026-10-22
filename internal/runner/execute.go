@@ -63,10 +63,12 @@ func execute(argv []string, evidence string, env []string, timeout int, stdin st
 		}
 		<-finished
 	}
-	text := "timeout\n"
-	if code != nil {
-		text = fmt.Sprintf("%d\n", *code)
+	// A step that put a link in place of its evidence directory points outside the evidence:
+	// nothing is written there, and the scan names the directory.
+	if info, err := os.Lstat(evidence); err != nil || !info.IsDir() {
+		return code, nil
 	}
+	text := exitRecord(code)
 	// A directory the word left read-only is opened for the write and closed again, and an exit
 	// file or link the word left in place is replaced, never written through.
 	write := func() error { return swap(filepath.Join(evidence, "exit"), []byte(text), 0600) }
@@ -75,6 +77,14 @@ func execute(argv []string, evidence string, env []string, timeout int, stdin st
 		return nil, err
 	}
 	return code, nil
+}
+
+// exitRecord is what a step's exit file holds: its exit code, or timeout.
+func exitRecord(code *int) string {
+	if code == nil {
+		return "timeout\n"
+	}
+	return fmt.Sprintf("%d\n", *code)
 }
 
 // errBusy means another verilex process holds a run's lock.

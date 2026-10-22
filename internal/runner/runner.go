@@ -415,7 +415,7 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 		}
 	}
 	judged := verdict.Judge(code, written, step.Word.Timeout)
-	found, err := scanStep(evidence, r.patterns)
+	found, err := scanStep(evidence, code, r.patterns)
 	if err != nil {
 		return WordRecord{}, err
 	}
@@ -441,6 +441,10 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 // readStdout reads a word's stdout, opening a stdout or directory the word left closed for the
 // read and closing it again. Only evidence another user owns stays unreadable; the scan names it.
 func readStdout(evidence string) (data []byte, err error) {
+	if info, err := os.Lstat(evidence); err != nil || !info.IsDir() {
+		// A link in place of the evidence directory is never read through; the scan names it.
+		return nil, fs.ErrPermission
+	}
 	read := func() error {
 		return withBits(filepath.Join(evidence, "stdout"), 0o400, func() (err error) {
 			data, err = os.ReadFile(filepath.Join(evidence, "stdout"))
@@ -451,15 +455,21 @@ func readStdout(evidence string) (data []byte, err error) {
 	return data, err
 }
 
-// scanStep scans a word's or frame step's evidence and names a missing exit file: a step that
-// gave its evidence directory to another user but left it open kept verilex from writing the
-// exit code, so the evidence cannot back the step's result.
-func scanStep(evidence string, patterns []*regexp2.Regexp) (Scan, error) {
+// scanStep scans a word's or frame step's evidence and names an exit file that does not hold
+// the step's exit code: a step that gave its evidence directory to another user but left it open
+// kept verilex from writing the exit code, and an exit file the step left there in its place
+// cannot back the step's result.
+func scanStep(evidence string, code *int, patterns []*regexp2.Regexp) (Scan, error) {
 	found, err := scan(evidence, patterns)
 	if err != nil {
 		return found, err
 	}
-	if _, err = inEvidence(evidence, "exit"); found.Unread == "" && err != nil {
+	var exit []byte
+	err = withBits(evidence, 0o100, func() (err error) {
+		exit, err = os.ReadFile(filepath.Join(evidence, "exit"))
+		return err
+	})
+	if found.Unread == "" && (err != nil || string(exit) != exitRecord(code)) {
 		found.Unread = "exit"
 	}
 	return found, nil
@@ -481,7 +491,7 @@ func (r *Run) frame(step, label string) (Frame, error) {
 		return Frame{}, err
 	}
 	f := Frame{Step: label, Exit: code, Evidence: evidence}
-	f.Scan, err = scanStep(evidence, r.patterns)
+	f.Scan, err = scanStep(evidence, code, r.patterns)
 	if err != nil {
 		return f, err
 	}
@@ -529,7 +539,7 @@ func cleanup(project dictionary.Project, record *Record, dir string, env Env) er
 	if err != nil {
 		return err
 	}
-	f.Scan, err = scanStep(evidence, p)
+	f.Scan, err = scanStep(evidence, code, p)
 	if err != nil {
 		return err
 	}
@@ -543,10 +553,12 @@ func cleanup(project dictionary.Project, record *Record, dir string, env Env) er
 	}
 	kept := true
 	for _, word := range live(record.Words) {
-		// Evidence another user owns survives although verilex cannot look inside; the word
-		// already ends inconclusive for it.
+		// Evidence another user owns survives although verilex cannot look inside, but only a word
+		// that already ended inconclusive for it may keep it closed: a green word's evidence that
+		// the cleanup step gave away is not shown to survive.
 		info, err := inEvidence(word.Evidence, "stdout")
-		if (err != nil && !errors.Is(err, fs.ErrPermission)) || (err == nil && info.IsDir()) {
+		closed := errors.Is(err, fs.ErrPermission) && word.Verdict != verdict.Green
+		if (err != nil && !closed) || (err == nil && info.IsDir()) {
 			kept = false
 		}
 	}

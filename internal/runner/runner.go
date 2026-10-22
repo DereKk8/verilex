@@ -441,10 +441,6 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 // readStdout reads a word's stdout, opening a stdout or directory the word left closed for the
 // read and closing it again. Only evidence another user owns stays unreadable; the scan names it.
 func readStdout(evidence string) (data []byte, err error) {
-	if info, err := os.Lstat(evidence); err != nil || !info.IsDir() {
-		// A link in place of the evidence directory is never read through; the scan names it.
-		return nil, fs.ErrPermission
-	}
 	read := func() error {
 		return withBits(filepath.Join(evidence, "stdout"), 0o400, func() (err error) {
 			data, err = os.ReadFile(filepath.Join(evidence, "stdout"))

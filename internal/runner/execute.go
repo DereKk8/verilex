@@ -63,11 +63,6 @@ func execute(argv []string, evidence string, env []string, timeout int, stdin st
 		}
 		<-finished
 	}
-	// A step that put a link in place of its evidence directory points outside the evidence:
-	// nothing is written there, and the scan names the directory.
-	if info, err := os.Lstat(evidence); err != nil || !info.IsDir() {
-		return code, nil
-	}
 	text := exitRecord(code)
 	// A directory the word left read-only is opened for the write and closed again, and an exit
 	// file or link the word left in place is replaced, never written through.

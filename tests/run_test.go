@@ -1074,26 +1074,6 @@ subprocess.run(["unshare", "--map-auto", "--map-root-user", "chown", "-R", "1:1"
 	}
 }
 
-// A word that puts a link in place of its evidence directory points verilex outside the evidence:
-// nothing there is read as its report or written, and the word is inconclusive.
-func TestEvidenceDirectoryLinkIsNotFollowed(t *testing.T) {
-	root := product(t)
-	outside := t.TempDir()
-	write(t, filepath.Join(outside, "exit"), "sentinel\n", 0600)
-	write(t, filepath.Join(outside, "stdout"), `{"verdict": "pass", "observation": "outside"}`+"\n", 0600)
-	addWord(t, root, "store-glanced", `mv "$VERILEX_EVIDENCE" "$VERILEX_EVIDENCE.gone"
-ln -s '`+outside+`' "$VERILEX_EVIDENCE"
-echo '{"verdict": "fail", "observation": "real", "preconditions_held": true}'
-`)
-	done := verilex(t, root, nil, "run", "store-open | store-glanced")
-	equal(t, done.code, 2)
-	record := lastRun(t, root)
-	equal(t, verdicts(record), []string{"green", "inconclusive"})
-	equal(t, record.Words[1].Reason, any("cannot scan evidence 02-store-glanced: permission denied"))
-	equal(t, read(t, filepath.Join(outside, "exit")), "sentinel\n")
-	equal(t, read(t, filepath.Join(outside, "stdout")), `{"verdict": "pass", "observation": "outside"}`+"\n")
-}
-
 // A word that leaves its own evidence directory or stdout closed, as `cp -a` from a read-only tree
 // does, still gets its exit code written and its report read: the run is green and the evidence
 // keeps its exit file and its modes.

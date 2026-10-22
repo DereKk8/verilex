@@ -49,11 +49,11 @@ func Init(argv []string, stderr io.Writer) int {
 		}
 		go bridge(ln, b.Socket)
 	}
-	fmt.Fprintln(ready, "ok")
-	ready.Close()
 	// The launcher's SIGTERM asks this process to end the sandbox before it exits.
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGTERM)
+	fmt.Fprintln(ready, "ok")
+	ready.Close()
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, stderr
 	if err = cmd.Start(); err != nil {

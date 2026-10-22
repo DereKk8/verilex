@@ -62,6 +62,11 @@ func execute(argv []string, evidence string, env []string, timeout int, stdin st
 		}
 		<-finished
 	}
+	// A step that replaced its evidence directory with a link points outside the evidence.
+	// Write nothing there; the scan names the directory and makes the step inconclusive.
+	if info, err := os.Lstat(evidence); err != nil || !info.IsDir() {
+		return code, nil
+	}
 	text := "timeout\n"
 	if code != nil {
 		text = fmt.Sprintf("%d\n", *code)

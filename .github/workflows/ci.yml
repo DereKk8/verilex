@@ -84,6 +84,8 @@ jobs:
             sudo apparmor_parser -r "/etc/apparmor.d/$p"
           done
       - run: scripts/ci test-agent build smoke canary canary-guards author-prompts
+      - name: Temporary failure-propagation proof
+        run: exit 1
 
   test-macos:
     runs-on: macos-latest

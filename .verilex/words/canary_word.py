@@ -53,7 +53,7 @@ def launched() -> dict:
         run, reported = out.parent.parent.name, json.loads(out.read_text())["instance"]["store"]
         store = (instance / "tally" / reported).resolve()  # an absolute reported path replaces the base
         if store.parent != root:
-            fail(f"run {run} launched its store at {reported} ({store}), not directly under TALLY_STORES {root}")
+            fail(f"run {run} store not directly under TALLY_STORES {root}: reported {reported}, resolved {store}")
         found[run] = store
     return found
 

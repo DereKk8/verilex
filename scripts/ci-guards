@@ -20,7 +20,7 @@ SH
 printf '#!/usr/bin/env bash\nexit 73\n' > "$work/bin/go"
 chmod +x "$work/bin/find" "$work/bin/go"
 
-for name in dot dot-slash parent absolute alias root; do
+for name in dot dot-slash parent absolute alias root newline newline-parent; do
   dir="$work/$name"
   mkdir -p "$dir/tree/scripts" "$dir/tree/.git" "$dir/tmp"
   cp "$ci" "$dir/tree/scripts/ci"
@@ -35,6 +35,8 @@ for name in dot dot-slash parent absolute alias root; do
     absolute) cover="$dir/tree" ;;
     alias) cover="$dir/alias" ;;
     root) cover=/ ;;
+    newline) cover=$'.\n' ;;
+    newline-parent) cover=$'..\n' ;;
   esac
   code=0
   CI_GUARD_ROOT="$dir" PATH="$work/bin:$PATH" TMPDIR="$dir/tmp" COVER_OUT="$cover" \

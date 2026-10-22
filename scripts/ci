@@ -67,7 +67,7 @@ test_core() (
   if [ -n "${COVER_OUT:-}" ]; then
     mkdir -p "$COVER_OUT"
     cover="$(cd "$COVER_OUT" && pwd -P)"
-    if [ "$cover" = / ] || [[ "$(pwd -P)/" == "$cover/"* ]]; then
+    if [ ! "$cover" -ef "$COVER_OUT" ] || [ "$cover" = / ] || [[ "$(pwd -P)/" == "$cover/"* ]]; then
       echo "COVER_OUT must not be the checkout or a parent of it: $COVER_OUT" >&2
       return 1
     fi

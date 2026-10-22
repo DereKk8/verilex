@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	// Track the compiled CLI in Go's test cache even though tests drive its binary.
 	_ "github.com/DereKk8/verilex/internal/cli"
@@ -1044,33 +1045,68 @@ subprocess.run(["unshare", "--map-auto", "--map-root-user", "chown", "-R", "1:1"
 	equal(t, record.Frame[1].Unread, "exit")
 }
 
-// The cleanup step may not hide a green word's evidence: evidence it gave to another user is not
-// shown to survive, so the run is inconclusive.
+// A step that leaves a pipe as its exit file in a directory it gave away cannot make verilex wait
+// on it: the word is inconclusive.
+func TestGivenAwayExitPipeDoesNotHang(t *testing.T) {
+	otherUser(t)
+	root := product(t)
+	t.Cleanup(func() {
+		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+	})
+	addWord(t, root, "store-glanced", `mkfifo "$VERILEX_EVIDENCE/exit"
+chmod 755 "$VERILEX_EVIDENCE"
+unshare --map-auto --map-root-user chown -R 1:1 "$VERILEX_EVIDENCE"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	run := start(t, root, nil, "run", "store-open | store-glanced")
+	hung := time.AfterFunc(time.Minute, func() { run.cmd.Process.Kill() })
+	done := run.wait(t)
+	hung.Stop()
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, verdicts(record), []string{"green", "inconclusive"})
+	equal(t, record.Words[1].Reason, any("cannot scan evidence exit: permission denied"))
+}
+
+// The cleanup step may not hide a word's evidence: a stdout verilex could open before the step
+// and cannot open after it did not survive, whatever the word's verdict, so the run is
+// inconclusive.
 func TestCleanupThatGivesAWordsEvidenceAway(t *testing.T) {
 	otherUser(t)
-	cases := []string{"", `os.remove(os.path.join(word, "stdout"))
-`}
-	for _, gutted := range cases {
-		t.Run(fmt.Sprint(gutted != ""), func(t *testing.T) {
-			root := product(t)
-			t.Cleanup(func() {
-				exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
-			})
-			path := filepath.Join(root, ".verilex", "frame", "cleanup")
-			write(t, path, read(t, path)+`import subprocess
-word = os.path.join(os.path.dirname(os.environ["VERILEX_EVIDENCE"]), "02-store-glanced")
-`+gutted+`os.chmod(word, 0o700)
+	give := `os.chmod(word, 0o700)
 subprocess.run(["unshare", "--map-auto", "--map-root-user", "chown", "-R", "1:1", word], check=True)
-`, 0755)
-			addWord(t, root, "store-glanced", `echo '{"verdict": "pass", "observation": "fine"}'
-`)
-			done := verilex(t, root, nil, "run", "store-open | store-glanced")
-			equal(t, done.code, 2)
-			record := lastRun(t, root)
-			equal(t, verdicts(record), []string{"green", "green"})
-			equal(t, *record.Reason, "evidence did not survive cleanup")
-			equal(t, *record.EvidenceKept, false)
-		})
+`
+	changes := map[string]string{
+		"given away": give,
+		"gutted":     `os.remove(os.path.join(word, "stdout"))` + "\n" + give,
+		"stdout given away": `os.chmod(os.path.join(word, "stdout"), 0o600)
+subprocess.run(["unshare", "--map-auto", "--map-root-user", "chown", "1:1", os.path.join(word, "stdout")], check=True)
+`,
+	}
+	reports := map[string]string{
+		"green": `echo '{"verdict": "pass", "observation": "fine"}'` + "\n",
+		"red":   `echo '{"verdict": "fail", "preconditions_held": true}'` + "\nexit 1\n",
+	}
+	for change, act := range changes {
+		for want, report := range reports {
+			t.Run(change+" "+want, func(t *testing.T) {
+				root := product(t)
+				t.Cleanup(func() {
+					exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+				})
+				path := filepath.Join(root, ".verilex", "frame", "cleanup")
+				write(t, path, read(t, path)+`import subprocess
+word = os.path.join(os.path.dirname(os.environ["VERILEX_EVIDENCE"]), "02-store-glanced")
+`+act, 0755)
+				addWord(t, root, "store-glanced", report)
+				done := verilex(t, root, nil, "run", "store-open | store-glanced")
+				equal(t, done.code, 2)
+				record := lastRun(t, root)
+				equal(t, verdicts(record), []string{"green", want})
+				equal(t, *record.Reason, "evidence did not survive cleanup")
+				equal(t, *record.EvidenceKept, false)
+			})
+		}
 	}
 }
 

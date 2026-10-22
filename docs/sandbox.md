@@ -6,7 +6,7 @@ The brain runs untrusted, in a sandbox: bubblewrap (`bwrap`) on Linux, `sandbox-
 
 - reads, and cannot write, the project, the system directories, the directories on its `PATH`, its own executable or install directory, the launcher's executable, the project's git directory when it lives elsewhere (a worktree), and its harness's credential files. On macOS it may also read the rest of the system outside `/Users`, `/Volumes`, the temporary directories and the user's home;
 - writes only `<run>/brain`, which holds its `HOME` and its `TMPDIR` (`/tmp` on Linux);
-- cannot reach the verilex home, the ledger, the real `verilex` binary (`--verilex`, and any other `verilex` on `PATH`), `VERILEX_HOME`, `VERILEX_LEDGER` or the run's logs. Each one is missing, or shows as an empty directory or as `/dev/null`;
+- cannot reach the verilex home, the ledger, the [judgments](intent-judge.md#the-judgments-store), the real `verilex` binary (`--verilex`, and any other `verilex` on `PATH`), `VERILEX_HOME`, `VERILEX_LEDGER`, the run's logs or the judge's files. Each one is missing, or shows as an empty directory or as `/dev/null`;
 - runs verilex only through `<run>/share/bin/verilex`, which sends each command to the launcher. The launcher runs it with its own home and ledger;
 - reaches the network only through an egress proxy (`HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY`). The proxy serves `CONNECT` to public addresses only. It refuses loopback, private, link-local, CGNAT and reserved addresses, and the host's own addresses;
 - on Linux, sees only its own processes and has no host network, IPC or abstract sockets. Every process it starts ends with the run;
@@ -52,6 +52,10 @@ verilex-agent-*/
     prompt.txt
     suggest.txt
     bin/verilex
+  judge/             the brain cannot see it
+    system.txt       the judge's system prompt
+    request.txt      the claim catalog and the intent
+    cwd/             the judge's empty working directory
   brain/             the brain writes it
     home/
     tmp/
@@ -62,6 +66,8 @@ verilex-agent-*/
     suggest.err
     verilex.log
     egress.log
+    judge.out        the judge's answer, when it judged
+    judge.err
   sock/              the socket behind `bin/verilex`
   sandbox/           per phase: `egress.sock` (Linux) or `sandbox.sb` (macOS)
   home/              the verilex home, when `--home` is not given

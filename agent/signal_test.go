@@ -64,7 +64,7 @@ func TestSignalLeavesNoRunDirectory(t *testing.T) {
 // A signal while verilex answers a lookup before the brain starts ends the launcher at once and
 // says it was interrupted, never that the time budget ended.
 func TestSignalDuringLookupIsInterrupted(t *testing.T) {
-	for _, sub := range []string{"ticket", "index"} {
+	for _, sub := range []string{"ticket", "claims"} {
 		t.Run(sub, func(t *testing.T) {
 			dir := t.TempDir()
 			fake := writeFake(t, dir, fakeFiles{ticket: ticketJSON("stub", "stub")})

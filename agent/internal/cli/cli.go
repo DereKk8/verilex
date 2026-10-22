@@ -16,9 +16,10 @@ import (
 	"github.com/DereKk8/verilex/agent/internal/sandbox"
 )
 
-const usage = `usage: verilex-agent [--text] [--project DIR] [--verilex PATH] (--ticket FILE | --intent TEXT | --diff REV) [--claim NAME] [--harness NAME] [--model NAME] [--effort LEVEL] [--profile NAME] [--ledger DIR] [--home DIR] [--skill FILE] [--brain PATH] [--harnesses FILE] [--suggest] [--allow-harness] [--keep-work]
+const usage = `usage: verilex-agent [--text] [--project DIR] [--verilex PATH] (--ticket FILE | --intent TEXT | --diff REV) [--claim NAME] [--harness NAME] [--model NAME] [--effort LEVEL] [--profile NAME] [--ledger DIR] [--home DIR] [--skill FILE] [--brain PATH] [--harnesses FILE] [--judge PATH] [--judge-model NAME] [--judgments DIR] [--suggest] [--allow-harness] [--keep-work]
 
 verilex-agent launches the brain named by the run spec, hands it the verilex skill and the intent, and prints verilex's own JSON verdict. The brain's message is ignored.
+An intent goes green only when the judge (the built-in claude judge with --allow-harness, or --judge PATH) finds that the product's claims prove all of it. Judgments are stamped and reused from --judgments (default $XDG_STATE_HOME/verilex-agent/judgments) until the intent, a claim they relied on or the judge changes.
 Every verilex run and plan of the brain gets --no-chain, so verilex refuses a chain the brain wrote. A green that does not cover the named claims and the diff, or no verilex run at all, is inconclusive (exit 2).
 `
 
@@ -145,7 +146,7 @@ func parse(argv []string) (run.Options, bool, error) {
 			opts.AllowHarness = true
 		case "--keep-work":
 			opts.KeepWork = true
-		case "--project", "--verilex", "--ticket", "--intent", "--diff", "--harness", "--model", "--effort", "--profile", "--ledger", "--home", "--skill", "--brain", "--harnesses":
+		case "--project", "--verilex", "--ticket", "--intent", "--diff", "--harness", "--model", "--effort", "--profile", "--ledger", "--home", "--skill", "--brain", "--harnesses", "--judge", "--judge-model", "--judgments":
 			got, err := take()
 			if err != nil {
 				return opts, false, err
@@ -179,6 +180,12 @@ func parse(argv []string) (run.Options, bool, error) {
 				opts.Brain = got
 			case "--harnesses":
 				opts.Harnesses = got
+			case "--judge":
+				opts.Judge = got
+			case "--judge-model":
+				opts.JudgeModel = got
+			case "--judgments":
+				opts.Judgments = got
 			}
 		case "--claim":
 			got, err := take()
@@ -193,8 +200,8 @@ func parse(argv []string) (run.Options, bool, error) {
 	if opts.Ticket == "" && opts.Intent == "" && opts.Diff == "" {
 		return opts, false, fmt.Errorf("a run needs --ticket, or --intent or --diff")
 	}
-	if opts.Ticket != "" && (opts.Intent != "" || opts.Diff != "" || opts.Harness != "" || opts.Model != "" || opts.Effort != "" || opts.Profile != "") {
-		return opts, false, fmt.Errorf("--ticket already carries intent, diff and the brain; do not pass those flags as well")
+	if opts.Ticket != "" && (opts.Intent != "" || opts.Diff != "" || opts.Harness != "" || opts.Model != "" || opts.Effort != "" || opts.Profile != "" || opts.JudgeModel != "") {
+		return opts, false, fmt.Errorf("--ticket already carries intent, diff, the brain and the judge model; do not pass those flags as well")
 	}
 	return opts, false, nil
 }

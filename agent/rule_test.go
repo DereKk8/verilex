@@ -55,9 +55,11 @@ func TestVerdictRuleMatchesDocs(t *testing.T) {
 }
 
 const (
-	apple    = "prove a stored apple is listed"
-	store    = "prove the store opens"
-	nothing  = "make the export faster"
+	apple   = "prove a stored apple is listed"
+	store   = "prove the store opens"
+	nothing = "make the export faster"
+	// trap shares a word with item-added and is about something no claim proves.
+	trap     = "refund an added item"
 	dupChain = "store-open | store-open"
 	// pearChain stores and lists pear, which hide-apple leaves alone.
 	pearChain = "store-open | item-stored pear | item-listed pear"
@@ -74,13 +76,13 @@ var verdictRule = []rule{
 		exit: 2, stderr: []string{"inconclusive: diff HEAD..HEAD changes no file under ", ", so there is nothing to prove"},
 	},
 	{
-		name: "03 verilex index fails", spec: intent(apple), index: "fail", neverStarts: true,
-		exit: 2, stderr: []string{"inconclusive: verilex index --intent failed, so the intent's claims are unknown: the index is broken"},
+		name: "03 verilex claims fails", spec: intent(apple), index: "fail", neverStarts: true,
+		exit: 2, stderr: []string{"inconclusive: verilex claims failed, so the intent's claims are unknown: the claims are broken"},
 	},
 	{
-		name: "04 verilex index does not answer before the time budget ends", ticket: ticket(apple, "1s"), index: "hang", neverStarts: true,
+		name: "04 verilex claims does not answer before the time budget ends", ticket: ticket(apple, "1s"), index: "hang", neverStarts: true,
 		within: 10 * time.Second,
-		exit:   2, stderr: []string{"inconclusive: the time budget ended before verilex index --intent answered"},
+		exit:   2, stderr: []string{"inconclusive: the time budget ended before verilex claims answered"},
 	},
 	{
 		name: "05 the sandbox tool fails", spec: intent(store), neverStarts: true,
@@ -263,9 +265,8 @@ var verdictRule = []rule{
 		exit:  2, stderr: []string{"is green but was not asked about claim item-listed"},
 	},
 	{
-		name: "29 the intent names no claim, and --claim stands for it", spec: append(intent(nothing), "--claim", "store-opened"),
-		brain: "verilex run --claim store-opened > \"$HOME/1\"\n",
-		exit:  0, stdout: "1",
+		name: "29 the intent names no claim, and --claim does not stand for it", spec: append(intent(trap), "--claim", "item-added"), neverStarts: true,
+		exit: 2, stderr: []string{`inconclusive: intent "refund an added item" names no claim: the judge (claude-opus-5-5) answered none with confidence 0.90: no claim proves a refund`},
 	},
 	{
 		name: "30 a green not asked about the diff", spec: diff(),
@@ -335,7 +336,7 @@ type rule struct {
 	// store another process holds, which verilex calls inconclusive, or a TALLY_DEFECT value such
 	// as hide-lists.
 	plan []string
-	// index fakes verilex index: "fail" exits 2, "hang" never answers.
+	// index fakes verilex claims, the judge's catalog: "fail" exits 2, "hang" never answers.
 	index string
 	// fake replaces verilex with one that prints these runs in turn.
 	fake []fakeRun
@@ -481,9 +482,9 @@ run)
     lock) export TALLY_SIMULATE_LOCK=1 ;;
     ?*) export TALLY_DEFECT="$line" ;;
   esac ;;
-index)
+claims)
   case "$RULE_INDEX" in
-    fail) echo "verilex: refused: the index is broken" >&2; exit 2 ;;
+    fail) echo "verilex: refused: the claims are broken" >&2; exit 2 ;;
     hang) exec sleep 30 ;;
   esac ;;
 esac

@@ -138,7 +138,7 @@ func Curated(g grouping.Grouping, w dictionary.Word) bool {
 	if !ok || d.Pin() != w.Proves() || d.ClaimSources != w.Claim.SourcesDigest() {
 		return false
 	}
-	ok, err := filesMatch(w, d.Digest)
+	ok, err := FilesMatch(w, d.Digest)
 	return err == nil && ok
 }
 
@@ -364,7 +364,7 @@ func wordDigest(w dictionary.Word, perm fingerprint.Perm) (string, error) {
 // earlier verilex stored without permissions adds older instead: the files may be unchanged, but
 // the record cannot show that their permissions are the ones judged.
 func (s *Status) filesDrift(w dictionary.Word, stored, changed, older string) error {
-	ok, err := filesMatch(w, stored)
+	ok, err := FilesMatch(w, stored)
 	if err != nil || ok {
 		return err
 	}
@@ -379,9 +379,9 @@ func (s *Status) filesDrift(w dictionary.Word, stored, changed, older string) er
 	return nil
 }
 
-// filesMatch reports whether stored is the digest of w's files as they are now (see
+// FilesMatch reports whether stored is the digest of w's files as they are now (see
 // fingerprint.Match).
-func filesMatch(w dictionary.Word, stored string) (bool, error) {
+func FilesMatch(w dictionary.Word, stored string) (bool, error) {
 	return fingerprint.Match(stored, func(perm fingerprint.Perm) (string, error) { return wordDigest(w, perm) })
 }
 

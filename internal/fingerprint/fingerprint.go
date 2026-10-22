@@ -88,6 +88,25 @@ func Digests(p dictionary.Project) (map[string]string, error) {
 	return digests, nil
 }
 
+// DigestsMatch reports whether stored fingerprints each part of a project's binding as it is now,
+// and no other part (see Match).
+func DigestsMatch(p dictionary.Project, stored map[string]string) (bool, error) {
+	parts, err := Binding(p)
+	if err != nil || len(stored) != len(parts) {
+		return false, err
+	}
+	for _, part := range parts {
+		ok, err := part.Matches(stored[part.Name])
+		if err != nil {
+			return false, fmt.Errorf("%s: %w", part.Label, err)
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // Cache reports whether a directory name holds an interpreter's cache, such as Python's
 // __pycache__: files an interpreter derives from the code it runs, which differ between checkouts.
 func Cache(name string) bool { return name == "__pycache__" }

@@ -138,8 +138,8 @@ func Curated(g grouping.Grouping, w dictionary.Word) bool {
 	if !ok || d.Pin() != w.Proves() || d.ClaimSources != w.Claim.SourcesDigest() {
 		return false
 	}
-	digest, err := WordDigest(w)
-	return err == nil && digest == d.Digest
+	ok, err := filesMatch(w, d.Digest)
+	return err == nil && ok
 }
 
 // StatusOf reports a word's lifecycle state. A word that proves a claim is admitted by its
@@ -260,11 +260,11 @@ func (s *Status) bindingDrift(p dictionary.Project, recorded map[string]string, 
 		return nil
 	}
 	for _, part := range parts {
-		digest, err := part.Digest()
+		ok, err := part.Matches(recorded[part.Name])
 		if err != nil {
 			return fmt.Errorf("%s: %w", part.Label, err)
 		}
-		if digest == recorded[part.Name] {
+		if ok {
 			continue
 		}
 		paths := make([]string, len(part.Names))
@@ -342,16 +342,16 @@ func SourceRoot(p dictionary.Project, source dictionary.ClaimSource) (string, []
 // WordDigest hashes every file of a word's directory except its admission record: its name,
 // permissions and contents, as a proof stamp does.
 func WordDigest(w dictionary.Word) (string, error) {
-	return wordDigest(w, true)
+	return wordDigest(w, fingerprint.RecordedPerm)
 }
 
-// wordDigest hashes a word's files, with their permissions or, as verilex did before it hashed
-// them, without.
-func wordDigest(w dictionary.Word, perms bool) (string, error) {
+// wordDigest hashes a word's files with the permission perm gives each or, as verilex did before
+// it hashed them, without when perm is nil.
+func wordDigest(w dictionary.Word, perm fingerprint.Perm) (string, error) {
 	h := sha256.New()
-	err := EachFile(w, func(rel string, perm fs.FileMode, data []byte) {
-		if perms {
-			fmt.Fprintf(h, "%s\x00%o\x00%d\x00", rel, perm, len(data))
+	err := eachFile(w, func(rel string, info fs.FileInfo, data []byte) {
+		if perm != nil {
+			fmt.Fprintf(h, "%s\x00%o\x00%d\x00", rel, perm(info), len(data))
 		} else {
 			fmt.Fprintf(h, "%s\x00%d\x00", rel, len(data))
 		}
@@ -364,11 +364,11 @@ func wordDigest(w dictionary.Word, perms bool) (string, error) {
 // earlier verilex stored without permissions adds older instead: the files may be unchanged, but
 // the record cannot show that their permissions are the ones judged.
 func (s *Status) filesDrift(w dictionary.Word, stored, changed, older string) error {
-	digest, err := WordDigest(w)
-	if err != nil || digest == stored {
+	ok, err := filesMatch(w, stored)
+	if err != nil || ok {
 		return err
 	}
-	contents, err := wordDigest(w, false)
+	contents, err := wordDigest(w, nil)
 	if err != nil {
 		return err
 	}
@@ -379,10 +379,22 @@ func (s *Status) filesDrift(w dictionary.Word, stored, changed, older string) er
 	return nil
 }
 
+// filesMatch reports whether stored is the digest of w's files as they are now (see
+// fingerprint.Match).
+func filesMatch(w dictionary.Word, stored string) (bool, error) {
+	return fingerprint.Match(stored, func(perm fingerprint.Perm) (string, error) { return wordDigest(w, perm) })
+}
+
 // EachFile visits a word's files in lexical order, skipping its admission record and
 // interpreter caches, which are not the word. The permission it reports is the one
 // fingerprint.RecordedPerm stores, so admission and the proof stamp agree.
 func EachFile(w dictionary.Word, visit func(rel string, perm fs.FileMode, data []byte)) error {
+	return eachFile(w, func(rel string, info fs.FileInfo, data []byte) {
+		visit(rel, fingerprint.RecordedPerm(info), data)
+	})
+}
+
+func eachFile(w dictionary.Word, visit func(rel string, info fs.FileInfo, data []byte)) error {
 	return filepath.WalkDir(w.Path, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -403,7 +415,7 @@ func EachFile(w dictionary.Word, visit func(rel string, perm fs.FileMode, data [
 		}
 		data, err := os.ReadFile(path)
 		if err == nil {
-			visit(filepath.ToSlash(rel), fingerprint.RecordedPerm(info), data)
+			visit(filepath.ToSlash(rel), info, data)
 		}
 		return err
 	})

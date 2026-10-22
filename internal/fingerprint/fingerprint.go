@@ -56,10 +56,15 @@ func (part Part) Paths() []string {
 }
 
 // Digest fingerprints the part's entries together, each like Tree but without interpreter caches.
-func (part Part) Digest() (string, error) {
+func (part Part) Digest() (string, error) { return part.digest(RecordedPerm) }
+
+// Matches reports whether stored fingerprints the part's entries as they are now (see Match).
+func (part Part) Matches(stored string) (bool, error) { return Match(stored, part.digest) }
+
+func (part Part) digest(perm Perm) (string, error) {
 	lines := make([]string, len(part.Names))
 	for i, name := range part.Names {
-		digest, err := tree(filepath.Join(part.Dir, name), true)
+		digest, err := tree(filepath.Join(part.Dir, name), true, perm)
 		if err != nil {
 			return "", err
 		}
@@ -88,9 +93,9 @@ func Digests(p dictionary.Project) (map[string]string, error) {
 func Cache(name string) bool { return name == "__pycache__" }
 
 // Tree fingerprints a file or a whole directory tree: names, permissions and contents.
-func Tree(root string) (string, error) { return tree(root, false) }
+func Tree(root string) (string, error) { return tree(root, false, RecordedPerm) }
 
-func tree(root string, skipCaches bool) (string, error) {
+func tree(root string, skipCaches bool, perm Perm) (string, error) {
 	info, err := os.Stat(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -99,7 +104,7 @@ func tree(root string, skipCaches bool) (string, error) {
 		return "", err
 	}
 	if !info.IsDir() {
-		return file(root, info)
+		return file(root, info, perm)
 	}
 	var lines strings.Builder
 	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
@@ -121,10 +126,10 @@ func tree(root string, skipCaches bool) (string, error) {
 			if entry.Type()&fs.ModeSymlink != 0 {
 				return fmt.Errorf("%s links to a directory", path)
 			}
-			fmt.Fprintf(&lines, "%q dir %o\n", rel, RecordedPerm(info))
+			fmt.Fprintf(&lines, "%q dir %o\n", rel, perm(info))
 			return nil
 		}
-		digest, err := file(path, info)
+		digest, err := file(path, info, perm)
 		if err != nil {
 			return err
 		}
@@ -137,7 +142,7 @@ func tree(root string, skipCaches bool) (string, error) {
 	return Of(lines.String()), nil
 }
 
-func file(path string, info fs.FileInfo) (string, error) {
+func file(path string, info fs.FileInfo, perm Perm) (string, error) {
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("%s is not a regular file", path)
 	}
@@ -147,7 +152,7 @@ func file(path string, info fs.FileInfo) (string, error) {
 	}
 	defer f.Close()
 	sum := sha256.New()
-	fmt.Fprintf(sum, "file %o\n", RecordedPerm(info))
+	fmt.Fprintf(sum, "file %o\n", perm(info))
 	if _, err = io.Copy(sum, f); err != nil {
 		return "", err
 	}
@@ -167,6 +172,31 @@ func RecordedPerm(info fs.FileInfo) fs.FileMode {
 		return 0o755
 	}
 	return 0o644
+}
+
+// Perm is the permission a fingerprint records for a file or a directory.
+type Perm func(fs.FileInfo) fs.FileMode
+
+// accepted lists each Perm a stored fingerprint may have been made with, the current one first.
+// fullPerm is how verilex recorded permissions before RecordedPerm, so a record it wrote on a
+// checkout with bits git does not track, such as a group-writable one, still matches. A digest
+// equal under fullPerm was made of the same contents and the same permission bits, so accepting
+// it never hides a change.
+var accepted = []Perm{RecordedPerm, fullPerm}
+
+// fullPerm is every permission bit, as verilex recorded them before RecordedPerm.
+func fullPerm(info fs.FileInfo) fs.FileMode { return info.Mode().Perm() }
+
+// Match reports whether stored is the digest of the files as they are now, made with any
+// accepted Perm. digest computes that digest with one Perm.
+func Match(stored string, digest func(Perm) (string, error)) (bool, error) {
+	for _, perm := range accepted {
+		current, err := digest(perm)
+		if err != nil || current == stored {
+			return err == nil, err
+		}
+	}
+	return false, nil
 }
 
 // Of is the sha256 of a text, in hex.

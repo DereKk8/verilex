@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "summary": "Clean step-owned CI scratch and refuse coverage paths that contain the checkout.",
+  "files": [
+    {
+      "path": "scripts/ci",
+      "summary": "Clean owned scratch and validate caller coverage before removing old coverage contents.",
+      "annotations": [
+        {
+          "newRange": [25, 30],
+          "summary": "remove_temp makes read-only test evidence writable before deleting owned scratch.",
+          "rationale": "Test evidence can contain read-only directories, so plain rm can leave scratch behind. Failure, SIGINT and SIGTERM probes populated read-only evidence and left no entries. SIGKILL cannot run shell traps.",
+          "author": "fm/verilex-ci-tmp-leak"
+        },
+        {
+          "newRange": [66, 80],
+          "summary": "test_ refuses physical coverage paths that contain the checkout, including the filesystem root.",
+          "rationale": "The first cleanup change could erase the checkout for COVER_OUT=., so the step now resolves symlinks and rejects checkout ancestors before deleting contents. Sentinel regressions fail on 2e4a1b2 and pass here. Full scripts/ci also retains coverage in a new caller directory. Existing unrelated coverage contents still follow the previous clearing behavior, tracked separately as instructed.",
+          "author": "fm/verilex-ci-tmp-leak"
+        },
+        {
+          "newRange": [145, 146],
+          "summary": "canary no longer advertises evidence that its exit trap removes.",
+          "rationale": "The cleanup requirement covers failed canaries too, so retaining state or printing its deleted path would be wrong. Failure probes removed state and preserved the failure status.",
+          "author": "fm/verilex-ci-tmp-leak"
+        }
+      ]
+    },
+    {
+      "path": "scripts/ci-guards",
+      "summary": "Exercise dangerous coverage paths against disposable checkout, git and parent sentinels.",
+      "annotations": [
+        {
+          "newRange": [1, 54],
+          "summary": "ci-guards runs the real test step on scratch copies and requires a refusal with intact sentinels.",
+          "rationale": "The D1 regression deleted both checkout and git sentinels on 2e4a1b2. The fixed head refuses six path forms, including a symlink alias and /. A find shim confines deletion to scratch even when testing vulnerable revisions. Both CI platforms run these guards through the existing canary-guards step. Real Go coverage was checked separately by full scripts/ci.",
+          "author": "fm/verilex-ci-tmp-leak"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "summary": "Split Linux CI between core tests and agent/build/canary checks without changing time limits or test coverage.",
+  "files": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "summary": "Run Linux core tests separately from agent tests and canaries while preserving the aggregate gate.",
+      "annotations": [
+        {
+          "newRange": [68, 87],
+          "summary": "test-agent-canary moves agent tests and every remaining former test-job step into a parallel Linux job.",
+          "rationale": "Main's test phase alone took 7m34s before setup, so moving only canaries could not ensure two minutes of margin. Final-head test and test-agent-canary jobs took 6m41s and 4m42s. Both retain 10-minute limits, full race checks and sandbox setup. GitHub CI passed. Runtime on other runner loads remains variable.",
+          "author": "fm/verilex-ci-test-split"
+        },
+        {
+          "newRange": [103, 103],
+          "summary": "ci now requires test-agent-canary as well as every existing job.",
+          "rationale": "The new job must block ci when it fails or is cancelled, so its result joins the unchanged always-running gate. Live run 39780095685 deliberately failed the new job after all real checks and ci failed. The final commit removes only the probe. Local execution also rejected cancelled and skipped results.",
+          "author": "fm/verilex-ci-test-split"
+        }
+      ]
+    },
+    {
+      "path": "scripts/ci",
+      "summary": "Expose core and agent test steps while preserving the existing complete test command.",
+      "annotations": [
+        {
+          "newRange": [53, 54],
+          "summary": "test still runs core and agent tests in order, while CI can select either step independently.",
+          "rationale": "Existing local and macOS callers keep their full test coverage because test delegates to both unchanged command bodies. Final-head GitHub checks passed. Local scripts/ci passed core tests and every non-agent step, but reproduced the known sandbox readiness race owned by issue 64 and PR https://github.com/DereKk8/verilex/pull/94. The supervisor kept that fix separate.",
+          "author": "fm/verilex-ci-test-split"
+        }
+      ]
+    }
+  ]
+}

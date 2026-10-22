@@ -1,13 +1,13 @@
 # Admit
 
-`verilex admit <word> --verdict <file>` records an outside curator's verdict on a proposed packet for a word without a claim. `admit` writes `.verilex/words/<word>/admission.json` and makes the word `admitted`; `reject` keeps the word provisional. Both verdicts are kept beside the packet. verilex refuses a verdict for an unknown packet, one whose word files or sections changed since the packet was built, and any verdict for a word that proves a claim, which joins through [onboarding](onboard.md).
+`verilex admit <word> --verdict <file>` records an outside curator's verdict on a proposed packet for a word without a claim. `admit` writes `.verilex/words/<word>/admission.json` and makes the word `admitted`; `reject` keeps the word provisional. Both verdicts are kept beside the packet. verilex refuses a verdict for an unknown packet, one whose word files, frame, shared word files or sections changed since the packet was built, and any verdict for a word that proves a claim, which joins through [onboarding](onboard.md).
 
 ## Sub-features
 
 - `admit-admit` writes `admission.json` with date, curator, packet, counted runs, word digest and the hash of each implemented section.
 - `admit-reject` keeps the word provisional and stores the verdict beside the packet.
 - `admit-refused-packet` refuses a verdict naming a packet that was never proposed for the word.
-- `admit-refused-stale` refuses a verdict when the word's files or the sections it implements changed after the packet was built.
+- `admit-refused-stale` refuses a verdict when the word's files, the frame, the shared word files or the sections it implements changed after the packet was built.
 - `admit-refused-claim` refuses a verdict for a word that proves a claim.
 - `admit-stamp` makes the next run of a chain with the word live once (`word changed`).
 
@@ -36,6 +36,7 @@ Preconditions:
 
 - **A verdict copied from another word.** A curator, or an agent passing the curator's file along, reuses a verdict written for another word. With `<PACKET>` from the preconditions, write `{"word": "item-stored", "packet": "<PACKET>", "verdict": "admit", "curator": "verify-verilex", "reason": "copied"}` to `$S/verdicts/mismatch.json` and run `"$S/vx" atk-adm-mismatch verilex admit probe-item --verdict "$S/verdicts/mismatch.json"`. Safe result: `verilex: refused: $S/verdicts/mismatch.json: the verdict is for "item-stored", not probe-item`, exit `2`, and `probe-item` has no `admission.json`.
 - **A verdict for an older packet after a retry.** An agent's `propose` times out and is run again, so the curator judged the first packet while a second exists. Run `"$S/vx" atk-prop-again verilex propose probe-item`, then admit with a verdict naming the first `<PACKET>`. Safe result: `admitted probe-item (curator verify-verilex, 2 runs)`, and `admission.json` names the first packet, the one judged. If the word changed in between, **Stale** applies and the admit is refused.
+- **A packet proposed by a verilex that hashed every permission bit.** A team proposes a word on a checkout made under umask `002` with a verilex that hashed every permission bit, then upgrades before the curator answers, without changing a byte or a mode. Build that verilex: `old="$(mktemp -d)"; git archive 9f38da6 | tar -x -C "$old" && go build -C "$old" -o "$old/verilex" ./cmd/verilex`. On a fresh session without `admit-all`, add `probe-item` as in [propose.md](propose.md) and run `chmod -R g+w "$S/tally/.verilex"`. Then run `"$S/vx" atk-adm-full-use-1 "$old/verilex" run 'store-open | probe-item apple | item-listed apple'`, `atk-adm-full-use-2` the same, and `"$S/vx" atk-adm-full-propose "$old/verilex" propose probe-item` (packet id `<PACKET>`). Write the `admit` verdict for `<PACKET>` to `$S/verdicts/probe-item-admit.json`. Run `chmod g-w "$S/tally/.verilex/words/probe-item/run"`, then `"$S/vx" atk-adm-full-mode verilex admit probe-item --verdict "$S/verdicts/probe-item-admit.json"`, and restore with `chmod g+w`. Run the same admit as `"$S/vx" atk-adm-full ...`, then `"$S/vx" atk-adm-full-check verilex check`, `chmod -R g-w "$S/tally/.verilex"` and `"$S/vx" atk-adm-full-canonical verilex check`. Safe result: `atk-adm-full-mode` is refused with `verilex: refused: probe-item changed since packet <PACKET>; propose it again`, exit `2`, because the packet holds every permission bit as it was judged. `atk-adm-full` prints `admitted probe-item (curator verify-verilex, 2 runs)` and writes `admission.json`, and both checks print `check: no drift (1 admitted)`, because the admission records the digests this verilex makes. Source: the zero-trust review of https://github.com/DereKk8/verilex/pull/57 (F7).
 
 ## Gotchas
 

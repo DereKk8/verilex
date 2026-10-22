@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "summary": "Keep the canary store-location cause visible when the driver truncates long paths.",
+  "files": [
+    {
+      "path": ".verilex/words/canary_word.py",
+      "summary": "Report the cause before any store path.",
+      "annotations": [
+        {
+          "newRange": [56, 56],
+          "summary": "launched names the store-location cause before all paths.",
+          "rationale": "The driver cuts causes at 300 characters, so two long paths previously hid the phrase the guard searched for. scripts/ci passed with the real pinned driver and the new long-path attack. The driver and its limit remain unchanged.",
+          "author": "fm/verilex-canary-cause-first"
+        }
+      ]
+    },
+    {
+      "path": "scripts/canary-guards",
+      "summary": "Exercise the real canary with long paths and match its cause.",
+      "annotations": [
+        {
+          "newRange": [91, 98],
+          "summary": "The long-path case forces truncation through the actual canary driver.",
+          "rationale": "A 180-character suffix makes the old message lose its cause without exceeding a filesystem component limit. This case failed on main before the word edit and passed on head through scripts/ci. Existing clean and store attacks also passed.",
+          "author": "fm/verilex-canary-cause-first"
+        }
+      ]
+    }
+  ]
+}

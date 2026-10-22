@@ -61,6 +61,13 @@ func groupWritable(t *testing.T, root string) {
 	}
 }
 
+func chmod(t *testing.T, path string, mode fs.FileMode) {
+	t.Helper()
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func stampsOf(t *testing.T, raw string) []string {
 	t.Helper()
 	var rec runner.Record
@@ -257,7 +264,7 @@ func stampNamed(t *testing.T, stamps []string, name string) string {
 // team that onboarded and admitted its words with it on a group-writable checkout keeps those
 // records after the upgrade while no file and no mode changes: the word files, the frame and the
 // shared word files, for words that prove a claim, a word whose claim covers another claim's
-// sentence, and a word without a claim. An edit still drifts.
+// sentence, and a word without a claim. A mode change or an edit still drifts.
 func TestFullModeRecordsOfGroupWritableCheckoutStayAdmitted(t *testing.T) {
 	root := baseline(t)
 	// item-kept-once maps a sentence of item-added's sub-feature, so item-stored stays clean only
@@ -290,6 +297,29 @@ func TestFullModeRecordsOfGroupWritableCheckoutStayAdmitted(t *testing.T) {
 	if got := plan(t, root, chain).stdout; !strings.HasPrefix(got, "plan: skip 3, run 0\n") {
 		t.Fatalf("plan: %q", got)
 	}
+
+	// The records hold every permission bit as it was judged, so any mode change drifts, a bit
+	// git does not record (group write) or one it does (owner execute), and restoring recovers.
+	stored := filepath.Join(root, ".verilex", "words", "item-stored", "run")
+	chmod(t, stored, 0o755)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 2 of 5 admitted drift-suspect; they always run\n"+
+		"  item-added-twice: claim item-kept-once needs review: verify-tally/features/items.md#item-add: requirement no claim maps: Expect exit 0 and `added NAME`; `store.json` lists NAME.\n"+
+		"  item-stored: the word's files changed since onboarding\n")
+	chmod(t, stored, 0o775)
+	glanced := filepath.Join(root, ".verilex", "words", "store-glanced", "word.md")
+	launch := filepath.Join(root, ".verilex", "frame", "launch")
+	chmod(t, glanced, 0o764)
+	chmod(t, launch, 0o755)
+	frame := "the frame changed since onboarding (.verilex/frame)"
+	equal(t, verilex(t, root, nil, "check").stdout, "check: 5 of 5 admitted drift-suspect; they always run\n"+
+		"  item-added-twice: "+frame+"\n"+
+		"  item-listed: "+frame+"\n"+
+		"  item-stored: "+frame+"\n"+
+		"  store-glanced: the word's files changed since admission; the frame changed since admission (.verilex/frame)\n"+
+		"  store-open: "+frame+"\n")
+	chmod(t, glanced, 0o664)
+	chmod(t, launch, 0o775)
+	equal(t, verilex(t, root, nil, "check").stdout, "check: no drift (5 admitted)\n")
 
 	for _, word := range []string{"item-listed", "store-glanced"} {
 		appendTo(t, filepath.Join(root, ".verilex", "words", word, "run"), "\n# changed\n")

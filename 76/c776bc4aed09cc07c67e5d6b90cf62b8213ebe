@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "summary": "Refuse linked evidence directories so outside reports cannot produce green or cause outside writes.",
+  "files": [
+    {
+      "path": "internal/runner/execute.go",
+      "summary": "Stop the exit write when the evidence root is not a real directory.",
+      "annotations": [{
+        "newRange": [65, 69],
+        "summary": "execute checks the directory itself before writing exit.",
+        "rationale": "A word can replace its evidence directory with a writable outside link, so checking file permissions alone does not protect the target. The CLI probes and TestEvidenceDirectoryLinkIsNotFollowed confirm that the outside exit stays unchanged. Concurrent background replacement is not tested.",
+        "author": "fm/verilex-evidence-link-s1"
+      }]
+    },
+    {
+      "path": "internal/runner/runner.go",
+      "summary": "Keep both report reads inside a real evidence directory.",
+      "annotations": [{
+        "newRange": [441, 448],
+        "summary": "readStdout refuses a linked root before reading the report.",
+        "rationale": "The word's real stdout can disagree with an outside pass report, so both reads must refuse the link. Permission refusal reaches scan rather than aborting before the word record exists. The real CLI and the regression test confirm inconclusive with no outside observation. macOS was not run locally.",
+        "author": "fm/verilex-evidence-link-s1"
+      }]
+    },
+    {
+      "path": "internal/runner/evidence.go",
+      "summary": "Make a linked scan root an explicit unreadable result.",
+      "annotations": [{
+        "newRange": [125, 129],
+        "summary": "scan names a linked root as unreadable without following or redacting its target.",
+        "rationale": "WalkDir does not descend into a root link, so silence previously looked clean. Naming the root makes the step inconclusive. The secret-report regression and CLI probe confirm that outside stdout stays unchanged. Child symlink behavior stays unchanged.",
+        "author": "fm/verilex-evidence-link-s1"
+      }]
+    },
+    {
+      "path": "tests/run_test.go",
+      "summary": "Test the false green and outside redaction paths through the CLI.",
+      "annotations": [{
+        "newRange": [626, 654],
+        "summary": "TestEvidenceDirectoryLinkIsNotFollowed checks the verdict, reason, observation and unchanged outside files.",
+        "rationale": "A verdict-only assertion misses outside file changes, so both cases also compare outside exit and stdout. The test fails against main's unchanged runner and passes on this head. scripts/ci passed. Asynchronous directory swaps are not covered.",
+        "author": "fm/verilex-evidence-link-s1"
+      }]
+    }
+  ]
+}

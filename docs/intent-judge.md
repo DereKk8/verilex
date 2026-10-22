@@ -82,6 +82,8 @@ Each judgment file records the intent, the judge's identity and model, the answe
 
 Anyone who can write the store can write a judgment that counts. Give write access only to the launchers.
 
+The launcher reads a `--judge` executable again after it answers. When the content no longer matches the stamp, as when a deploy replaces the judge during a run and a rollback restores it later, the run is inconclusive and nothing is stored. A judge replaced during a run by someone with write access to the judge file, for example one that restores the original before it exits, is outside what reuse protects against: that person can already write a judgment straight into the store.
+
 ## Limits
 
 - The judge reads the whole catalog on every judgment. The experiment measured catalogs of 3 and 13 claims. A product with hundreds of claims may need a narrower catalog.

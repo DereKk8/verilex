@@ -520,6 +520,20 @@ func TestBindingChangedDuringOnboardingRecordsNothing(t *testing.T) {
 	equal(t, status(t, root, "store-open"), "provisional")
 }
 
+// Onboarding records the word files its trials ran with, so a change to them while it runs records
+// nothing, never the files as they are once the trials are over.
+func TestWordChangedDuringOnboardingRecordsNothing(t *testing.T) {
+	root := product(t)
+	used(t, root, "store-open")
+	used(t, root, "store-open")
+	launch := filepath.Join(root, ".verilex", "frame", "launch")
+	original := read(t, launch)
+	// Each launch leaves a line in the word's own directory, as an edit during the trials would.
+	write(t, launch, strings.Replace(original, "run = os.environ[\"VERILEX_RUN\"]\n", "run = os.environ[\"VERILEX_RUN\"]\nwith open(Path(os.environ[\"VERILEX_PROJECT_ROOT\"], \".verilex\", \"words\", \"store-open\", \"launches.log\"), \"a\") as log:\n    log.write(run + \"\\n\")\n", 1), 0755)
+	equal(t, verilex(t, root, nil, "onboard", "store-open"), output{code: 2, stderr: "verilex: refused: the word's files changed while store-open was onboarded; onboard it again\n"})
+	equal(t, status(t, root, "store-open"), "provisional")
+}
+
 // A decision recorded before onboarding kept the frame and the shared word files cannot say the
 // word still runs with them, so the word is drift-suspect until it is onboarded again.
 func TestDecisionWithoutBindingIsDriftSuspect(t *testing.T) {

@@ -122,6 +122,11 @@ func scan(dir string, patterns []*regexp2.Regexp) (found Scan, err error) {
 	}
 	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if path == dir {
+			if err == nil && entry.Type()&fs.ModeSymlink != 0 {
+				// A link in place of the evidence directory leads outside the evidence.
+				found.Unread = filepath.Base(dir)
+				return fs.SkipDir
+			}
 			if err == nil {
 				err = visit(path, "", entry)
 			}

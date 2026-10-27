@@ -27,6 +27,11 @@ type Verdict struct {
 
 var packetID = regexp.MustCompile(`^[0-9a-f]{16}$`)
 
+// afterRead is a test seam. When a test of this package sets it, it runs once admit has read the
+// word's files and the binding that the admission records, before admit compares anything with
+// the packet. No flag, environment variable or file sets it.
+var afterRead func()
+
 // Admit records a curator's verdict on a proposed word. Both verdicts are kept beside the
 // packet; only "admit" writes an admission record, so a rejected word stays as it was. The
 // verdict must name a packet of this word whose files, frame, shared word files and sections
@@ -85,6 +90,9 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 	binding, err := fingerprint.Digests(p)
 	if err != nil {
 		return v, nil, err
+	}
+	if afterRead != nil {
+		afterRead()
 	}
 	current, err := sections(p, w)
 	if err != nil {

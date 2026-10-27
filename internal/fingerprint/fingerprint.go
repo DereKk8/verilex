@@ -7,10 +7,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
@@ -56,21 +58,83 @@ func (part Part) Paths() []string {
 }
 
 // Digest fingerprints the part's entries together, each like Tree but without interpreter caches.
-func (part Part) Digest() (string, error) { return part.digest(RecordedPerm) }
-
-// Matches reports whether stored fingerprints the part's entries as they are now (see Match).
-func (part Part) Matches(stored string) (bool, error) { return Match(stored, part.digest) }
-
-func (part Part) digest(perm Perm) (string, error) {
-	lines := make([]string, len(part.Names))
-	for i, name := range part.Names {
-		digest, err := tree(filepath.Join(part.Dir, name), true, perm)
-		if err != nil {
-			return "", err
-		}
-		lines[i] = name + "=" + digest
+func (part Part) Digest() (string, error) {
+	digests, err := part.digests([]Perm{RecordedPerm})
+	if err != nil {
+		return "", err
 	}
-	return Of(strings.Join(lines, "\n")), nil
+	return digests[0], nil
+}
+
+// Matches reports whether stored fingerprints the part's entries as they are now (see Read).
+func (part Part) Matches(stored string) (bool, error) {
+	read, err := part.Read()
+	return err == nil && read.Matches(stored), err
+}
+
+// Read fingerprints the part's entries in one read.
+func (part Part) Read() (Read, error) {
+	digests, err := part.digests(accepted)
+	return Read{digests}, err
+}
+
+// digests fingerprints the part's entries in one read, once with each of perms.
+func (part Part) digests(perms []Perm) ([]string, error) {
+	lines := make([][]string, len(perms))
+	for _, name := range part.Names {
+		digests, err := tree(filepath.Join(part.Dir, name), true, perms)
+		if err != nil {
+			return nil, err
+		}
+		for i, digest := range digests {
+			lines[i] = append(lines[i], name+"="+digest)
+		}
+	}
+	digests := make([]string, len(perms))
+	for i, entries := range lines {
+		digests[i] = Of(strings.Join(entries, "\n"))
+	}
+	return digests, nil
+}
+
+// BindingRead is one read of a project's binding: each part's Read, by part name.
+type BindingRead map[string]Read
+
+// ReadBinding reads each part of a project's binding once.
+func ReadBinding(p dictionary.Project) (BindingRead, error) {
+	parts, err := Binding(p)
+	if err != nil {
+		return nil, err
+	}
+	read := BindingRead{}
+	for _, part := range parts {
+		if read[part.Name], err = part.Read(); err != nil {
+			return nil, fmt.Errorf("%s: %w", part.Label, err)
+		}
+	}
+	return read, nil
+}
+
+// Digests is the fingerprint of each part that verilex records now, by part name.
+func (b BindingRead) Digests() map[string]string {
+	digests := map[string]string{}
+	for name, read := range b {
+		digests[name] = read.Digest()
+	}
+	return digests
+}
+
+// Matches reports whether stored fingerprints each part of the read, and no other part (see Read).
+func (b BindingRead) Matches(stored map[string]string) bool {
+	if len(stored) != len(b) {
+		return false
+	}
+	for name, read := range b {
+		if !read.Matches(stored[name]) {
+			return false
+		}
+	}
+	return true
 }
 
 // Digests fingerprints each part of a project's binding, by part name.
@@ -88,44 +152,32 @@ func Digests(p dictionary.Project) (map[string]string, error) {
 	return digests, nil
 }
 
-// DigestsMatch reports whether stored fingerprints each part of a project's binding as it is now,
-// and no other part (see Match).
-func DigestsMatch(p dictionary.Project, stored map[string]string) (bool, error) {
-	parts, err := Binding(p)
-	if err != nil || len(stored) != len(parts) {
-		return false, err
-	}
-	for _, part := range parts {
-		ok, err := part.Matches(stored[part.Name])
-		if err != nil {
-			return false, fmt.Errorf("%s: %w", part.Label, err)
-		}
-		if !ok {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
 // Cache reports whether a directory name holds an interpreter's cache, such as Python's
 // __pycache__: files an interpreter derives from the code it runs, which differ between checkouts.
 func Cache(name string) bool { return name == "__pycache__" }
 
 // Tree fingerprints a file or a whole directory tree: names, permissions and contents.
-func Tree(root string) (string, error) { return tree(root, false, RecordedPerm) }
+func Tree(root string) (string, error) {
+	digests, err := tree(root, false, []Perm{RecordedPerm})
+	if err != nil {
+		return "", err
+	}
+	return digests[0], nil
+}
 
-func tree(root string, skipCaches bool, perm Perm) (string, error) {
+// tree fingerprints a file or a whole directory tree in one read, once with each of perms.
+func tree(root string, skipCaches bool, perms []Perm) ([]string, error) {
 	info, err := os.Stat(root)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("%s is missing", root)
+			return nil, fmt.Errorf("%s is missing", root)
 		}
-		return "", err
+		return nil, err
 	}
 	if !info.IsDir() {
-		return file(root, info, perm)
+		return file(root, info, perms)
 	}
-	var lines strings.Builder
+	lines := make([]strings.Builder, len(perms))
 	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -145,37 +197,62 @@ func tree(root string, skipCaches bool, perm Perm) (string, error) {
 			if entry.Type()&fs.ModeSymlink != 0 {
 				return fmt.Errorf("%s links to a directory", path)
 			}
-			fmt.Fprintf(&lines, "%q dir %o\n", rel, perm(info))
+			for i, perm := range perms {
+				fmt.Fprintf(&lines[i], "%q dir %o\n", rel, perm(info))
+			}
 			return nil
 		}
-		digest, err := file(path, info, perm)
+		digests, err := file(path, info, perms)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(&lines, "%q %s\n", rel, digest)
+		for i, digest := range digests {
+			fmt.Fprintf(&lines[i], "%q %s\n", rel, digest)
+		}
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return Of(lines.String()), nil
+	digests := make([]string, len(perms))
+	for i := range lines {
+		digests[i] = Of(lines[i].String())
+	}
+	return digests, nil
 }
 
-func file(path string, info fs.FileInfo, perm Perm) (string, error) {
+// file fingerprints a regular file once with each of perms, from one open of it: every digest
+// hashes the same contents, and the mode of the file those contents came from.
+func file(path string, info fs.FileInfo, perms []Perm) ([]string, error) {
 	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("%s is not a regular file", path)
+		return nil, fmt.Errorf("%s is not a regular file", path)
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer f.Close()
-	sum := sha256.New()
-	fmt.Fprintf(sum, "file %o\n", perm(info))
-	if _, err = io.Copy(sum, f); err != nil {
-		return "", err
+	if info, err = f.Stat(); err != nil {
+		return nil, err
 	}
-	return hex.EncodeToString(sum.Sum(nil)), nil
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	sums := make([]hash.Hash, len(perms))
+	writers := make([]io.Writer, len(perms))
+	for i, perm := range perms {
+		sums[i] = sha256.New()
+		fmt.Fprintf(sums[i], "file %o\n", perm(info))
+		writers[i] = sums[i]
+	}
+	if _, err = io.Copy(io.MultiWriter(writers...), f); err != nil {
+		return nil, err
+	}
+	digests := make([]string, len(perms))
+	for i, sum := range sums {
+		digests[i] = hex.EncodeToString(sum.Sum(nil))
+	}
+	return digests, nil
 }
 
 // RecordedPerm is the permission a fingerprint stores.
@@ -206,17 +283,31 @@ var accepted = []Perm{RecordedPerm, fullPerm}
 // fullPerm is every permission bit, as verilex recorded them before RecordedPerm.
 func fullPerm(info fs.FileInfo) fs.FileMode { return info.Mode().Perm() }
 
-// Match reports whether stored is the digest of the files as they are now, made with any
-// accepted Perm. digest computes that digest with one Perm.
-func Match(stored string, digest func(Perm) (string, error)) (bool, error) {
+// Read is one read of some files, fingerprinted with each accepted Perm. A record is matched
+// against a Read and made from the same Read, never from two reads, so what verilex records is
+// exactly what it matched: the same bytes and modes, or nothing.
+type Read struct{ digests []string }
+
+// Reading fingerprints one read of some files with each accepted Perm. digest hashes those files
+// with one Perm; it must hash what was read, never read the files again.
+func Reading(digest func(Perm) string) Read {
+	read := Read{}
 	for _, perm := range accepted {
-		current, err := digest(perm)
-		if err != nil || current == stored {
-			return err == nil, err
-		}
+		read.digests = append(read.digests, digest(perm))
 	}
-	return false, nil
+	return read
 }
+
+// Digest is the fingerprint verilex records now: the read under RecordedPerm.
+func (r Read) Digest() string {
+	if len(r.digests) == 0 {
+		return ""
+	}
+	return r.digests[0]
+}
+
+// Matches reports whether stored fingerprints the read with any accepted Perm.
+func (r Read) Matches(stored string) bool { return stored != "" && slices.Contains(r.digests, stored) }
 
 // Of is the sha256 of a text, in hex.
 func Of(text string) string {

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"os"
@@ -339,40 +340,71 @@ func SourceRoot(p dictionary.Project, source dictionary.ClaimSource) (string, []
 	return filepath.Join(p.Root, source.Repo), dictionary.DefaultSkillDirs
 }
 
+// Files is one read of a word's files: every file of its directory except its admission record and
+// interpreter caches, with its name, mode and contents. Its digests (see fingerprint.Read), and
+// the files it shows, all come from that one read.
+type Files struct {
+	fingerprint.Read
+	files []file
+}
+
+type file struct {
+	rel  string
+	info fs.FileInfo
+	data []byte
+}
+
+// ReadFiles reads a word's files once.
+func ReadFiles(w dictionary.Word) (Files, error) {
+	var f Files
+	err := eachFile(w, func(rel string, info fs.FileInfo, data []byte) {
+		f.files = append(f.files, file{rel, info, data})
+	})
+	if err != nil {
+		return Files{}, err
+	}
+	f.Read = fingerprint.Reading(f.digest)
+	return f, nil
+}
+
+// Each visits the files in lexical order, with the permission fingerprint.RecordedPerm stores.
+func (f Files) Each(visit func(rel string, perm fs.FileMode, data []byte)) {
+	for _, file := range f.files {
+		visit(file.rel, fingerprint.RecordedPerm(file.info), file.data)
+	}
+}
+
+// digest hashes the files with the permission perm gives each or, as verilex did before it hashed
+// them, without when perm is nil.
+func (f Files) digest(perm fingerprint.Perm) string {
+	h := sha256.New()
+	for _, file := range f.files {
+		if perm != nil {
+			fmt.Fprintf(h, "%s\x00%o\x00%d\x00", file.rel, perm(file.info), len(file.data))
+		} else {
+			fmt.Fprintf(h, "%s\x00%d\x00", file.rel, len(file.data))
+		}
+		h.Write(file.data)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // WordDigest hashes every file of a word's directory except its admission record: its name,
 // permissions and contents, as a proof stamp does.
 func WordDigest(w dictionary.Word) (string, error) {
-	return wordDigest(w, fingerprint.RecordedPerm)
-}
-
-// wordDigest hashes a word's files with the permission perm gives each or, as verilex did before
-// it hashed them, without when perm is nil.
-func wordDigest(w dictionary.Word, perm fingerprint.Perm) (string, error) {
-	h := sha256.New()
-	err := eachFile(w, func(rel string, info fs.FileInfo, data []byte) {
-		if perm != nil {
-			fmt.Fprintf(h, "%s\x00%o\x00%d\x00", rel, perm(info), len(data))
-		} else {
-			fmt.Fprintf(h, "%s\x00%d\x00", rel, len(data))
-		}
-		h.Write(data)
-	})
-	return hex.EncodeToString(h.Sum(nil)), err
+	f, err := ReadFiles(w)
+	return f.Digest(), err
 }
 
 // filesDrift adds changed when w's files no longer match the digest a record stored. A digest an
 // earlier verilex stored without permissions adds older instead: the files may be unchanged, but
 // the record cannot show that their permissions are the ones judged.
 func (s *Status) filesDrift(w dictionary.Word, stored, changed, older string) error {
-	ok, err := FilesMatch(w, stored)
-	if err != nil || ok {
+	f, err := ReadFiles(w)
+	if err != nil || f.Matches(stored) {
 		return err
 	}
-	contents, err := wordDigest(w, nil)
-	if err != nil {
-		return err
-	}
-	if contents == stored {
+	if f.digest(nil) == stored {
 		changed = older
 	}
 	s.Drift = append(s.Drift, changed)
@@ -380,9 +412,10 @@ func (s *Status) filesDrift(w dictionary.Word, stored, changed, older string) er
 }
 
 // FilesMatch reports whether stored is the digest of w's files as they are now (see
-// fingerprint.Match).
+// fingerprint.Read).
 func FilesMatch(w dictionary.Word, stored string) (bool, error) {
-	return fingerprint.Match(stored, func(perm fingerprint.Perm) (string, error) { return wordDigest(w, perm) })
+	f, err := ReadFiles(w)
+	return err == nil && f.Matches(stored), err
 }
 
 // EachFile visits a word's files in lexical order, skipping its admission record and
@@ -409,11 +442,17 @@ func eachFile(w dictionary.Word, visit func(rel string, info fs.FileInfo, data [
 		if err != nil || rel == admissionFile || rel == admissionFile+".tmp" {
 			return err
 		}
-		info, err := os.Stat(path)
+		// One open gives both the mode and the contents, so they are of the same file.
+		f, err := os.Open(path)
 		if err != nil {
 			return err
 		}
-		data, err := os.ReadFile(path)
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		data, err := io.ReadAll(f)
 		if err == nil {
 			visit(filepath.ToSlash(rel), info, data)
 		}

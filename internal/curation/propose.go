@@ -132,16 +132,14 @@ func Propose(p dictionary.Project, name string) (Packet, string, error) {
 	if err != nil {
 		return Packet{}, "", fmt.Errorf("%v; point the word at a feature-map section, or record the moment with `verilex gap`", err)
 	}
-	files, err := wordFiles(w)
+	// The files the packet shows and its word digest come from one read, so the curator judges
+	// the files the digest is of, and admit matches that digest.
+	files, err := lifecycle.ReadFiles(w)
 	if err != nil {
 		return Packet{}, "", err
 	}
 	if afterFiles != nil {
 		afterFiles()
-	}
-	digest, err := lifecycle.WordDigest(w)
-	if err != nil {
-		return Packet{}, "", err
 	}
 	binding, err := fingerprint.Digests(p)
 	if err != nil {
@@ -155,7 +153,7 @@ func Propose(p dictionary.Project, name string) (Packet, string, error) {
 		}
 		dictionaryEntries = append(dictionaryEntries, Entry{other.Name, s.State, other.Promise, other.Args, other.Requires, other.Provides, other.Implements, other.Proves()})
 	}
-	packet := Packet{Project: p.Name, Created: now(), Word: name, Status: status.State, Files: files, WordDigest: digest, Binding: binding, Uses: uses, Sections: implemented, Dictionary: dictionaryEntries, Curator: instructions}
+	packet := Packet{Project: p.Name, Created: now(), Word: name, Status: status.State, Files: shown(files), WordDigest: files.Digest(), Binding: binding, Uses: uses, Sections: implemented, Dictionary: dictionaryEntries, Curator: instructions}
 	data, err := json.Marshal(packet)
 	if err != nil {
 		return Packet{}, "", err
@@ -174,14 +172,16 @@ func proposalsDir(p dictionary.Project, word string) string {
 	return filepath.Join(runner.StateHome(), p.Name, "proposals", word)
 }
 
-func wordFiles(w dictionary.Word) (map[string]string, error) {
-	files := map[string]string{}
-	err := lifecycle.EachFile(w, func(rel string, _ fs.FileMode, data []byte) {
+// shown is the word's files as a packet shows them to the curator: each file's text, or its size
+// when it is not text.
+func shown(files lifecycle.Files) map[string]string {
+	shown := map[string]string{}
+	files.Each(func(rel string, _ fs.FileMode, data []byte) {
 		if utf8.Valid(data) {
-			files[rel] = string(data)
+			shown[rel] = string(data)
 		} else {
-			files[rel] = fmt.Sprintf("(binary, %d bytes)", len(data))
+			shown[rel] = fmt.Sprintf("(binary, %d bytes)", len(data))
 		}
 	})
-	return files, err
+	return shown
 }

@@ -13,11 +13,12 @@ import (
 
 	"github.com/DereKk8/verilex/internal/cli"
 	"github.com/DereKk8/verilex/internal/curation"
+	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/lifecycle"
 )
 
-// These tests drive the real CLI in this process, so an edit can land at admit's seam: while the
-// command runs, at the one moment that matters, every time.
+// These tests drive the real CLI in this process, so an edit can land at a seam of propose or
+// admit: while the command runs, at the one moment that matters, every time.
 
 // The curator judged the packet, so admit records the word's files as the packet held them, or
 // nothing. Here the word on disk is not the judged one when admit starts, and the judged files
@@ -80,6 +81,44 @@ func TestAdmitRecordsOnlyTheFrameTheCuratorJudged(t *testing.T) {
 	equal(t, verilex(t, root, "admit", "store-glanced", "--verdict", file), output{stdout: "admitted store-glanced (curator curator-model-1, 2 runs)\n"})
 	write(t, launch, unjudged)
 	equal(t, verilex(t, root, "check").stdout, "check: 1 of 1 admitted drift-suspect; they always run\n  store-glanced: the frame changed since admission (.verilex/frame)\n")
+}
+
+// The curator reads the files a packet shows, and admit matches the packet's word digest, so the
+// digest is of the files shown. An edit that lands right after propose read them never puts the
+// digest of other files beside them, and those other files are never admitted on the packet.
+func TestProposeDigestsTheWordFilesItShows(t *testing.T) {
+	root := product(t)
+	run := glanced(t, root)
+	shown := read(t, run)
+	curation.SetAfterFiles(t, func() { write(t, run, shown+"\n# edit after propose read the files\n") })
+	packet := propose(t, root, "store-glanced")
+	curation.SetAfterFiles(t, nil)
+	equal(t, packet.Files["run"], shown)
+
+	// The digest of exactly the files the packet shows, with the modes they have.
+	copied := filepath.Join(t.TempDir(), "store-glanced")
+	if err := os.Mkdir(copied, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for rel, text := range packet.Files {
+		info, err := os.Stat(filepath.Join(filepath.Dir(run), rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeMode(t, filepath.Join(copied, rel), text, info.Mode().Perm())
+	}
+	digest, err := lifecycle.WordDigest(dictionary.Word{Name: "store-glanced", Path: copied})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if packet.WordDigest != digest {
+		t.Fatalf("the packet shows the curator files with digest %s but holds word digest %s", digest, packet.WordDigest)
+	}
+
+	file := verdict(t, root, packet.ID)
+	equal(t, verilex(t, root, "admit", "store-glanced", "--verdict", file), output{code: 2, stderr: "verilex: refused: store-glanced changed since packet " + packet.ID + "; propose it again\n"})
+	write(t, run, shown)
+	equal(t, verilex(t, root, "admit", "store-glanced", "--verdict", file), output{stdout: "admitted store-glanced (curator curator-model-1, 2 runs)\n"})
 }
 
 type output struct {

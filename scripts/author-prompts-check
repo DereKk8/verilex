@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Regression tests for the pr-author-prompts check.sh label rule: a quote that names an option or item
-# the reader never sees is refused unless it carries a matching resolution of at least 8 words, and the
-# real Author prompts comments in scripts/testdata/author-prompts are never refused for a label.
+# Regression tests for Author prompts: concrete purpose, related quotes, defined
+# terminology, and resolved choice labels. Historical fixtures retain label coverage.
 # usage: scripts/author-prompts-check
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -15,7 +14,7 @@ sentence='rebuild the importer on the existing parser, keep the old file format 
 comment() { printf '## Author prompts\n\n%s\n\n> %s\n' "$why" "$1" > "$work/c.md"; }
 # expect <ok|refused> <name> <quote>
 expect() {
-  comment "$3"
+  comment "$3 for the importer"
   if "$check" "$work/c.md" 2>"$work/err"; then got=ok; else got=refused; fi
   [ "$got" = "$1" ] && return
   echo "FAIL $2: wanted $1, got $got"; cat "$work/err"; fails=$((fails + 1))
@@ -103,4 +102,5 @@ fails=$((fails + $(corpus scripts/testdata/author-prompts)))
 mkdir "$work/bad"; comment 'option B'; cp "$work/c.md" "$work/bad/bad.md"
 [ "$(corpus "$work/bad" 2>/dev/null)" = 1 ] || { echo "FAIL corpus check does not count a refused fixture"; fails=$((fails + 1)); }
 [ "$fails" -eq 0 ] || { echo "author-prompts-check: $fails failed"; exit 1; }
+"$PWD/.agents/skills/pr-author-prompts/tests.sh"
 echo "author-prompts-check: ok"

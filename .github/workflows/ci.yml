@@ -48,9 +48,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      # The agent tests run each brain in bubblewrap. Ubuntu 24.04 grants the user namespace it
-      # needs only to a program an AppArmor profile names: the recipe for Ubuntu in docs/sandbox.md.
-      # The evidence tests give files to another user with unshare, which needs the same grant.
+      # Evidence tests give files to another user with unshare, which needs the AppArmor
+      # user-namespace grant described in docs/sandbox.md.
       - name: sandbox
         run: |
           sudo apt-get update -q
@@ -59,12 +58,32 @@ jobs:
             printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile %s /usr/bin/%s flags=(unconfined) {\n  userns,\n}\n' "$p" "$p" | sudo tee "/etc/apparmor.d/$p"
             sudo apparmor_parser -r "/etc/apparmor.d/$p"
           done
-      - run: scripts/ci test build smoke canary canary-guards author-prompts | tee ci.log
+      - run: scripts/ci test-core | tee ci.log
         shell: bash
       - name: coverage
         if: always()
         run: |
           { echo '### Coverage (black-box tests, per package)'; echo '```'; grep 'coverage:' ci.log | sed 's|github.com/DereKk8/verilex/||' || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  test-agent-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the canary builds its driver from a pinned commit and diffs against origin/main
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: sandbox
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q bubblewrap
+          for p in bwrap unshare; do
+            printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile %s /usr/bin/%s flags=(unconfined) {\n  userns,\n}\n' "$p" "$p" | sudo tee "/etc/apparmor.d/$p"
+            sudo apparmor_parser -r "/etc/apparmor.d/$p"
+          done
+      - run: scripts/ci test-agent build smoke canary canary-guards author-prompts
 
   test-macos:
     runs-on: macos-latest
@@ -81,7 +100,7 @@ jobs:
   # The only required check: passes only when every job above succeeded.
   ci:
     if: always()
-    needs: [lint, vuln, test, test-macos]
+    needs: [lint, vuln, test, test-agent-canary, test-macos]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

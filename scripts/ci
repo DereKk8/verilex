@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The blocking checks. CI calls each step; run with no argument to run them all.
-# usage: scripts/ci [lint|mod|vuln|test|build|smoke|boundary|site|canary|canary-guards|author-prompts ...]
+# usage: scripts/ci [lint|mod|vuln|test|test-core|test-agent|build|smoke|boundary|site|canary|canary-guards|author-prompts ...]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -50,7 +50,8 @@ site() {
     go run . check -root ..
   )
 }
-test_() {
+test_() { test_core; test_agent; }
+test_core() {
   # tests/ builds verilex itself; the instrumented binary writes coverage to GOCOVERDIR, which go test would override
   cover="${COVER_OUT:-$(mktemp -d)}"
   rm -rf "$cover" && mkdir -p "$cover"
@@ -62,8 +63,8 @@ test_() {
   find "$cover" -mindepth 2 -name 'covmeta.*' -print -quit | while read -r meta; do mv "$meta" "$cover"; done
   find "$cover" -mindepth 2 -name 'covcounters.*' -exec sh -c 'mv "$@" "$0"' "$cover" {} +
   go tool covdata percent -i="$cover"
-  (cd agent && go test -race ./...)
 }
+test_agent() { (cd agent && go test -race ./...); }
 build() {
   go build -o /dev/null ./cmd/verilex
   go build -o /dev/null ./agent/cmd/verilex-agent
@@ -126,6 +127,8 @@ for step in "${steps[@]}"; do
   case "$step" in
     lint|mod|vuln|build|smoke|boundary|site|canary) "$step" ;;
     test) test_ ;;
+    test-core) test_core ;;
+    test-agent) test_agent ;;
     canary-guards) scripts/canary-guards ;;
     author-prompts) scripts/author-prompts-check ;;
     *) echo "unknown step: $step" >&2; exit 2 ;;

@@ -4,13 +4,15 @@
 
 Every word result carries a proof stamp: a fingerprint of everything the result depended on.
 
-- the word's own directory (`word.md`, `run`, its `admission.json` and anything beside them, with permissions);
+- the word's own directory (`word.md`, `run`, its `admission.json` and anything beside them, with modes);
 - for a word that proves a claim, the seal of its onboarding decision (`word admission`), so onboarding runs its chains live once more;
 - the fingerprint of the claim version the word proves, so a pass is evidence only for that version, and the claim's sources, so the first run after a re-map is live;
 - everything in `.verilex/words/` outside word directories (helpers words share), `.verilex/config.yaml` and `.verilex/frame/`;
 - the paths in the word's `inputs` and the values of the variables in its `env`;
 - the verilex executable;
 - the stamp of the step before it, so a change anywhere upstream reaches every later word.
+
+A file's mode counts as git records it: 0755 when its owner may execute it, and 0644 otherwise. A directory's mode does not count. So two checkouts of the same commit stamp alike, even when one was made under umask `002`.
 
 ## When a chain is skipped
 <!-- claims: chain-skipped -->

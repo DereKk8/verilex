@@ -137,7 +137,7 @@ func within(p dictionary.Project, passages []Passage, touched []string) []Passag
 	var paths []string
 	for _, item := range touched {
 		if kind, value := classifyChange(item); kind == "path" {
-			paths = append(paths, resolve(value))
+			paths = append(paths, resolve(p.Root, value))
 		}
 	}
 	out := []Passage{}

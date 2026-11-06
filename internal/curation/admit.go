@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -77,6 +76,8 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 		return v, nil, fmt.Errorf("%s: not a packet for %s", packetPath, name)
 	}
 	stale := fmt.Errorf("%s changed since packet %s; propose it again", name, v.Packet)
+	// The admission records these digests, made before the packet is matched, so a file that
+	// changes while admit runs drifts instead of being admitted.
 	digest, err := lifecycle.WordDigest(w)
 	if err != nil {
 		return v, nil, err
@@ -89,7 +90,14 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 	if err != nil {
 		return v, nil, fmt.Errorf("%v; %v", err, stale)
 	}
-	if digest != packet.WordDigest || !maps.Equal(binding, packet.Binding) || len(current) != len(packet.Sections) {
+	unchanged, err := lifecycle.FilesMatch(w, packet.WordDigest)
+	if err == nil && unchanged {
+		unchanged, err = fingerprint.DigestsMatch(p, packet.Binding)
+	}
+	if err != nil {
+		return v, nil, err
+	}
+	if !unchanged || len(current) != len(packet.Sections) {
 		return v, nil, stale
 	}
 	hashes := map[string]string{}

@@ -26,7 +26,7 @@ import (
 // MY_ghp_... or éghp_..., and an encoded byte ends in a letter or digit: a URL escape, once or
 // more (%3D, %253D), a quoted-printable one (=3D), or a backslash escape (\n, \x3d, \075,
 // \u003c, \U0000003c).
-const tokenStart = `(?:(?<![A-Za-z0-9])|(?<=%(?:25)*[0-9A-Fa-f]{2})|(?<==[0-9A-F]{2})|(?<=\\(?:[abefnrtv]|[0-7]{1,3}|x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})))`
+const tokenStart = `(?:(?<![A-Za-z0-9])|(?<=%(?:25)*[0-9A-Fa-f]{2})|(?<==[0-9A-Fa-f]{2})|(?<=\\(?:[abefnrtv]|[0-7]{1,3}|x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})))`
 
 var secretPatterns = []string{
 	`-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----|[\s\S]*)`,
@@ -124,6 +124,11 @@ func scan(dir string, patterns []*regexp2.Regexp) (found Scan, err error) {
 		if path == dir {
 			if err == nil {
 				err = visit(path, "", entry)
+			}
+			if errors.Is(err, fs.ErrPermission) {
+				// A word gave the whole directory to another user: scanning it is impossible.
+				found.Unread = filepath.Base(dir)
+				return fs.SkipDir
 			}
 			return err
 		}
@@ -480,8 +485,9 @@ func withBits(path string, bits fs.FileMode, change func() error) error {
 	if !errors.Is(err, fs.ErrPermission) {
 		return err
 	}
-	info, statErr := os.Stat(path)
-	if statErr != nil || info.Mode().Perm()&bits == bits {
+	// A link is never opened: its target lies outside the evidence.
+	info, statErr := os.Lstat(path)
+	if statErr != nil || info.Mode()&fs.ModeSymlink != 0 || info.Mode().Perm()&bits == bits {
 		return err
 	}
 	if err = os.Chmod(path, info.Mode()|bits); err != nil {

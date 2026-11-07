@@ -5,6 +5,7 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,14 +63,23 @@ func execute(argv []string, evidence string, env []string, timeout int, stdin st
 		}
 		<-finished
 	}
-	text := "timeout\n"
-	if code != nil {
-		text = fmt.Sprintf("%d\n", *code)
-	}
-	if err = os.WriteFile(filepath.Join(evidence, "exit"), []byte(text), 0600); err != nil {
+	text := exitRecord(code)
+	// A directory the word left read-only is opened for the write and closed again, and an exit
+	// file or link the word left in place is replaced, never written through.
+	write := func() error { return swap(filepath.Join(evidence, "exit"), []byte(text), 0600) }
+	if err = withBits(evidence, 0o300, write); err != nil && !errors.Is(err, fs.ErrPermission) {
+		// A word that gave its evidence directory away leaves nothing to write; the scan names the directory.
 		return nil, err
 	}
 	return code, nil
+}
+
+// exitRecord is what a step's exit file holds: its exit code, or timeout.
+func exitRecord(code *int) string {
+	if code == nil {
+		return "timeout\n"
+	}
+	return fmt.Sprintf("%d\n", *code)
 }
 
 // errBusy means another verilex process holds a run's lock.

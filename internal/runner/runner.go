@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"math"
@@ -15,6 +16,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/DereKk8/verilex/internal/dictionary"
@@ -410,17 +412,17 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 	// drop a value; redactJudgment keeps every secret out of what is recorded.
 	var written, stdout []byte
 	if code != nil {
-		if written, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil {
+		if written, err = readStdout(evidence); err != nil && !errors.Is(err, fs.ErrPermission) {
 			return WordRecord{}, err
 		}
 	}
 	judged := verdict.Judge(code, written, step.Word.Timeout)
-	found, err := scan(evidence, r.patterns)
+	found, err := scanStep(evidence, code, r.patterns)
 	if err != nil {
 		return WordRecord{}, err
 	}
 	if code != nil {
-		if stdout, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil {
+		if stdout, err = readStdout(evidence); err != nil && !errors.Is(err, fs.ErrPermission) {
 			return WordRecord{}, err
 		}
 	}
@@ -438,6 +440,69 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 	return WordRecord{Word: step.Word.Name, Args: step.Argv, Provides: step.Provides, Implements: step.Word.Implements, Proves: step.Word.Proves(), Entry: step.Word.Entry, Verdict: judged.Verdict, Reported: judged.Reported, Reason: judged.Reason, Observation: judged.Observation, Detail: judged.Detail, Exit: code, Seconds: math.RoundToEven(time.Since(started).Seconds()*100) / 100, Evidence: evidence}, nil
 }
 
+// readStdout reads a word's stdout, opening a stdout or directory the word left closed for the
+// read and closing it again. Only evidence another user owns stays unreadable; the scan names it.
+func readStdout(evidence string) (data []byte, err error) {
+	read := func() error {
+		return withBits(filepath.Join(evidence, "stdout"), 0o400, func() (err error) {
+			data, err = os.ReadFile(filepath.Join(evidence, "stdout"))
+			return err
+		})
+	}
+	err = withBits(evidence, 0o100, read)
+	return data, err
+}
+
+// scanStep scans a word's or frame step's evidence and names an exit file that does not hold
+// the step's exit code: a step that gave its evidence directory to another user but left it open
+// kept verilex from writing the exit code, and an exit file the step left there in its place
+// cannot back the step's result.
+func scanStep(evidence string, code *int, patterns []*regexp2.Regexp) (Scan, error) {
+	found, err := scan(evidence, patterns)
+	if err != nil {
+		return found, err
+	}
+	var exit []byte
+	err = withBits(evidence, 0o100, func() error {
+		f, err := openRegular(filepath.Join(evidence, "exit"))
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		exit, err = io.ReadAll(f)
+		return err
+	})
+	if found.Unread == "" && (err != nil || string(exit) != exitRecord(code)) {
+		found.Unread = "exit"
+	}
+	return found, nil
+}
+
+// openRegular opens a regular file for reading, and never waits on a pipe or device a step left
+// in its place.
+func openRegular(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+		f.Close()
+		return nil, errors.Join(fs.ErrInvalid, err)
+	}
+	return f, nil
+}
+
+// openStdout opens a word's stdout for reading, opening a directory the word left closed.
+func openStdout(evidence string) error {
+	return withBits(evidence, 0o100, func() error {
+		f, err := openRegular(filepath.Join(evidence, "stdout"))
+		if err == nil {
+			f.Close()
+		}
+		return err
+	})
+}
+
 func (r *Run) frame(step, label string) (Frame, error) {
 	evidence := filepath.Join(r.record.Dir, "frame-"+label)
 	code, err := execute([]string{r.project.Frame(step)}, evidence, environment(r.project, &r.record, evidence, r.env), frameTimeout, "")
@@ -445,7 +510,7 @@ func (r *Run) frame(step, label string) (Frame, error) {
 		return Frame{}, err
 	}
 	f := Frame{Step: label, Exit: code, Evidence: evidence}
-	f.Scan, err = scan(evidence, r.patterns)
+	f.Scan, err = scanStep(evidence, code, r.patterns)
 	if err != nil {
 		return f, err
 	}
@@ -483,6 +548,12 @@ func Cleanup(project dictionary.Project, record *Record, dir string) error {
 
 func cleanup(project dictionary.Project, record *Record, dir string, env Env) error {
 	defer os.RemoveAll(record.pycache())
+	// A word's stdout verilex could not open before the cleanup step runs stays that word's own
+	// inconclusive; any other stdout the step removes or hides did not survive.
+	closed := map[string]bool{}
+	for _, word := range live(record.Words) {
+		closed[word.Evidence] = errors.Is(openStdout(word.Evidence), fs.ErrPermission)
+	}
 	evidence := filepath.Join(dir, "frame-cleanup")
 	code, err := execute([]string{project.Frame("cleanup")}, evidence, environment(project, record, evidence, env), frameTimeout, "")
 	if err != nil {
@@ -493,7 +564,7 @@ func cleanup(project dictionary.Project, record *Record, dir string, env Env) er
 	if err != nil {
 		return err
 	}
-	f.Scan, err = scan(evidence, p)
+	f.Scan, err = scanStep(evidence, code, p)
 	if err != nil {
 		return err
 	}
@@ -507,8 +578,8 @@ func cleanup(project dictionary.Project, record *Record, dir string, env Env) er
 	}
 	kept := true
 	for _, word := range live(record.Words) {
-		info, err := os.Stat(filepath.Join(word.Evidence, "stdout"))
-		if err != nil || info.IsDir() {
+		err := openStdout(word.Evidence)
+		if err != nil && !(closed[word.Evidence] && errors.Is(err, fs.ErrPermission)) {
 			kept = false
 		}
 	}

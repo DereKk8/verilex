@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	// Track the compiled CLI in Go's test cache even though tests drive its binary.
 	_ "github.com/DereKk8/verilex/internal/cli"
@@ -329,6 +330,7 @@ func TestDishonestWordResultsAreInconclusive(t *testing.T) {
 		{"secret-after-form-feed-escape", `printf '%s\n' "line\\fghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
 		{"secret-after-octal-escape", `printf '%s\n' "token\\075ghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
 		{"secret-after-quoted-printable", `printf '%s\n' "token=3Dghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
+		{"secret-after-lower-quoted-printable", `printf '%s\n' "token=3dghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/env.txt"` + "\n" + `echo '{"verdict": "pass", "observation": "fine"}'` + "\n", "secret pattern in evidence env.txt"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -951,6 +953,215 @@ echo "ghp_$(printf 'A%.0s' $(seq 36))" > "$VERILEX_EVIDENCE/t.txt"
 			}
 		})
 	}
+}
+
+// A word that gives its whole evidence directory away leaves verilex unable to write the exit
+// file, and the run is inconclusive, not "not run" and never green.
+func TestEvidenceDirectoryGivenAway(t *testing.T) {
+	otherUser(t)
+	cases := []struct{ mode, reason string }{
+		{"700", "cannot scan evidence 02-store-glanced: permission denied"},
+		{"755", "cannot scan evidence exit: permission denied"},
+	}
+	for _, c := range cases {
+		t.Run(c.mode, func(t *testing.T) {
+			root := product(t)
+			t.Cleanup(func() {
+				exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+			})
+			addWord(t, root, "store-glanced", `echo fine > "$VERILEX_EVIDENCE/f.txt"
+chmod `+c.mode+` "$VERILEX_EVIDENCE"
+unshare --map-auto --map-root-user chown -R 1:1 "$VERILEX_EVIDENCE"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+			done := verilex(t, root, nil, "run", "store-open | store-glanced")
+			equal(t, done.code, 2)
+			record := lastRun(t, root)
+			equal(t, verdicts(record), []string{"green", "inconclusive"})
+			equal(t, record.Words[1].Reason, any(c.reason))
+			equal(t, *record.Reason, "store-glanced: "+c.reason)
+			equal(t, *record.EvidenceKept, true)
+		})
+	}
+}
+
+// A frame step that gives its evidence directory away but leaves it open keeps verilex from
+// writing its exit code, so the instance is not vouched for and the run is inconclusive.
+func TestFrameEvidenceGivenAway(t *testing.T) {
+	otherUser(t)
+	root := product(t)
+	t.Cleanup(func() {
+		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+	})
+	path := filepath.Join(root, ".verilex", "frame", "doctor")
+	give := `os.chmod(os.environ["VERILEX_EVIDENCE"], 0o755)
+subprocess.run(["unshare", "--map-auto", "--map-root-user", "chown", "-R", "1:1", os.environ["VERILEX_EVIDENCE"]], check=True)
+`
+	write(t, path, strings.Replace(read(t, path), "sys.exit(0 if", give+"sys.exit(0 if", 1), 0755)
+	done := verilex(t, root, nil, "run", "store-open")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, *record.Verdict, "inconclusive")
+	equal(t, *record.Reason, "doctor refused the instance (exit 2)")
+	equal(t, record.Frame[1].Unread, "exit")
+	equal(t, len(record.Words), 0)
+}
+
+// A word that writes its own exit file and then gives its evidence directory away readable kept
+// verilex from writing the exit code: the forged file cannot back the pass, so the word and a frame
+// step that does the same are inconclusive.
+func TestGivenAwayEvidenceWithItsOwnExitFile(t *testing.T) {
+	otherUser(t)
+	root := product(t)
+	t.Cleanup(func() {
+		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+	})
+	addWord(t, root, "store-glanced", `printf '99\n' > "$VERILEX_EVIDENCE/exit"
+chmod 755 "$VERILEX_EVIDENCE"
+unshare --map-auto --map-root-user chown -R 1:1 "$VERILEX_EVIDENCE"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	done := verilex(t, root, nil, "run", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, verdicts(record), []string{"green", "inconclusive"})
+	equal(t, record.Words[1].Reason, any("cannot scan evidence exit: permission denied"))
+	equal(t, read(t, filepath.Join(record.Words[1].Evidence, "exit")), "99\n")
+
+	frameRoot := product(t)
+	t.Cleanup(func() {
+		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(frameRoot), "state")).Run()
+	})
+	path := filepath.Join(frameRoot, ".verilex", "frame", "doctor")
+	give := `open(os.path.join(os.environ["VERILEX_EVIDENCE"], "exit"), "w").write("7\n")
+os.chmod(os.environ["VERILEX_EVIDENCE"], 0o755)
+subprocess.run(["unshare", "--map-auto", "--map-root-user", "chown", "-R", "1:1", os.environ["VERILEX_EVIDENCE"]], check=True)
+`
+	write(t, path, strings.Replace(read(t, path), "sys.exit(0 if", give+"sys.exit(0 if", 1), 0755)
+	done = verilex(t, frameRoot, nil, "run", "store-open")
+	equal(t, done.code, 2)
+	record = lastRun(t, frameRoot)
+	equal(t, *record.Reason, "doctor refused the instance (exit 2)")
+	equal(t, record.Frame[1].Unread, "exit")
+}
+
+// A step that leaves a pipe as its exit file in a directory it gave away cannot make verilex wait
+// on it: the word is inconclusive.
+func TestGivenAwayExitPipeDoesNotHang(t *testing.T) {
+	otherUser(t)
+	root := product(t)
+	t.Cleanup(func() {
+		exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+	})
+	addWord(t, root, "store-glanced", `mkfifo "$VERILEX_EVIDENCE/exit"
+chmod 755 "$VERILEX_EVIDENCE"
+unshare --map-auto --map-root-user chown -R 1:1 "$VERILEX_EVIDENCE"
+echo '{"verdict": "pass", "observation": "fine"}'
+`)
+	run := start(t, root, nil, "run", "store-open | store-glanced")
+	hung := time.AfterFunc(time.Minute, func() { run.cmd.Process.Kill() })
+	done := run.wait(t)
+	hung.Stop()
+	equal(t, done.code, 2)
+	record := lastRun(t, root)
+	equal(t, verdicts(record), []string{"green", "inconclusive"})
+	equal(t, record.Words[1].Reason, any("cannot scan evidence exit: permission denied"))
+}
+
+// The cleanup step may not hide a word's evidence: a stdout verilex could open before the step
+// and cannot open after it did not survive, whatever the word's verdict, so the run is
+// inconclusive.
+func TestCleanupThatGivesAWordsEvidenceAway(t *testing.T) {
+	otherUser(t)
+	give := `os.chmod(word, 0o700)
+subprocess.run(["unshare", "--map-auto", "--map-root-user", "chown", "-R", "1:1", word], check=True)
+`
+	changes := map[string]string{
+		"given away": give,
+		"gutted":     `os.remove(os.path.join(word, "stdout"))` + "\n" + give,
+		"stdout given away": `os.chmod(os.path.join(word, "stdout"), 0o600)
+subprocess.run(["unshare", "--map-auto", "--map-root-user", "chown", "1:1", os.path.join(word, "stdout")], check=True)
+`,
+	}
+	reports := map[string]string{
+		"green": `echo '{"verdict": "pass", "observation": "fine"}'` + "\n",
+		"red":   `echo '{"verdict": "fail", "preconditions_held": true}'` + "\nexit 1\n",
+	}
+	for change, act := range changes {
+		for want, report := range reports {
+			t.Run(change+" "+want, func(t *testing.T) {
+				root := product(t)
+				t.Cleanup(func() {
+					exec.Command("unshare", "--map-auto", "--map-root-user", "rm", "-rf", filepath.Join(filepath.Dir(root), "state")).Run()
+				})
+				path := filepath.Join(root, ".verilex", "frame", "cleanup")
+				write(t, path, read(t, path)+`import subprocess
+word = os.path.join(os.path.dirname(os.environ["VERILEX_EVIDENCE"]), "02-store-glanced")
+`+act, 0755)
+				addWord(t, root, "store-glanced", report)
+				done := verilex(t, root, nil, "run", "store-open | store-glanced")
+				equal(t, done.code, 2)
+				record := lastRun(t, root)
+				equal(t, verdicts(record), []string{"green", want})
+				equal(t, *record.Reason, "evidence did not survive cleanup")
+				equal(t, *record.EvidenceKept, false)
+			})
+		}
+	}
+}
+
+// A word that leaves its own evidence directory or stdout closed, as `cp -a` from a read-only tree
+// does, still gets its exit code written and its report read: the run is green and the evidence
+// keeps its exit file and its modes.
+func TestClosedEvidenceTheWordOwnsStillBacksAPass(t *testing.T) {
+	cases := []struct{ closing, path, mode string }{
+		{`chmod 500 "$VERILEX_EVIDENCE"`, "", "dr-x------"},
+		{`chmod 000 "$VERILEX_EVIDENCE"`, "", "d---------"},
+		{`chmod 000 "$VERILEX_EVIDENCE/stdout"`, "stdout", "----------"},
+		{`printf '1\n' > "$VERILEX_EVIDENCE/exit"; chmod 400 "$VERILEX_EVIDENCE/exit"`, "exit", "-rw-------"},
+		{`ln -s /etc/passwd "$VERILEX_EVIDENCE/exit"`, "exit", "-rw-------"},
+	}
+	for _, c := range cases {
+		t.Run(c.closing, func(t *testing.T) {
+			root := product(t)
+			addWord(t, root, "store-glanced", "echo fine > \"$VERILEX_EVIDENCE/f.txt\"\n"+c.closing+"\necho '{\"verdict\": \"pass\", \"observation\": \"fine\"}'\n")
+			done := verilex(t, root, nil, "run", "store-open | store-glanced")
+			equal(t, done.code, 0)
+			record := lastRun(t, root)
+			equal(t, verdicts(record), []string{"green", "green"})
+			evidence := record.Words[1].Evidence
+			info, err := os.Stat(filepath.Join(evidence, c.path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			equal(t, info.Mode().String(), c.mode)
+			if err = os.Chmod(evidence, 0700); err != nil {
+				t.Fatal(err)
+			}
+			exit, err := os.ReadFile(filepath.Join(evidence, "exit"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			equal(t, string(exit), "0\n")
+		})
+	}
+}
+
+// verilex opens closed evidence only inside the evidence: a stdout link to a closed file
+// elsewhere is not opened, so the report verilex never scanned cannot back a pass.
+func TestClosedLinkTargetIsNotOpened(t *testing.T) {
+	root := product(t)
+	outside := filepath.Join(t.TempDir(), "report")
+	write(t, outside, `{"verdict": "pass", "observation": "fine"}`+"\n", 0)
+	addWord(t, root, "store-glanced", "rm \"$VERILEX_EVIDENCE/stdout\"\nln -s '"+outside+"' \"$VERILEX_EVIDENCE/stdout\"\n")
+	done := verilex(t, root, nil, "run", "store-open | store-glanced")
+	equal(t, done.code, 2)
+	equal(t, verdicts(lastRun(t, root)), []string{"green", "inconclusive"})
+	info, err := os.Stat(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	equal(t, info.Mode().String(), "----------")
 }
 
 func TestWordFailureWithoutDetailDoesNotFormatNone(t *testing.T) {

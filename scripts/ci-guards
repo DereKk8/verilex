@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Refuse coverage paths that could erase the checkout. Optional argument: CI script under test.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+ci="${1:-scripts/ci}"
+work="$(mktemp -d)"
+trap 'chmod -R u+w "$work"; rm -rf "$work"' EXIT
+work="$(cd "$work" && pwd -P)"
+mkdir "$work/bin"
+CI_GUARD_FIND="$(command -v find)"
+export CI_GUARD_FIND
+cat > "$work/bin/find" <<'SH'
+#!/usr/bin/env bash
+# Even an unsafe script under test must never delete outside this case's scratch directory.
+case "$(cd "$1" && pwd -P)/" in
+  "$CI_GUARD_ROOT/"*) exec "$CI_GUARD_FIND" "$@" ;;
+  *) echo 'ci-guards: blocked find outside scratch' >&2; exit 73 ;;
+esac
+SH
+printf '#!/usr/bin/env bash\nexit 73\n' > "$work/bin/go"
+chmod +x "$work/bin/find" "$work/bin/go"
+
+for name in dot dot-slash parent absolute alias root newline newline-parent; do
+  dir="$work/$name"
+  mkdir -p "$dir/tree/scripts" "$dir/tree/.git" "$dir/tmp"
+  cp "$ci" "$dir/tree/scripts/ci"
+  printf 'keep\n' > "$dir/tree/sentinel"
+  printf 'keep\n' > "$dir/tree/.git/sentinel"
+  printf 'keep\n' > "$dir/parent-sentinel"
+  ln -s "$dir/tree" "$dir/alias"
+  case "$name" in
+    dot) cover=. ;;
+    dot-slash) cover=./ ;;
+    parent) cover=.. ;;
+    absolute) cover="$dir/tree" ;;
+    alias) cover="$dir/alias" ;;
+    root) cover=/ ;;
+    newline) cover=$'.\n' ;;
+    newline-parent) cover=$'..\n' ;;
+  esac
+  code=0
+  CI_GUARD_ROOT="$dir" PATH="$work/bin:$PATH" TMPDIR="$dir/tmp" COVER_OUT="$cover" \
+    bash "$dir/tree/scripts/ci" test > "$work/$name.log" 2>&1 || code=$?
+  if [ "$code" -ne 1 ] ||
+    ! grep -qF 'COVER_OUT must not be the checkout or a parent of it:' "$work/$name.log" ||
+    [ ! -f "$dir/tree/sentinel" ] || [ ! -f "$dir/tree/.git/sentinel" ] ||
+    [ ! -f "$dir/parent-sentinel" ]; then
+    echo "FAIL coverage-$name: exit $code; checkout, git and parent sentinels must survive a refusal"
+    cat "$work/$name.log"
+    for sentinel in "$dir/tree/sentinel" "$dir/tree/.git/sentinel" "$dir/parent-sentinel"; do
+      if [ -f "$sentinel" ]; then echo "preserved: $sentinel"; else echo "DELETED: $sentinel"; fi
+    done
+    exit 1
+  fi
+  echo "ok   coverage-$name: sentinels preserved"
+done

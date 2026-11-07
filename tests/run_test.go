@@ -623,6 +623,35 @@ echo '{"verdict": "pass", "observation": "fine"}'
 	noSecret(t, root, done, token)
 }
 
+// A word that replaces its evidence directory with a link cannot supply an outside report or
+// make verilex write or redact files outside the evidence.
+func TestEvidenceDirectoryLinkIsNotFollowed(t *testing.T) {
+	for _, c := range []struct{ name, observation string }{
+		{"pass-report", "outside"},
+		{"secret-report", "ghp_" + strings.Repeat("A", 36)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := product(t)
+			outside := t.TempDir()
+			stdout := `{"verdict": "pass", "observation": "` + c.observation + `"}` + "\n"
+			write(t, filepath.Join(outside, "exit"), "sentinel\n", 0600)
+			write(t, filepath.Join(outside, "stdout"), stdout, 0600)
+			addWord(t, root, "store-glanced", `mv "$VERILEX_EVIDENCE" "$VERILEX_EVIDENCE.gone"
+ln -s '`+outside+`' "$VERILEX_EVIDENCE"
+echo '{"verdict": "fail", "observation": "real", "preconditions_held": true}'
+`)
+			done := verilex(t, root, nil, "run", "store-open | store-glanced")
+			equal(t, done.code, 2)
+			record := lastRun(t, root)
+			equal(t, verdicts(record), []string{"green", "inconclusive"})
+			equal(t, record.Words[1].Reason, any("cannot scan evidence 02-store-glanced: permission denied"))
+			equal(t, record.Words[1].Observation, nil)
+			equal(t, read(t, filepath.Join(outside, "exit")), "sentinel\n")
+			equal(t, read(t, filepath.Join(outside, "stdout")), stdout)
+		})
+	}
+}
+
 // A file or directory the word left without read permission is scanned all the same, and keeps
 // its mode: a clean one leaves the run green, and a secret inside one is redacted.
 func TestEvidenceWithoutReadPermissionIsScanned(t *testing.T) {

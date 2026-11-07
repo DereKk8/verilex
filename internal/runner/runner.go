@@ -410,7 +410,7 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 	// drop a value; redactJudgment keeps every secret out of what is recorded.
 	var written, stdout []byte
 	if code != nil {
-		if written, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil {
+		if written, err = readStdout(evidence); err != nil && !errors.Is(err, fs.ErrPermission) {
 			return WordRecord{}, err
 		}
 	}
@@ -420,7 +420,7 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 		return WordRecord{}, err
 	}
 	if code != nil {
-		if stdout, err = os.ReadFile(filepath.Join(evidence, "stdout")); err != nil {
+		if stdout, err = readStdout(evidence); err != nil && !errors.Is(err, fs.ErrPermission) {
 			return WordRecord{}, err
 		}
 	}
@@ -436,6 +436,14 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 		judged.Reason = cause
 	}
 	return WordRecord{Word: step.Word.Name, Args: step.Argv, Provides: step.Provides, Implements: step.Word.Implements, Proves: step.Word.Proves(), Entry: step.Word.Entry, Verdict: judged.Verdict, Reported: judged.Reported, Reason: judged.Reason, Observation: judged.Observation, Detail: judged.Detail, Exit: code, Seconds: math.RoundToEven(time.Since(started).Seconds()*100) / 100, Evidence: evidence}, nil
+}
+
+// readStdout refuses a report outside the evidence. The scan names a replaced directory.
+func readStdout(evidence string) ([]byte, error) {
+	if info, err := os.Lstat(evidence); err != nil || !info.IsDir() {
+		return nil, fs.ErrPermission
+	}
+	return os.ReadFile(filepath.Join(evidence, "stdout"))
 }
 
 func (r *Run) frame(step, label string) (Frame, error) {

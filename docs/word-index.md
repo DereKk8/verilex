@@ -61,4 +61,4 @@ An anchor that names a claim that does not exist, that sits above the file's fir
 
 ## What a word depends on
 
-A word depends on its own directory, its claim file, the feature files its claim's sources (or its `implements`) point at, its `inputs`, declared `depends` (paths, config keys, image pins, runbook refs), and what every word shares: `config.yaml`, the frame, the files beside the word directories and the grouping file. `--changed` accepts a path or `config:<key>`, `image:<pin>` or `runbook:<ref>`.
+A word depends on its own directory, its claim file, the feature files its claim's sources (or its `implements`) point at, its `inputs`, declared `depends` (paths, config keys, image pins, runbook refs), and what every word shares: `config.yaml`, the frame, the files beside the word directories and the grouping file. `--changed` accepts a path or `config:<key>`, `image:<pin>` or `runbook:<ref>`. A relative path is relative to the project root, the directory that holds `.verilex/`, whatever the working directory: from `<project>/bin`, the tally binary is `--changed bin/tally`, and `--changed tally` names `<project>/tally`. An absolute path is used as it is.

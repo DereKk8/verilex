@@ -174,6 +174,27 @@ func TestRelativeChangedPathResolvesAgainstProject(t *testing.T) {
 		equal(t, got.stderr, "")
 		equal(t, got.stdout, changedTally)
 	})
+	t.Run("subdirectory", func(t *testing.T) {
+		sub := filepath.Join(root, "bin")
+		idx := verilexIn(t, root, sub, "index", "--changed", "bin/tally")
+		equal(t, idx.code, 0)
+		equal(t, idx.stderr, "")
+		equal(t, idx.stdout, changedTally)
+
+		ran := verilexIn(t, root, sub, "run", "--changed", "bin/tally")
+		equal(t, ran.code, 0)
+		equal(t, ran.stderr, "")
+		if !strings.HasPrefix(ran.stdout, "green: 3 green, skipped: stamps match run ") {
+			t.Fatalf("stdout %q", ran.stdout)
+		}
+
+		local := verilexIn(t, root, sub, "run", "--changed", "tally")
+		equal(t, local.code, 2)
+		equal(t, local.stderr, "")
+		if !strings.HasPrefix(local.stdout, "inconclusive: no claim covers this change; fall back to the product verify skill\n") {
+			t.Fatalf("stdout %q", local.stdout)
+		}
+	})
 }
 
 // Bits git does not record leave the admitted digests and the proof stamps alone.

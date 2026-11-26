@@ -25,14 +25,28 @@ boundary() { go run scripts/boundary.go; }
 vuln() {
   # govulncheck cannot map a distro-suffixed `go version` (go1.27.2-X:nodwarf5) and then reports no
   # standard-library findings, so each module is scanned with the exact release its go.mod names.
-  root="go$(go mod edit -print | sed -n 's/^go //p')"
-  GOTOOLCHAIN="$root" go tool govulncheck ./...
+  # `./...` from the root lists no package of another module, so the modules come from go.work
+  # itself, named explicitly so a GOWORK in the environment cannot drop one: a module added there is scanned too.
+  work="$PWD/go.work"
+  workgo="go$(go work edit -print "$work" | sed -n 's/^go //p')"
+  tools="$(mktemp -d)"
+  GOWORK="$work" GOTOOLCHAIN="$workgo" go build -o "$tools" golang.org/x/vuln/cmd/govulncheck
+  modules="$(GOWORK="$work" GOTOOLCHAIN="$workgo" go list -m -f 'go{{.GoVersion}} {{.Dir}}')"
+  [ -n "$modules" ] || { echo "vuln: go.work lists no module"; return 1; }
+  ok=true
+  # Each line is read whole and split at its first space only, so a directory keeps any space it holds.
+  # govulncheck takes a non-empty GOVERSION from the environment over the Go it loads, so each scan
+  # clears it and matches advisories against the release GOTOOLCHAIN pins.
+  while IFS= read -r module <&3; do
+    release="${module%% *}" dir="${module#* }"
+    (cd "$dir" && GOWORK="$work" GOTOOLCHAIN="$release" GOVERSION="" "$tools/govulncheck" ./...) ||
+      { echo "vuln red: $dir at $release"; ok=false; }
+  done 3<<<"$modules"
   # site/ keeps its own dependencies, outside go.work; the same govulncheck checks them, against
   # the standard library of the Go its go.mod requires.
-  tools="$(mktemp -d)"
-  GOTOOLCHAIN="$root" go build -o "$tools" golang.org/x/vuln/cmd/govulncheck
   site="go$(GOWORK=off go -C site mod edit -print | sed -n 's/^go //p')"
-  (cd site && GOWORK=off GOTOOLCHAIN="$site" "$tools/govulncheck" ./...)
+  (cd site && GOWORK=off GOTOOLCHAIN="$site" GOVERSION="" "$tools/govulncheck" ./...) || { echo "vuln red: site at $site"; ok=false; }
+  $ok
 }
 # The docs web app: a module of its own, outside go.work, so the core and the launcher keep no
 # dependencies. Vetted with the core's staticcheck, tested, and every docs link and anchor checked.

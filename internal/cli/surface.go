@@ -44,7 +44,7 @@ func claimSurface(project dictionary.Project, words []dictionary.Word, args opti
 	if plan.Inconclusive != "" {
 		return nothingCovered(project, plan, args, out, stderr, refuse)
 	}
-	steps, err := dictionary.ParseChain(plan.Chain, words)
+	steps, err := dictionary.ParseChain(plan.Chain, ix.Words())
 	if err != nil {
 		return refuse(err)
 	}

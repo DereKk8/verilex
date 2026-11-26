@@ -19,6 +19,11 @@ import (
 // format changes whenever the meaning of a stamp changes, so old stamps stop matching.
 const format = "verilex-stamp-1"
 
+// afterStamp is a test seam. When a test of this package sets it, it runs once Chain has computed
+// a step's stamp digest, before Hold is checked for that step. No flag, environment variable or
+// file sets it.
+var afterStamp func(word string)
+
 // Stamp fingerprints one step of a chain.
 type Stamp struct {
 	// Slot names the step by the chain prefix that ends in it; two steps share a slot only when
@@ -80,6 +85,9 @@ func Chain(project dictionary.Project, steps []dictionary.Step) []Stamp {
 		}
 		if s.Unclear == "" {
 			s.Digest = fingerprint.Of(s.Slot + "\n" + lines(s.Components))
+		}
+		if afterStamp != nil {
+			afterStamp(step.Word.Name)
 		}
 		hold, seen := holds[step.Word.Name]
 		if !seen {

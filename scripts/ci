@@ -34,14 +34,18 @@ vuln() {
   modules="$(GOWORK="$work" GOTOOLCHAIN="$workgo" go list -m -f 'go{{.GoVersion}} {{.Dir}}')"
   [ -n "$modules" ] || { echo "vuln: go.work lists no module"; return 1; }
   ok=true
-  while read -r release dir <&3; do
-    (cd "$dir" && GOWORK="$work" GOTOOLCHAIN="$release" "$tools/govulncheck" ./...) ||
+  # Each line is read whole and split at its first space only, so a directory keeps any space it holds.
+  # govulncheck takes a non-empty GOVERSION from the environment over the Go it loads, so each scan
+  # clears it and matches advisories against the release GOTOOLCHAIN pins.
+  while IFS= read -r module <&3; do
+    release="${module%% *}" dir="${module#* }"
+    (cd "$dir" && GOWORK="$work" GOTOOLCHAIN="$release" GOVERSION="" "$tools/govulncheck" ./...) ||
       { echo "vuln red: $dir at $release"; ok=false; }
   done 3<<<"$modules"
   # site/ keeps its own dependencies, outside go.work; the same govulncheck checks them, against
   # the standard library of the Go its go.mod requires.
   site="go$(GOWORK=off go -C site mod edit -print | sed -n 's/^go //p')"
-  (cd site && GOWORK=off GOTOOLCHAIN="$site" "$tools/govulncheck" ./...) || { echo "vuln red: site at $site"; ok=false; }
+  (cd site && GOWORK=off GOTOOLCHAIN="$site" GOVERSION="" "$tools/govulncheck" ./...) || { echo "vuln red: site at $site"; ok=false; }
   $ok
 }
 # The docs web app: a module of its own, outside go.work, so the core and the launcher keep no

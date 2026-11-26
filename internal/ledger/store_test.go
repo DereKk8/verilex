@@ -123,3 +123,38 @@ func TestConcurrentRecordsKeepEveryPass(t *testing.T) {
 		t.Fatalf("a pass counted for another claim version: %q", why)
 	}
 }
+
+// Record checks stdout and exit against the evidence contract and hashes stdout into the pass.
+// What it copies into the ledger must be those exact judged bytes, never a second read that an
+// overlapping edit could have changed.
+func TestLedgerRecordsExactlyTheEvidenceItJudged(t *testing.T) {
+	store := ledger.At(t.TempDir())
+	entry := green(t, "3-run")
+	judgedStdout := `{"verdict": "pass", "observation": "store.json lists apple"}` + "\n"
+	ledger.SetAfterBacked(t, func(dir string) {
+		if err := os.WriteFile(filepath.Join(dir, "stdout"), []byte(`{"verdict": "fail", "detail": "tampered"}`+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "exit"), []byte("1\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err := store.Record(map[string]ledger.Entry{slot: entry}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	got, why := reuse(store, "item-added@18e2db0cee8f")
+	if why != "" || len(got) != 1 {
+		t.Fatalf("recorded pass did not stand after source evidence changed: got=%+v why=%q", got, why)
+	}
+	copiedStdout, err := os.ReadFile(filepath.Join(got[0].Evidence, "stdout"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	copiedExit, err := os.ReadFile(filepath.Join(got[0].Evidence, "exit"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(copiedStdout) != judgedStdout || string(copiedExit) != "0\n" {
+		t.Fatalf("ledger stored stdout=%q exit=%q, want %q and \"0\\n\"", copiedStdout, copiedExit, judgedStdout)
+	}
+}

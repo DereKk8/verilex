@@ -44,6 +44,11 @@ type Store struct {
 // At opens the ledger kept in dir.
 func At(dir string) Store { return Store{dir: dir} }
 
+// afterBacked is a test seam. When a test of this package sets it, it runs once add has checked
+// an entry's evidence with backed, before it copies the evidence into the ledger. No flag,
+// environment variable or file sets it.
+var afterBacked func(evidence string)
+
 // passFormat changes whenever the meaning of a pass file changes, so older passes stop standing.
 const passFormat = "verilex-pass-1"
 
@@ -295,6 +300,9 @@ func (s Store) add(slot string, e Entry, now time.Time) error {
 	}
 	if why := backed(e.Evidence, stdout); why != "" {
 		return errors.New("its evidence misses the evidence contract: " + why)
+	}
+	if afterBacked != nil {
+		afterBacked(e.Evidence)
 	}
 	var id [16]byte
 	if _, err = rand.Read(id[:]); err != nil {

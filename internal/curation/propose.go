@@ -94,6 +94,11 @@ type Packet struct {
 
 const instructions = `Judge whether this word belongs in the shared dictionary. Admit it only when its promise is one real product moment a user would recognize, its run proves exactly that promise with a second observation, its uses' evidence backs the verdicts they report, it faithfully implements the feature-map sections listed, and no dictionary word already covers it. Write your verdict as a JSON file {"word": <word>, "packet": <id>, "verdict": "admit" or "reject", "curator": <the model that judged>, "reason": <one or two sentences>} and record it with ` + "`verilex admit <word> --verdict <file>`."
 
+// afterFiles is a test seam. When a test of this package sets it, it runs once propose has read
+// the word's files that the packet shows, before propose reads anything else for the packet. No
+// flag, environment variable or file sets it.
+var afterFiles func()
+
 // Propose builds the curator packet for a word and stores it in the project's state
 // directory. It refuses a word with fewer than MinRuns counted uses and an admitted word
 // whose sections (or claim version and sources) and files are unchanged.
@@ -130,6 +135,9 @@ func Propose(p dictionary.Project, name string) (Packet, string, error) {
 	files, err := wordFiles(w)
 	if err != nil {
 		return Packet{}, "", err
+	}
+	if afterFiles != nil {
+		afterFiles()
 	}
 	digest, err := lifecycle.WordDigest(w)
 	if err != nil {

@@ -729,8 +729,17 @@ func (j *intentJudge) intent(ctx context.Context, verilex, project, intent strin
 		return judge.Judgment{}, err
 	}
 	defer stdin.Close()
+	argv := j.judge.Command(system)
+	if j.judge.HasCopy() {
+		j.judge.WaitTick()
+		copyPath := filepath.Join(j.dir, "judge")
+		if err := j.judge.WriteCopy(copyPath); err != nil {
+			return judge.Judgment{}, err
+		}
+		argv = []string{copyPath}
+	}
 	env := append(os.Environ(), "VERILEX_JUDGE_MODEL="+j.judge.Model, "VERILEX_JUDGE_SYSTEM="+system)
-	stdout, stderr, err := command(ctx, judgeTimeout, j.judge.Command(system), filepath.Join(j.dir, "cwd"), env, stdin)
+	stdout, stderr, err := command(ctx, judgeTimeout, argv, filepath.Join(j.dir, "cwd"), env, stdin)
 	os.WriteFile(filepath.Join(j.log, "judge.out"), stdout, 0o600)
 	os.WriteFile(filepath.Join(j.log, "judge.err"), stderr, 0o600)
 	switch {

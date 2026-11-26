@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -80,12 +82,38 @@ func Catalog(raw []byte) ([]Claim, error) {
 	return claims, nil
 }
 
+// fileStat records the kernel identity of a named executable (and its symlink, if any) when
+// Resolve read it, so Unchanged catches both replacements and edit-and-restore cycles.
+type fileStat struct {
+	mode   fs.FileMode
+	size   int64
+	mtime  int64
+	ctime  int64
+	ino    uint64
+	dev    uint64
+	hasSys bool
+
+	isLink    bool
+	linkMode  fs.FileMode
+	linkMtime int64
+	linkCtime int64
+	linkIno   uint64
+	linkDev   uint64
+	linkSys   bool
+	linkTo    string
+}
+
+const tickGuard = 20 * time.Millisecond
+
 // Judge is the command that judges, and what names it in a stamp.
 type Judge struct {
 	Argv  []string
 	Model string
 	// driver names the command: the built-in template, or the content of a named executable.
 	driver string
+	// data and stat hold the exact bytes and kernel identity of a named executable read in Resolve.
+	data []byte
+	stat fileStat
 }
 
 // builtin is the Claude Code command the experiment measured. It loads no tools, settings, MCP
@@ -109,20 +137,95 @@ func Resolve(path, model string, allowHarness bool) (Judge, error) {
 			return Judge{}, fmt.Errorf("--judge %s: %v", path, err)
 		}
 		path = full
-		info, err := os.Stat(path)
-		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
-			return Judge{}, fmt.Errorf("--judge %s is not an executable file", path)
-		}
-		data, err := os.ReadFile(path)
+		data, st, err := readExecutable(path)
 		if err != nil {
-			return Judge{}, fmt.Errorf("--judge %s: %v", path, err)
+			return Judge{}, err
 		}
-		return Judge{Argv: []string{path}, Model: model, driver: "executable " + digest(string(data))}, nil
+		return Judge{Argv: []string{path}, Model: model, driver: "executable " + digest(string(data)), data: data, stat: st}, nil
 	}
 	if !allowHarness {
 		return Judge{}, errors.New("an intent needs a judge, and the built-in claude judge is not started unless --allow-harness is set; pass --judge to run a named executable instead")
 	}
 	return Judge{Argv: builtin, Model: model, driver: "builtin " + strings.Join(builtin, "\x00")}, nil
+}
+
+func readExecutable(path string) ([]byte, fileStat, error) {
+	linfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, fileStat{}, fmt.Errorf("--judge %s is not an executable file", path)
+	}
+	var st fileStat
+	if linfo.Mode()&fs.ModeSymlink != 0 {
+		st.isLink = true
+		st.linkMode = linfo.Mode()
+		st.linkMtime = linfo.ModTime().UnixNano()
+		st.linkCtime, st.linkIno, st.linkDev, st.linkSys = statIdentity(linfo)
+		target, err := os.Readlink(path)
+		if err != nil {
+			return nil, fileStat{}, fmt.Errorf("--judge %s: %v", path, err)
+		}
+		st.linkTo = target
+		sinfo, err := os.Stat(path)
+		if err != nil || sinfo.IsDir() || !sinfo.Mode().IsRegular() || sinfo.Mode()&0o111 == 0 {
+			return nil, fileStat{}, fmt.Errorf("--judge %s is not an executable file", path)
+		}
+	} else if linfo.IsDir() || !linfo.Mode().IsRegular() || linfo.Mode()&0o111 == 0 {
+		return nil, fileStat{}, fmt.Errorf("--judge %s is not an executable file", path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fileStat{}, fmt.Errorf("--judge %s: %v", path, err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.IsDir() || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
+		return nil, fileStat{}, fmt.Errorf("--judge %s is not an executable file", path)
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fileStat{}, fmt.Errorf("--judge %s: %v", path, err)
+	}
+	st.mode = info.Mode()
+	st.size = info.Size()
+	st.mtime = info.ModTime().UnixNano()
+	st.ctime, st.ino, st.dev, st.hasSys = statIdentity(info)
+	return data, st, nil
+}
+
+// HasCopy reports whether j is a named executable whose stamped bytes can be materialized into a
+// private copy before execution.
+func (j Judge) HasCopy() bool { return strings.HasPrefix(j.driver, "executable ") }
+
+// WriteCopy writes the exact executable bytes read in Resolve to path with mode 0700.
+func (j Judge) WriteCopy(path string) error {
+	if !j.HasCopy() {
+		return nil
+	}
+	return os.WriteFile(path, j.data, 0o700)
+}
+
+// WaitTick waits out the coarse filesystem timestamp window when the executable was modified
+// within tickGuard of now, so an edit-and-restore while the judge runs advances ctime.
+func (j Judge) WaitTick() {
+	if !j.HasCopy() {
+		return
+	}
+	newest := j.stat.ctime
+	if j.stat.isLink && j.stat.linkCtime > newest {
+		newest = j.stat.linkCtime
+	}
+	if newest <= 0 {
+		return
+	}
+	age := time.Duration(time.Now().UnixNano() - newest)
+	if age >= tickGuard {
+		return
+	}
+	wait := tickGuard - age
+	if wait > tickGuard {
+		wait = tickGuard
+	}
+	time.Sleep(wait)
 }
 
 // Command fills placeholders only in the built-in template. An explicit judge's argv is literal.
@@ -137,14 +240,15 @@ func (j Judge) Command(system string) []string {
 	return out
 }
 
-// Unchanged refuses a named executable whose content is no longer the content its identity
-// stamps, so an answer from a judge replaced while the launcher ran is not stored as the original's.
+// Unchanged refuses a named executable whose content or kernel identity no longer matches what
+// Resolve read, so an answer from a judge replaced or edited-and-restored while the launcher ran
+// is not stored as the original's.
 func (j Judge) Unchanged() error {
 	if !strings.HasPrefix(j.driver, "executable ") {
 		return nil
 	}
-	data, err := os.ReadFile(j.Argv[0])
-	if err != nil || "executable "+digest(string(data)) != j.driver {
+	data, st, err := readExecutable(j.Argv[0])
+	if err != nil || st != j.stat || "executable "+digest(string(data)) != j.driver {
 		return fmt.Errorf("the judge %s changed while the launcher ran, so its answer is not stamped", j.Argv[0])
 	}
 	return nil

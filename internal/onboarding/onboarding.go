@@ -15,6 +15,7 @@
 package onboarding
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -124,7 +125,7 @@ type Choice struct {
 // Onboard runs the onboarding pipeline for one word, or records the agent's choice for an
 // undecided one. An error refuses the proposal before anything is judged.
 func Onboard(p dictionary.Project, name string, choice Choice) (Result, error) {
-	words, err := lifecycle.LoadWords(p)
+	claims, words, err := lifecycle.Load(p)
 	if err != nil {
 		return Result{}, err
 	}
@@ -143,8 +144,35 @@ func Onboard(p dictionary.Project, name string, choice Choice) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	wordFiles, err := lifecycle.ReadFiles(w)
+	if err != nil {
+		return Result{}, err
+	}
+	if !wordFiles.MatchesContract(w) {
+		return Result{}, fmt.Errorf("the word's files changed while %s was onboarded; onboard it again", name)
+	}
+	bindingRead, err := fingerprint.ReadBinding(p)
+	if err != nil {
+		return Result{}, err
+	}
+	claimData, claimWitness, err := fingerprint.ReadFile(w.Claim.Path, p.Dir())
+	if err != nil {
+		return Result{}, err
+	}
+	freshClaim, err := dictionary.ParseClaim(w.Claim.Path, claimData)
+	if err != nil {
+		return Result{}, err
+	}
+	if !sameClaim(freshClaim, *w.Claim) {
+		return Result{}, fmt.Errorf("claim %s changed while %s was onboarded; onboard it again", w.Claim.Name, name)
+	}
 	r := Result{Word: name, Product: p.Name, Proves: w.Proves(), Date: time.Now().UTC().Format(time.RFC3339)}
-	status, err := lifecycle.StatusOf(p, w)
+	status, err := lifecycle.StatusOfSnapshot(p, w, lifecycle.Snapshot{
+		WordDir:     &lifecycle.WordDir{Files: wordFiles},
+		Binding:     bindingRead,
+		HasGrouping: true,
+		Grouping:    g,
+	})
 	if err != nil {
 		return r, err
 	}
@@ -152,7 +180,7 @@ func Onboard(p dictionary.Project, name string, choice Choice) (Result, error) {
 		if status.State != lifecycle.Admitted {
 			return r, fmt.Errorf("%s is %s, so it has no grouping question to answer; onboard it first", name, status.State)
 		}
-		return r, settle(p, w, words, choice, &r)
+		return r, settle(p, w, words, claims, choice, &r)
 	}
 	if status.State == lifecycle.Admitted {
 		return r, useful(p, w, g, &r)
@@ -179,18 +207,24 @@ func Onboard(p dictionary.Project, name string, choice Choice) (Result, error) {
 	if err != nil {
 		return r, err
 	}
-	claims, err := dictionary.LoadClaims(p)
-	if err != nil {
-		return r, err
+	o := &onboarding{
+		p: p, w: w, words: words, claims: claims, now: grouping.PinsOf(claims, words), g: g, r: &r,
+		opens:        map[string]map[string][]string{},
+		binding:      bindingRead.Digests(),
+		bindingRead:  bindingRead,
+		wordFiles:    wordFiles,
+		claimData:    claimData,
+		claimWitness: claimWitness,
+		otherWords:   map[string]snappedWord{},
 	}
-	binding, err := fingerprint.Digests(p)
-	if err != nil {
-		return r, err
-	}
-	o := &onboarding{p: p, w: w, words: words, claims: claims, now: grouping.PinsOf(claims, words), g: g, r: &r, opens: map[string]map[string][]string{}, binding: binding}
 	if r.Record, err = newRecord(p, name); err != nil {
 		return r, err
 	}
+	closeSnap, err := o.prepareSnapshot()
+	if err != nil {
+		return r, err
+	}
+	defer closeSnap()
 	o.decide(anchors, uses)
 	if r.Outcome == Onboarded || r.Outcome == Undecided {
 		if err = grouping.Update(p, func(g *grouping.Grouping) error { return o.record(g, uses, sources) }); err != nil {
@@ -198,6 +232,11 @@ func Onboard(p dictionary.Project, name string, choice Choice) (Result, error) {
 		}
 	}
 	return r, save(r)
+}
+
+type snappedWord struct {
+	word  dictionary.Word
+	files *lifecycle.Files
 }
 
 type onboarding struct {
@@ -217,8 +256,93 @@ type onboarding struct {
 	agree []Candidate
 	// group is the claim the word joins under.
 	group dictionary.Claim
-	// binding is the frame and the shared word files the trials ran with.
-	binding map[string]string
+	// binding, bindingRead, wordFiles, claimData and claimWitness capture the exact bytes and
+	// kernel stat identities read before any trial runs.
+	binding      map[string]string
+	bindingRead  *fingerprint.BindingRead
+	wordFiles    *lifecycle.Files
+	claimData    []byte
+	claimWitness fingerprint.Witness
+	// trialProject and snapWords point at the private snapshot of frame, shared helpers and words.
+	trialProject dictionary.Project
+	snapWords    string
+	otherWords   map[string]snappedWord
+}
+
+func sameClaim(a, b dictionary.Claim) bool {
+	if a.Fingerprint != b.Fingerprint || a.SourcesDigest() != b.SourcesDigest() || len(a.Defects) != len(b.Defects) {
+		return false
+	}
+	for name, defect := range a.Defects {
+		other, ok := b.Defects[name]
+		if !ok || defect.Digest() != other.Digest() {
+			return false
+		}
+	}
+	return true
+}
+
+func (o *onboarding) prepareSnapshot() (func(), error) {
+	snapDir := filepath.Join(o.r.Record, ".snap")
+	cleanup := func() { _ = os.RemoveAll(snapDir) }
+	snapFrame := filepath.Join(snapDir, "frame")
+	snapWords := filepath.Join(snapDir, "words")
+	if err := o.bindingRead.MaterializeFrame(snapFrame); err != nil {
+		cleanup()
+		return func() {}, err
+	}
+	if err := o.bindingRead.MaterializeShared(snapWords); err != nil {
+		cleanup()
+		return func() {}, err
+	}
+	if err := o.wordFiles.Materialize(filepath.Join(snapWords, o.w.Name)); err != nil {
+		cleanup()
+		return func() {}, err
+	}
+	o.trialProject = o.p
+	o.trialProject.FrameDir = snapFrame
+	o.snapWords = snapWords
+	return cleanup, nil
+}
+
+func (o *onboarding) snapSteps(steps []dictionary.Step) ([]dictionary.Step, error) {
+	out := slices.Clone(steps)
+	for i := range out {
+		name := out[i].Word.Name
+		if name != o.w.Name {
+			if _, ok := o.otherWords[name]; !ok {
+				files, err := lifecycle.ReadFiles(out[i].Word)
+				if err != nil {
+					return nil, err
+				}
+				if !files.MatchesContract(out[i].Word) {
+					return nil, fmt.Errorf("word %s changed while %s was onboarded; onboard it again", name, o.w.Name)
+				}
+				if err := files.Materialize(filepath.Join(o.snapWords, name)); err != nil {
+					return nil, err
+				}
+				o.otherWords[name] = snappedWord{word: out[i].Word, files: files}
+			}
+		}
+		out[i].Word.Path = filepath.Join(o.snapWords, name)
+	}
+	return out, nil
+}
+
+func (o *onboarding) waitTick() {
+	newest := o.wordFiles.Witness().MaxCtime()
+	if c := o.bindingRead.Witness().MaxCtime(); c > newest {
+		newest = c
+	}
+	if c := o.claimWitness.MaxCtime(); c > newest {
+		newest = c
+	}
+	for _, sw := range o.otherWords {
+		if c := sw.files.Witness().MaxCtime(); c > newest {
+			newest = c
+		}
+	}
+	fingerprint.WaitTick(newest)
 }
 
 func (o *onboarding) reject(why string) { o.r.Outcome, o.r.Reason = Rejected, why }
@@ -269,9 +393,15 @@ func (o *onboarding) decide(anchors []featuremap.Anchor, uses []curation.Use) {
 			values[i] = steps[k].Argv[j]
 		}
 	}
+	snappedSteps, err := o.snapSteps(steps)
+	if err != nil {
+		o.r.Outcome, o.r.Reason = Inconclusive, err.Error()
+		return
+	}
+	o.waitTick()
 	own := []Trial{}
 	for _, s := range all {
-		t := Trial{State: s.name, Word: w.Name, Chain: chain, env: s.env(all), steps: steps}
+		t := Trial{State: s.name, Word: w.Name, Chain: chain, env: s.env(all), steps: snappedSteps}
 		switch {
 		case s.defect == nil:
 			t.Expect = string(verdict.Green)
@@ -280,7 +410,7 @@ func (o *onboarding) decide(anchors []featuremap.Anchor, uses []curation.Use) {
 		}
 		own = append(own, t)
 	}
-	own = trials(o.p, filepath.Join(o.r.Record, "trials"), own, 0)
+	own = trials(o.trialProject, filepath.Join(o.r.Record, "trials"), own, 0)
 	o.r.Trials = own
 	if o.gate(own) {
 		return
@@ -294,12 +424,20 @@ func (o *onboarding) decide(anchors []featuremap.Anchor, uses []curation.Use) {
 			if err != nil {
 				continue
 			}
+			snappedOther, err := o.snapSteps(steps)
+			if err != nil {
+				o.r.Outcome, o.r.Reason = Inconclusive, err.Error()
+				return
+			}
 			candidate.Words = append(candidate.Words, other.Name)
 			for _, s := range all {
-				specs = append(specs, Trial{State: s.name, Word: other.Name, Chain: built, env: s.env(all), steps: steps})
+				specs = append(specs, Trial{State: s.name, Word: other.Name, Chain: built, env: s.env(all), steps: snappedOther})
 			}
 		}
-		results := trials(o.p, filepath.Join(o.r.Record, "trials"), specs, len(o.r.Trials))
+		if len(specs) > 0 {
+			o.waitTick()
+		}
+		results := trials(o.trialProject, filepath.Join(o.r.Record, "trials"), specs, len(o.r.Trials))
 		o.r.Trials = append(o.r.Trials, results...)
 		for _, t := range results {
 			if t.Verdict == string(verdict.Inconclusive) || t.Verdict == notRun {
@@ -445,7 +583,7 @@ func (o *onboarding) variants(claim string) []dictionary.Word {
 		if other.Name == o.w.Name || !ok || grouping.Name(d.Claim) != claim || other.Stale != "" || !d.Holds(other.Name, o.now) {
 			continue
 		}
-		if s, err := lifecycle.StatusOf(o.p, other); err == nil && s.State == lifecycle.Admitted {
+		if s, err := lifecycle.StatusOfSnapshot(o.p, other, lifecycle.Snapshot{Binding: o.bindingRead, HasGrouping: true, Grouping: o.g}); err == nil && s.State == lifecycle.Admitted {
 			result = append(result, other)
 		}
 		if len(result) == compared {
@@ -468,11 +606,26 @@ func (o *onboarding) record(g *grouping.Grouping, uses []curation.Use, sources [
 		return fmt.Errorf("the grouping changed while %s was onboarded, by another onboarding or answer; onboard it again", o.w.Name)
 	}
 	c := *o.w.Claim
-	if binding, err := fingerprint.Digests(o.p); err != nil || !maps.Equal(binding, o.binding) {
+	afterBinding, err := fingerprint.ReadBinding(o.p)
+	if err != nil || !maps.Equal(afterBinding.Digests(), o.binding) || !afterBinding.Witness().Equal(o.bindingRead.Witness()) {
 		return fmt.Errorf("the frame or the shared word files changed while %s was onboarded; onboard it again", o.w.Name)
 	}
-	digest, _ := lifecycle.WordDigest(o.w)
-	d := grouping.Decision{Claim: o.group.Pin(), Entry: o.w.Entry, Digest: digest, Binding: o.binding, Match: o.r.Match,
+	afterWord, err := lifecycle.ReadFiles(o.w)
+	if err != nil || afterWord.Digest() != o.wordFiles.Digest() || !afterWord.Witness().Equal(o.wordFiles.Witness()) {
+		return fmt.Errorf("the word's files changed while %s was onboarded; onboard it again", o.w.Name)
+	}
+	afterClaimData, afterClaimWitness, err := fingerprint.ReadFile(c.Path, o.p.Dir())
+	if err != nil || !bytes.Equal(afterClaimData, o.claimData) || !afterClaimWitness.Equal(o.claimWitness) {
+		return fmt.Errorf("claim %s changed while %s was onboarded; onboard it again", c.Name, o.w.Name)
+	}
+	for _, name := range slices.Sorted(maps.Keys(o.otherWords)) {
+		sw := o.otherWords[name]
+		afterOther, err := lifecycle.ReadFiles(sw.word)
+		if err != nil || afterOther.Digest() != sw.files.Digest() || !afterOther.Witness().Equal(sw.files.Witness()) {
+			return fmt.Errorf("word %s changed while %s was onboarded; onboard it again", name, o.w.Name)
+		}
+	}
+	d := grouping.Decision{Claim: o.group.Pin(), Entry: o.w.Entry, Digest: o.wordFiles.Digest(), Binding: o.binding, Match: o.r.Match,
 		Defects: map[string]string{}, Uses: map[string][]string{o.p.Name: runs(uses)}, Chain: o.chain, ClaimSources: c.SourcesDigest(), Sources: sources,
 		Date: o.r.Date, Record: filepath.Base(o.r.Record)}
 	for name, defect := range c.Defects {
@@ -533,13 +686,9 @@ func request(p dictionary.Project, w dictionary.Word, d grouping.Decision) *Requ
 // the question for all of them. A word moved under a claim whose own question is still open keeps
 // the pending claims it was compared with that are part of that question. Every check runs on the
 // grouping file under its lock, so two answers at once cannot both apply.
-func settle(p dictionary.Project, w dictionary.Word, words []dictionary.Word, choice Choice, r *Result) error {
+func settle(p dictionary.Project, w dictionary.Word, words []dictionary.Word, claims map[string]dictionary.Claim, choice Choice, r *Result) error {
 	if choice.SameAs != "" && choice.Distinct {
 		return errors.New("choose one: --same-as <claim> or --distinct")
-	}
-	claims, err := dictionary.LoadClaims(p)
-	if err != nil {
-		return err
 	}
 	now := grouping.PinsOf(claims, words)
 	return grouping.Update(p, func(g *grouping.Grouping) error {
@@ -619,7 +768,12 @@ func useful(p dictionary.Project, w dictionary.Word, g grouping.Grouping, r *Res
 	d.Uses[p.Name] = runs(uses)
 	r.Outcome = Onboarded
 	return grouping.Update(p, func(g *grouping.Grouping) error {
-		g.Set(w.Name, d)
+		current, ok := g.Sound(w.Name)
+		if !ok || current.Seal != d.Seal {
+			return fmt.Errorf("the grouping decision for %s changed while adding %s; onboard it again", w.Name, p.Name)
+		}
+		current.Uses[p.Name] = runs(uses)
+		g.Set(w.Name, current)
 		sealed := g.Words[w.Name]
 		r.Decision = &sealed
 		return nil

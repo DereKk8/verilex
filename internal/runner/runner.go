@@ -39,6 +39,8 @@ type Run struct {
 	// ledger. Only Trial sets them.
 	env   Env
 	trial bool
+	// snapWords holds the private snapshot directory of materialized word scripts for this run.
+	snapWords string
 }
 
 // Env changes the environment a run's frame steps and words see: Set adds or overrides
@@ -150,6 +152,11 @@ func (r *Run) Execute(p Plan, opts Options) (Record, error) {
 			return Record{}, Refused{err}
 		}
 	}
+	closeSnap, snapErr := r.prepareSnapshot(p.stamps)
+	if snapErr != nil {
+		return Record{}, snapErr
+	}
+	defer closeSnap()
 	base := len(r.record.History)
 	err := r.drive(p)
 	r.settle(p.stamps, base)
@@ -233,7 +240,7 @@ func (r *Run) proven(before []stamp.Stamp) map[string]ledger.Entry {
 	}
 	after := stamp.Chain(r.project, r.steps)
 	for i, word := range r.record.Words {
-		if word.Verdict != verdict.Green || word.ReliesOn != "" || before[i].Digest == "" || before[i].Digest != after[i].Digest {
+		if word.Verdict != verdict.Green || word.ReliesOn != "" || !before[i].Unchanged(after[i]) {
 			continue
 		}
 		entries[before[i].Slot] = r.entry(i, word, before[i])
@@ -251,7 +258,7 @@ func (r *Run) settle(before []stamp.Stamp, base int) {
 	after := stamp.Chain(r.project, r.steps)
 	for k := base; k < len(r.record.History); k++ {
 		for i, s := range before {
-			if s.Slot == r.record.History[k].Slot && s.Digest != after[i].Digest {
+			if s.Slot == r.record.History[k].Slot && !s.Unchanged(after[i]) {
 				r.record.History[k].Stamp = ""
 			}
 		}
@@ -402,7 +409,7 @@ func (r *Run) word(index int, step dictionary.Step, states []string) (WordRecord
 		return WordRecord{}, err
 	}
 	started := time.Now()
-	code, err := execute(append([]string{step.Word.Run()}, step.Argv...), evidence, environment(r.project, &r.record, evidence, r.env), step.Word.Timeout, string(stdin))
+	code, err := execute(append([]string{r.wordRun(step)}, step.Argv...), evidence, environment(r.project, &r.record, evidence, r.env), step.Word.Timeout, string(stdin))
 	if err != nil {
 		return WordRecord{}, err
 	}

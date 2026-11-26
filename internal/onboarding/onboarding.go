@@ -57,6 +57,11 @@ const (
 // proposal; each was gated when it joined, so a few stand for the claim.
 const compared = 3
 
+// afterReview is a test seam. When a test of this package sets it, it runs once Onboard has run
+// lifecycle.Review on the claim's sources, before crossRepo records their commits. No flag,
+// environment variable or file sets it.
+var afterReview func()
+
 // Result is one onboarding, as `verilex onboard --json` prints it and its record keeps it.
 type Result struct {
 	Word    string `json:"word"`
@@ -162,6 +167,9 @@ func Onboard(p dictionary.Project, name string, choice Choice) (Result, error) {
 	}
 	if len(c.Defects) == 0 {
 		return r, fmt.Errorf("claim %s declares no planted defect, so onboarding cannot show that %s catches one: add 'defects' to %s", c.Name, name, c.Path)
+	}
+	if afterReview != nil {
+		afterReview()
 	}
 	sources, err := crossRepo(p, c, anchors)
 	if err != nil {

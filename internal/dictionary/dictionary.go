@@ -2,6 +2,8 @@
 package dictionary
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -41,10 +43,18 @@ type Project struct {
 	Root, Name     string
 	SecretPatterns []*regexp2.Regexp
 	SkillDirs      []string
+	// FrameDir, when non-empty, holds a private snapshot of the project's frame scripts
+	// materialized from the exact bytes stamped before execution.
+	FrameDir string
 }
 
-func (p Project) Dir() string              { return filepath.Join(p.Root, ".verilex") }
-func (p Project) Frame(step string) string { return filepath.Join(p.Dir(), "frame", step) }
+func (p Project) Dir() string { return filepath.Join(p.Root, ".verilex") }
+func (p Project) Frame(step string) string {
+	if p.FrameDir != "" {
+		return filepath.Join(p.FrameDir, step)
+	}
+	return filepath.Join(p.Dir(), "frame", step)
+}
 
 type Word struct {
 	Name, Path, Promise                  string
@@ -72,7 +82,10 @@ type Word struct {
 	Entry string
 	// Stale says why the pin names an older version of the claim; a chain holding the word is refused.
 	Stale string
-	pin   string
+	// ContractDigest is the sha256 hex digest of the word.md bytes parsed into this Word, so
+	// callers that read the word's files later can confirm word.md did not change in between.
+	ContractDigest string
+	pin            string
 }
 
 func (w Word) Run() string { return filepath.Join(w.Path, "run") }
@@ -214,6 +227,8 @@ func loadWord(path string, claims map[string]Claim) (Word, error) {
 		return Word{}, fmt.Errorf("%s: missing executable 'run'", path)
 	}
 	w := Word{Name: name, Path: path, Timeout: 1800}
+	sum := sha256.Sum256(text)
+	w.ContractDigest = hex.EncodeToString(sum[:])
 	for _, field := range []struct {
 		key  string
 		dest *[]string

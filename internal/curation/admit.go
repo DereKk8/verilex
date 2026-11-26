@@ -81,13 +81,16 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 		return v, nil, fmt.Errorf("%s: not a packet for %s", packetPath, name)
 	}
 	stale := fmt.Errorf("%s changed since packet %s; propose it again", name, v.Packet)
-	// The admission records these digests, made before the packet is matched, so a file that
-	// changes while admit runs drifts instead of being admitted.
-	digest, err := lifecycle.WordDigest(w)
+	// Read the word's files and the binding once: both the packet match and the recorded
+	// admission come from that single read, so a concurrent change can never admit unjudged bytes.
+	files, err := lifecycle.ReadFiles(w)
 	if err != nil {
 		return v, nil, err
 	}
-	binding, err := fingerprint.Digests(p)
+	if !files.MatchesContract(w) {
+		return v, nil, stale
+	}
+	binding, err := fingerprint.ReadBinding(p)
 	if err != nil {
 		return v, nil, err
 	}
@@ -98,14 +101,7 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 	if err != nil {
 		return v, nil, fmt.Errorf("%v; %v", err, stale)
 	}
-	unchanged, err := lifecycle.FilesMatch(w, packet.WordDigest)
-	if err == nil && unchanged {
-		unchanged, err = fingerprint.DigestsMatch(p, packet.Binding)
-	}
-	if err != nil {
-		return v, nil, err
-	}
-	if !unchanged || len(current) != len(packet.Sections) {
+	if !files.Matches(packet.WordDigest) || !binding.Matches(packet.Binding) || len(current) != len(packet.Sections) {
 		return v, nil, stale
 	}
 	hashes := map[string]string{}
@@ -125,6 +121,6 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 	for _, use := range packet.Uses {
 		runs = append(runs, use.Run)
 	}
-	a := &lifecycle.Admission{Word: name, Date: now(), Curator: v.Curator, Reason: v.Reason, Packet: v.Packet, Runs: runs, WordDigest: digest, Binding: binding, Sections: hashes}
+	a := &lifecycle.Admission{Word: name, Date: now(), Curator: v.Curator, Reason: v.Reason, Packet: v.Packet, Runs: runs, WordDigest: files.Digest(), Binding: binding.Digests(), Sections: hashes}
 	return v, a, writeJSON(lifecycle.AdmissionPath(w), a)
 }

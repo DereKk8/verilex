@@ -82,7 +82,7 @@ Each judgment file records the intent, the judge's identity and model, the answe
 
 Anyone who can write the store can write a judgment that counts. Give write access only to the launchers.
 
-The launcher reads a `--judge` executable again after it answers. When the content no longer matches the stamp, as when a deploy replaces the judge during a run and a rollback restores it later, the run is inconclusive and nothing is stored. A judge replaced during a run by someone with write access to the judge file, for example one that restores the original before it exits, is outside what reuse protects against: that person can already write a judgment straight into the store.
+For a `--judge` executable, the launcher reads the file once, runs a private copy of those exact bytes, and verifies afterwards that the original file's content and kernel identity (inode, device and change time) did not change while the launcher ran. When the file was replaced or edited and restored, the run is inconclusive and nothing is stored.
 
 ## Limits
 

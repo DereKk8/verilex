@@ -44,7 +44,7 @@ func (ix Index) touchOf(p dictionary.Project, raw []string) touch {
 	for i, item := range raw {
 		kind, value := classifyChange(item)
 		if kind == "path" {
-			path := resolve(value)
+			path := resolve(p.Root, value)
 			paths = append(paths, path)
 			pathAt = append(pathAt, i)
 			shown := path

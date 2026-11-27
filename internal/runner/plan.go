@@ -61,6 +61,10 @@ type Skip struct {
 // Skipped reports whether every step is skipped.
 func (p Plan) Skipped() bool { return p.Rerun == "" }
 
+// Stamps returns the step stamps computed for this plan, so callers such as PlanClaims can judge
+// individual steps from the same single read that decided the chain.
+func (p Plan) Stamps() []stamp.Stamp { return p.stamps }
+
 // Decide stamps the chain and applies the one skip rule. On a fresh instance it is all or
 // nothing (ledger.Reuse); on a kept instance it skips the prefix that instance already proves
 // (ledger.Continue). It runs nothing. An error refuses the chain before anything starts.

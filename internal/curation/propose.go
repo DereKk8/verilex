@@ -94,6 +94,11 @@ type Packet struct {
 
 const instructions = `Judge whether this word belongs in the shared dictionary. Admit it only when its promise is one real product moment a user would recognize, its run proves exactly that promise with a second observation, its uses' evidence backs the verdicts they report, it faithfully implements the feature-map sections listed, and no dictionary word already covers it. Write your verdict as a JSON file {"word": <word>, "packet": <id>, "verdict": "admit" or "reject", "curator": <the model that judged>, "reason": <one or two sentences>} and record it with ` + "`verilex admit <word> --verdict <file>`."
 
+// afterFiles is a test seam. When a test of this package sets it, it runs once propose has read
+// the word's files that the packet shows, before propose reads anything else for the packet. No
+// flag, environment variable or file sets it.
+var afterFiles func()
+
 // Propose builds the curator packet for a word and stores it in the project's state
 // directory. It refuses a word with fewer than MinRuns counted uses and an admitted word
 // whose sections (or claim version and sources) and files are unchanged.
@@ -109,7 +114,18 @@ func Propose(p dictionary.Project, name string) (Packet, string, error) {
 	if err = onboardOnly(w); err != nil {
 		return Packet{}, "", err
 	}
-	status, err := lifecycle.StatusOf(p, w)
+	wd, err := lifecycle.ReadWordDir(w)
+	if err != nil {
+		return Packet{}, "", err
+	}
+	if !wd.Files.MatchesContract(w) {
+		return Packet{}, "", fmt.Errorf("%s changed while proposing; propose it again", name)
+	}
+	bindingRead, err := fingerprint.ReadBinding(p)
+	if err != nil {
+		return Packet{}, "", err
+	}
+	status, err := lifecycle.StatusOfSnapshot(p, w, lifecycle.Snapshot{WordDir: wd, Binding: bindingRead})
 	if err != nil {
 		return Packet{}, "", err
 	}
@@ -127,23 +143,20 @@ func Propose(p dictionary.Project, name string) (Packet, string, error) {
 	if err != nil {
 		return Packet{}, "", fmt.Errorf("%v; point the word at a feature-map section, or record the moment with `verilex gap`", err)
 	}
-	files, err := wordFiles(w)
-	if err != nil {
-		return Packet{}, "", err
+	files := wordFiles(wd.Files)
+	if afterFiles != nil {
+		afterFiles()
 	}
-	digest, err := lifecycle.WordDigest(w)
-	if err != nil {
-		return Packet{}, "", err
-	}
-	binding, err := fingerprint.Digests(p)
-	if err != nil {
-		return Packet{}, "", err
-	}
+	digest := wd.Files.Digest()
+	binding := bindingRead.Digests()
 	dictionaryEntries := make([]Entry, 0, len(words))
 	for _, other := range words {
-		s, err := lifecycle.StatusOf(p, other)
-		if err != nil {
-			return Packet{}, "", err
+		s := status
+		if other.Name != w.Name {
+			s, err = lifecycle.StatusOfSnapshot(p, other, lifecycle.Snapshot{Binding: bindingRead})
+			if err != nil {
+				return Packet{}, "", err
+			}
 		}
 		dictionaryEntries = append(dictionaryEntries, Entry{other.Name, s.State, other.Promise, other.Args, other.Requires, other.Provides, other.Implements, other.Proves()})
 	}
@@ -166,14 +179,14 @@ func proposalsDir(p dictionary.Project, word string) string {
 	return filepath.Join(runner.StateHome(), p.Name, "proposals", word)
 }
 
-func wordFiles(w dictionary.Word) (map[string]string, error) {
+func wordFiles(read *lifecycle.Files) map[string]string {
 	files := map[string]string{}
-	err := lifecycle.EachFile(w, func(rel string, _ fs.FileMode, data []byte) {
+	read.Each(func(rel string, _ fs.FileMode, data []byte) {
 		if utf8.Valid(data) {
 			files[rel] = string(data)
 		} else {
 			files[rel] = fmt.Sprintf("(binary, %d bytes)", len(data))
 		}
 	})
-	return files, err
+	return files
 }

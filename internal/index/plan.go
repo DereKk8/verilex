@@ -9,7 +9,6 @@ import (
 	"github.com/DereKk8/verilex/internal/dictionary"
 	"github.com/DereKk8/verilex/internal/ledger"
 	"github.com/DereKk8/verilex/internal/runner"
-	"github.com/DereKk8/verilex/internal/stamp"
 )
 
 // PlanFormat is the claim-plan JSON contract. A different value is a breaking change.
@@ -163,7 +162,11 @@ func (ix Index) PlanClaims(p dictionary.Project, derived, named, changes []strin
 		phrases = append(phrases, countPhrase(n, "touched claim not picked", "touched claims not picked"))
 	}
 	plan.Warning = strings.Join(append(phrases, plan.Gaps.Phrases()...), ", ")
-	stamps := stamp.Chain(p, steps)
+	decided, err := runner.Decide(p, steps, runner.Options{ForceLive: plan.force})
+	if err != nil {
+		return plan, err
+	}
+	stamps := decided.Stamps()
 	store := ledger.At(runner.LedgerDir(p))
 	seen := map[string]bool{}
 	for i, step := range steps {
@@ -194,10 +197,6 @@ func (ix Index) PlanClaims(p dictionary.Project, derived, named, changes []strin
 			continue
 		}
 		plan.Run = append(plan.Run, LiveClaim{Claim: name, Word: step.Word.Name, Step: step.Label(), Reason: why})
-	}
-	decided, err := runner.Decide(p, steps, runner.Options{ForceLive: plan.force})
-	if err != nil {
-		return plan, err
 	}
 	plan.Rerun = decided.Rerun
 	return plan, nil

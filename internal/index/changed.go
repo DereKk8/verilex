@@ -117,9 +117,12 @@ func normal(chain string) string {
 	return strings.Join(segments, " | ")
 }
 
-// resolve makes a touched path absolute, with symbolic links resolved as the project root's are,
-// even when the file itself is gone.
-func resolve(file string) string {
+// resolve makes a touched path absolute from the project root, with symbolic links resolved
+// as the project root's are, even when the file itself is gone. An absolute path stays absolute.
+func resolve(root, file string) string {
+	if !filepath.IsAbs(file) {
+		file = filepath.Join(root, file)
+	}
 	path, err := filepath.Abs(file)
 	if err != nil {
 		return file

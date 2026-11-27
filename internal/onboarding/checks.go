@@ -1,6 +1,8 @@
 package onboarding
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -106,6 +108,14 @@ func crossRepo(p dictionary.Project, c dictionary.Claim, anchors []featuremap.An
 		if dirty != "" {
 			return nil, fmt.Errorf("claim %s: %s has uncommitted changes in %s; commit them, so the recorded commit holds what onboarding checks", c.Name, anchors[i].File, source.Repo)
 		}
+		committed, err := gitBytes(root, "show", commit+":./"+filepath.ToSlash(anchors[i].File))
+		if err != nil {
+			return nil, fmt.Errorf("claim %s: %s is not in commit %s of %s: %v", c.Name, anchors[i].File, commit, source.Repo, err)
+		}
+		sum := sha256.Sum256(committed)
+		if anchors[i].FileDigest == "" || hex.EncodeToString(sum[:]) != anchors[i].FileDigest {
+			return nil, fmt.Errorf("claim %s: %s in %s changed after review; onboard it again", c.Name, anchors[i].File, source.Repo)
+		}
 		repo, err := git(root, "remote", "get-url", "origin")
 		if err != nil || repo == "" {
 			repo = filepath.ToSlash(source.Repo)
@@ -116,12 +126,20 @@ func crossRepo(p dictionary.Project, c dictionary.Claim, anchors []featuremap.An
 }
 
 func git(dir string, args ...string) (string, error) {
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	out, err := gitBytes(dir, args...)
 	if err != nil {
-		if exit, ok := err.(*exec.ExitError); ok && len(exit.Stderr) > 0 {
-			return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(exit.Stderr)))
-		}
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func gitBytes(dir string, args ...string) ([]byte, error) {
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	if err != nil {
+		if exit, ok := err.(*exec.ExitError); ok && len(exit.Stderr) > 0 {
+			return nil, fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(exit.Stderr)))
+		}
+		return nil, err
+	}
+	return out, nil
 }

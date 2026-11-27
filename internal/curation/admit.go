@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,6 +26,11 @@ type Verdict struct {
 }
 
 var packetID = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+// afterRead is a test seam. When a test of this package sets it, it runs once admit has read the
+// word's files and the binding that the admission records, before admit compares anything with
+// the packet. No flag, environment variable or file sets it.
+var afterRead func()
 
 // Admit records a curator's verdict on a proposed word. Both verdicts are kept beside the
 // packet; only "admit" writes an admission record, so a rejected word stays as it was. The
@@ -77,19 +81,27 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 		return v, nil, fmt.Errorf("%s: not a packet for %s", packetPath, name)
 	}
 	stale := fmt.Errorf("%s changed since packet %s; propose it again", name, v.Packet)
-	digest, err := lifecycle.WordDigest(w)
+	// Read the word's files and the binding once: both the packet match and the recorded
+	// admission come from that single read, so a concurrent change can never admit unjudged bytes.
+	files, err := lifecycle.ReadFiles(w)
 	if err != nil {
 		return v, nil, err
 	}
-	binding, err := fingerprint.Digests(p)
+	if !files.MatchesContract(w) {
+		return v, nil, stale
+	}
+	binding, err := fingerprint.ReadBinding(p)
 	if err != nil {
 		return v, nil, err
+	}
+	if afterRead != nil {
+		afterRead()
 	}
 	current, err := sections(p, w)
 	if err != nil {
 		return v, nil, fmt.Errorf("%v; %v", err, stale)
 	}
-	if digest != packet.WordDigest || !maps.Equal(binding, packet.Binding) || len(current) != len(packet.Sections) {
+	if !files.Matches(packet.WordDigest) || !binding.Matches(packet.Binding) || len(current) != len(packet.Sections) {
 		return v, nil, stale
 	}
 	hashes := map[string]string{}
@@ -109,6 +121,6 @@ func Admit(p dictionary.Project, name, verdictPath string) (Verdict, *lifecycle.
 	for _, use := range packet.Uses {
 		runs = append(runs, use.Run)
 	}
-	a := &lifecycle.Admission{Word: name, Date: now(), Curator: v.Curator, Reason: v.Reason, Packet: v.Packet, Runs: runs, WordDigest: digest, Binding: binding, Sections: hashes}
+	a := &lifecycle.Admission{Word: name, Date: now(), Curator: v.Curator, Reason: v.Reason, Packet: v.Packet, Runs: runs, WordDigest: files.Digest(), Binding: binding.Digests(), Sections: hashes}
 	return v, a, writeJSON(lifecycle.AdmissionPath(w), a)
 }

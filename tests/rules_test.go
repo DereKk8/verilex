@@ -209,7 +209,7 @@ func TestAnyChangedStampComponentForcesRerun(t *testing.T) {
 			return nil
 		}, chain, "item-listed apple: word changed"},
 		{"word permissions", func(t *testing.T, root string) map[string]string {
-			if err := os.Chmod(filepath.Join(root, ".verilex", "words", "item-stored", "run"), 0700); err != nil {
+			if err := os.Chmod(filepath.Join(root, ".verilex", "words", "item-stored", "word.md"), 0755); err != nil {
 				t.Fatal(err)
 			}
 			admitted(t, root, "item-stored")

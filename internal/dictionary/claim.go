@@ -195,10 +195,15 @@ func ReadClaim(path string) (Claim, error) {
 	if err != nil {
 		return Claim{}, err
 	}
+	return ParseClaim(path, data)
+}
+
+// ParseClaim parses and checks claim YAML bytes already read from path and fingerprints its identity.
+func ParseClaim(path string, data []byte) (Claim, error) {
 	var f claimFile
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
-	if err = decoder.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
+	if err := decoder.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
 		return Claim{}, fmt.Errorf("%s: malformed claim: %v", path, err)
 	}
 	name := strings.TrimSuffix(filepath.Base(path), ".yaml")
@@ -256,7 +261,7 @@ func ReadClaim(path string) (Claim, error) {
 		}
 		c.Defects[name] = Defect{Env: env}
 	}
-	if err = undeclared(path, append(slices.Clone(c.Requires), c.Provides...), c.Args); err != nil {
+	if err := undeclared(path, append(slices.Clone(c.Requires), c.Provides...), c.Args); err != nil {
 		return c, err
 	}
 	identity, err := json.Marshal(struct {

@@ -44,6 +44,11 @@ type Store struct {
 // At opens the ledger kept in dir.
 func At(dir string) Store { return Store{dir: dir} }
 
+// afterBacked is a test seam. When a test of this package sets it, it runs once add has checked
+// an entry's evidence with backed, before it copies the evidence into the ledger. No flag,
+// environment variable or file sets it.
+var afterBacked func(evidence string)
+
 // passFormat changes whenever the meaning of a pass file changes, so older passes stop standing.
 const passFormat = "verilex-pass-1"
 
@@ -226,8 +231,12 @@ func (s Store) stands(p pass, st stamp.Stamp, claim string, now time.Time) strin
 // of 0 and a result object reporting pass with a second observation. It is "" when it does.
 func backed(evidence string, stdout []byte) string {
 	text, err := os.ReadFile(filepath.Join(evidence, "exit"))
-	code, convErr := strconv.Atoi(strings.TrimSpace(string(text)))
-	if err != nil || convErr != nil {
+	return backedBytes(stdout, text, err)
+}
+
+func backedBytes(stdout, exitText []byte, exitErr error) string {
+	code, convErr := strconv.Atoi(strings.TrimSpace(string(exitText)))
+	if exitErr != nil || convErr != nil {
 		return "no exit code on record"
 	}
 	if j := verdict.Judge(&code, stdout, 0); j.Verdict != verdict.Green {
@@ -293,15 +302,20 @@ func (s Store) add(slot string, e Entry, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if why := backed(e.Evidence, stdout); why != "" {
+	exitText, exitErr := os.ReadFile(filepath.Join(e.Evidence, "exit"))
+	if why := backedBytes(stdout, exitText, exitErr); why != "" {
 		return errors.New("its evidence misses the evidence contract: " + why)
+	}
+	if afterBacked != nil {
+		afterBacked(e.Evidence)
 	}
 	var id [16]byte
 	if _, err = rand.Read(id[:]); err != nil {
 		return err
 	}
 	ref := "evidence/" + hex.EncodeToString(id[:])
-	if err = copyTree(e.Evidence, filepath.Join(s.dir, filepath.FromSlash(ref))); err != nil {
+	judged := map[string][]byte{"stdout": stdout, "exit": exitText}
+	if err = copyTree(e.Evidence, filepath.Join(s.dir, filepath.FromSlash(ref)), judged); err != nil {
 		return err
 	}
 	p := pass{
@@ -491,10 +505,10 @@ func (s Store) storageNow(root *os.Root) (time.Time, bool) {
 	return info.ModTime(), true
 }
 
-// copyTree gives dest its own copy of the regular files and directories under src, linking
-// files where the file system allows, so a local ledger costs no extra space. dest appears whole
-// or not at all.
-func copyTree(src, dest string) error {
+// copyTree gives dest its own copy of the regular files and directories under src, writing any
+// already-judged files in fixed directly from memory so judged bytes are never re-read or
+// hardlinked, and linking other files where the file system allows. dest appears whole or not at all.
+func copyTree(src, dest string, fixed map[string][]byte) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0700); err != nil {
 		return err
 	}
@@ -511,6 +525,9 @@ func copyTree(src, dest string) error {
 		if err != nil || rel == "." {
 			return err
 		}
+		if _, ok := fixed[filepath.ToSlash(rel)]; ok {
+			return nil
+		}
 		target := filepath.Join(tmp, rel)
 		switch {
 		case d.IsDir():
@@ -524,6 +541,11 @@ func copyTree(src, dest string) error {
 	})
 	if err != nil {
 		return err
+	}
+	for rel, data := range fixed {
+		if err = os.WriteFile(filepath.Join(tmp, filepath.FromSlash(rel)), data, 0600); err != nil {
+			return err
+		}
 	}
 	return os.Rename(tmp, dest)
 }

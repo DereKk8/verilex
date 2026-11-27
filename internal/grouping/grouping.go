@@ -157,6 +157,10 @@ func Load(p dictionary.Project) (Grouping, error) {
 	return g.clone(), err
 }
 
+func Parse(path string, data []byte) (Grouping, error) {
+	return parse(path, data)
+}
+
 func parse(path string, data []byte) (Grouping, error) {
 	var g Grouping
 	decoder := yaml.NewDecoder(bytes.NewReader(data))

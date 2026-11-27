@@ -42,6 +42,9 @@ type Anchor struct {
 	Hash string `json:"hash"`
 	// Review says why the verify skill no longer holds what the anchor pins; empty when it does.
 	Review []string `json:"review,omitempty"`
+	// FileDigest is the sha256 hex digest of the raw feature file bytes Pin read, so callers can
+	// verify that a recorded git commit holds the exact bytes reviewed.
+	FileDigest string `json:"-"`
 }
 
 // Pin checks a source against the verify skill as it is now. The sub-feature must still be
@@ -65,6 +68,8 @@ func Pin(root string, skillDirs []string, s Source) (Anchor, error) {
 		if err != nil {
 			return a, err
 		}
+		fileSum := sha256.Sum256(data)
+		a.FileDigest = hex.EncodeToString(fileSum[:])
 		text := strings.ReplaceAll(string(data), "\r\n", "\n")
 		scope, found := subFeature(text, id)
 		if !found {
